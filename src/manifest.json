@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "TabHarbor",
+  "version": "0.1.0",
+  "description": "TabHarbor v2——窗口/分组/标签三层树形管理（M0 工程骨架）",
+  "permissions": [
+    "tabs",
+    "storage",
+    "sidePanel",
+    "contextMenus",
+    "alarms",
+    "commands",
+    "downloads"
+  ],
+  "optional_host_permissions": ["https://api.github.com/*"],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "TabHarbor"
+  },
+  "side_panel": {
+    "default_path": "sidebar/sidebar.html"
+  },
+  "commands": {
+    "open-side": {
+      "suggested_key": { "default": "Alt+Shift+B" },
+      "description": "打开侧边栏"
+    },
+    "open-window": {
+      "suggested_key": { "default": "Alt+Shift+W" },
+      "description": "打开独立窗口"
+    },
+    "locate-tab": {
+      "suggested_key": { "default": "Alt+Shift+L" },
+      "description": "定位当前标签"
+    },
+    "expand-all": {
+      "suggested_key": { "default": "Alt+Shift+E" },
+      "description": "展开全部"
+    },
+    "collapse-all": {
+      "description": "收起全部（未预置快捷键，可在 chrome://extensions/shortcuts 自行绑定）"
+    }
+  }
+}
