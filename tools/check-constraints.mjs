@@ -76,6 +76,8 @@ const RULES = [
 ];
 
 function walk(dir, out = []) {
+  // M0 骨架期 src 可能尚不存在：空态按 0 文件处理
+  if (!fs.existsSync(dir)) return out;
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) walk(p, out);
