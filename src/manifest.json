@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TabHarbor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TabHarbor v2——窗口/分组/标签三层树形管理（M0 工程骨架）",
   "permissions": [
     "tabs",
