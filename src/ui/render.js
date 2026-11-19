@@ -1,5 +1,8 @@
 // TH2 共享渲染入口（FR-001：双模式复用同一渲染函数、同一数据源）
-// M0 范围：壳级骨架渲染（窗口→分组嵌套→标签 的静态树 + 空态）。交互（打开/拖拽/右键）在 M1/M2 接入。
+// M1-2：视觉态（FR-022 关闭按钮仅已开/FR-023 亮灰/FR-036 选中/FR-008 短链接）由 opts 驱动：
+//   opts.openIds   Set<nodeId> —— 打开态派生集合（align.computeOpenIds 产出，组/窗含其中即亮）
+//   opts.linkShow  boolean —— 链接开关（settings.linkShow，默认关）
+//   opts.selectedId string —— 当前选中节点（单击设置）
 
 export function renderTree(m, opts = {}) {
   const out = [];
@@ -25,9 +28,26 @@ function renderChildren(m, parentId, opts, depth) {
 function nodeRow(n, opts, depth) {
   const pad = 14 * depth;
   const icon = n.kind === "window" ? "▤" : n.kind === "group" ? "▸" : "○";
-  const cls = `node node-${n.kind}`;
+  const open = opts.openIds ? opts.openIds.has(n.id) : false;
+  const stateCls = open ? "node-open" : "node-closed";
+  const selCls = opts.selectedId === n.id ? " node-selected" : "";
+  const cls = `node node-${n.kind} ${stateCls}${selCls}`;
   const title = n.title || n.url || "";
-  return `<div class="${cls}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px"><span class="nico">${icon}</span><span class="tt">${escapeHtml(title)}</span></div>`;
+  const link =
+    n.kind === "tab" && opts.linkShow && n.url
+      ? `<span class="node-link">${escapeHtml(shortUrl(n.url))}</span>`
+      : "";
+  const closeBtn =
+    n.kind === "tab" && open
+      ? `<button class="close" data-act="close" title="关闭网页">×</button>`
+      : "";
+  return `<div class="${cls}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px"><span class="nico">${icon}</span><span class="tt">${escapeHtml(title)}</span>${link}${closeBtn}</div>`;
+}
+
+// FR-008：短链接——去协议头，超长截断
+function shortUrl(u) {
+  const s = String(u).replace(/^https?:\/\//, "");
+  return s.length > 24 ? `${s.slice(0, 24)}…` : s;
 }
 
 export function escapeHtml(s) {

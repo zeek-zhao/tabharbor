@@ -474,3 +474,76 @@ step("那么", "窗口 {} 的打开态为 {}", (title, s) => {
   const got = openStateOf(title);
   if (got !== s) throw new Error(`窗口 ${title}=${got} ≠ ${s}`);
 });
+
+/* ---------- M1-2 树渲染视觉态（06_visual.feature，FR-008/022/023/036/045/054，issue #18） ---------- */
+import * as shell from "../src/ui/shell.js";
+import * as render from "../src/ui/render.js";
+
+step("假如", "树模型的开发分组含标签 {}", (title) => {
+  const g = ctx.named["开发"];
+  const t = model.addTab(ctx.m, title, tabUrl(title), g.id);
+  ctx.named[title] = t;
+});
+
+step("假如", "打开态包含 {}", (title) => {
+  ctx.viewOpenIds = ctx.viewOpenIds || new Set();
+  ctx.viewOpenIds.add(ctx.named[title].id);
+});
+
+step("假如", "选中了 {}", (title) => {
+  ctx.selectedId = ctx.named[title].id;
+});
+
+step("假如", "链接开关开启", () => {
+  ctx.linkShow = true;
+});
+
+step("当", "渲染树视图", () => {
+  ctx.html = render.renderTree(ctx.m, {
+    openIds: ctx.viewOpenIds || new Set(),
+    linkShow: ctx.linkShow || false,
+    selectedId: ctx.selectedId || null,
+  });
+});
+
+function rowOf(title) {
+  const id = (ctx.named[title] || findAnyByTitle(title)).id;
+  const rows = ctx.html.split('<div class="node');
+  const row = rows.find((r) => r.includes(`data-id="${id}"`));
+  if (!row) throw new Error(`渲染输出中找不到节点 ${title} 的行`);
+  return row;
+}
+
+function tagOf(row) {
+  return row.slice(0, row.indexOf(">") + 1);
+}
+
+step("那么", "已打开标签 {} 的行有关闭按钮", (title) => {
+  if (!rowOf(title).includes('data-act="close"')) throw new Error(`${title} 行缺少关闭按钮`);
+});
+
+step("那么", "关闭标签 {} 的行没有关闭按钮", (title) => {
+  if (rowOf(title).includes('data-act="close"')) throw new Error(`${title} 关闭态不应有关闭按钮`);
+});
+
+step("那么", "节点 {} 的行有类 {}", (title, cls) => {
+  if (!tagOf(rowOf(title)).includes(cls)) throw new Error(`${title} 行缺少类 ${cls}`);
+});
+
+step("那么", "节点 {} 的行包含 {}", (title, needle) => {
+  if (!rowOf(title).includes(needle)) throw new Error(`${title} 行缺少 ${needle}`);
+});
+
+step("那么", "节点 {} 的行不包含 {}", (title, needle) => {
+  if (rowOf(title).includes(needle)) throw new Error(`${title} 行不应包含 ${needle}`);
+});
+
+step("那么", "主题设置缺省解析为 {}", (want) => {
+  const got = shell.themeOf(undefined);
+  if (got !== want) throw new Error(`themeOf(undefined)=${got} ≠ ${want}`);
+});
+
+step("那么", "主题设置 {} 解析为 {}", (theme, want) => {
+  const got = shell.themeOf({ theme });
+  if (got !== want) throw new Error(`themeOf({theme:${theme}})=${got} ≠ ${want}`);
+});
