@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>TabHarbor</title>
+  <link rel="stylesheet" href="../assets/m2.css" />
+</head>
+<body class="sidebar-body">
+  <div id="side" class="side">
+    <div id="titlebar" class="titlebar">
+      <span class="logo">TabHarbor</span>
+      <button id="btnClose" class="tbtn" data-label="关闭" data-act="close">✕</button>
+    </div>
+    <div id="searchbar" class="searchbar">
+      <input id="q" type="text" placeholder="搜索标签与分组" />
+      <button id="btnSettings" class="tbtn" data-label="设置" data-act="settings">⚙</button>
+    </div>
+    <div id="quickbar" class="quickbar">
+      <button id="btnLocate" class="tbtn" data-label="定位当前标签" data-act="locate">⌖</button>
+      <button id="btnExpand" class="tbtn" data-label="展开全部" data-act="expand">▾</button>
+      <button id="btnCollapse" class="tbtn" data-label="收起全部" data-act="collapse">▴</button>
+      <button id="btnLinks" class="tbtn" data-label="窗口关联" data-act="links">🔗</button>
+      <button id="btnTrash" class="tbtn" data-label="回收站" data-act="trash">🗑</button>
+      <button id="btnHistory" class="tbtn" data-label="历史记录" data-act="history">◷</button>
+      <button id="btnFullscreen" class="tbtn" data-label="全屏卡片页" data-act="fullscreen">⛶</button>
+      <button id="btnTheme" class="tbtn" data-label="主题切换" data-act="theme">◐</button>
+    </div>
+    <div id="spBody" class="sp-body"></div>
+    <div id="footer" class="footer">
+      <span id="stats"></span>
+      <span class="footer-actions"><button id="btnKeys" class="fbtn" data-label="快捷键">⌨</button><button id="btnGuide" class="fbtn" data-label="上手指南">?</button></span>
+    </div>
+    <div id="tip" class="tip"></div>
+  </div>
+  <script type="module" src="../ui/shell.js"></script>
+</body>
+</html>

@@ -142,3 +142,45 @@ step("那么", "从存储键 {} 读回的模型与写入一致", async (key) => 
     throw new Error("存储读回不一致");
   }
 });
+
+/* ---------- 场景组：双模式壳窗口（FR-001/002/003/004/005/006/007，文件内容静态断言） ---------- */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function repoFile(rel) {
+  const p = join(REPO_ROOT, rel);
+  if (!readFileSync(p, "utf8")) throw new Error(`文件为空：${rel}`);
+  return readFileSync(p, "utf8");
+}
+
+step("那么", "{} 与 {} 引用同一渲染入口 {}", (a, b, entry) => {
+  const tag = `<script type="module" src="../ui/${entry}"></script>`;
+  for (const f of [a, b]) {
+    if (!repoFile(f).includes(tag)) throw new Error(`${f} 未引用 ${entry}`);
+  }
+  if (a !== b && repoFile(a).length === 0) throw new Error("空文件");
+});
+
+step("那么", "{} 包含 {}", (rel, needle) => {
+  if (!repoFile(rel).includes(needle.replace(/\\"/g, '"'))) {
+    throw new Error(`${rel} 不包含 ${needle}`);
+  }
+});
+
+step("那么", "{} 不包含 {}", (rel, needle) => {
+  if (repoFile(rel).includes(needle.replace(/\\"/g, '"'))) {
+    throw new Error(`${rel} 不应包含 ${needle}`);
+  }
+});
+
+step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
+  const html = repoFile(rel);
+  const m = html.match(/<div id="quickbar"[\s\S]*?<\/div>/);
+  if (!m) throw new Error(`${rel} 缺少快捷栏`);
+  const acts = [...m[0].matchAll(/data-act="([a-z]+)"/g)].map((x) => x[1]).join(",");
+  if (acts !== expect) throw new Error(`快捷栏图标序不符：${acts} ≠ ${expect}`);
+});
