@@ -46,6 +46,9 @@ export function parseFeature(text) {
       cur = { name: line.slice(line.indexOf(":") + 1).trim(), steps: [] };
       feature.scenarios.push(cur);
     } else if (line.startsWith("背景:") || line.startsWith("Background:")) {
+      // 背景: 行是纯 header——尾随文本一律报错，防止把步骤写在 header 上被静默丢弃
+      const rest = line.slice(line.indexOf(":") + 1).trim();
+      if (rest) throw new Error(`背景: 行必须是纯 header（尾随文本被丢弃）：${rest}`);
       cur = "bg";
     } else {
       const kw = KINDS.find((k) => line.startsWith(k + " ") || line.startsWith(k + "\t"));
