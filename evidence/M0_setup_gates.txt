@@ -1,0 +1,49 @@
+=== TH2 M0 setup 本地门禁（2026-11-19）===
+
+> tabharbor@0.1.0 constraints
+> node tools/check-constraints.mjs
+
+D-016 静态禁止清单 · A 类红线（CR-005 修订 v1.0）
+扫描目录：C:\Users\zeek.zhao.ROLLINGWIRELESS\.dsh\bot\workspace\tabharbor-v2\src
+扫描文件：0 个（*.js / *.json / *.mjs）
+规则条数：12
+
+结果：0 项命中 —— 静态红线检查通过。
+
+
+> tabharbor@0.1.0 compliance
+> node tools/check-compliance.mjs
+
+开源合规检查 · LICENSE + 敏感信息扫描
+LICENSE：存在且为 MIT License
+扫描文件：19 个 · 模式：7 组
+
+结果：合规 0 项命中 —— 开源合规检查通过。
+
+
+> tabharbor@0.1.0 committer
+> node tools/check-committer.mjs
+
+fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+仓库尚无提交历史（首次提交前），单一提交人门禁空跑通过
+扫描提交数: 0（基点 HEAD）
+汇总: 全部提交人均为唯一授权邮箱 —— 门禁通过
+
+
+> tabharbor@0.1.0 test
+> node tools/bdd-runner.mjs features
+
+== TabHarbor BDD 回归（TH-BDD-001，零依赖 runner）==
+功能: 工程骨架冒烟（00_smoke.feature）
+  PASS  场景: 冒烟流水线可用（2 步骤）
+
+汇总: 1/1 场景 PASS
+
+
+> tabharbor@0.1.0 format:check
+> prettier --no-error-on-unmatched-pattern --check "src/**/*.js" "tools/*.mjs" "tests/*.mjs"
+
+Checking formatting...
+All matched files use Prettier code style!

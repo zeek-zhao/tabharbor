@@ -1,0 +1,13 @@
+# TH2-LEARNINGS — 解决过的问题记录
+
+> 格式：日期 | 问题（现象）→ 根因 → 修复 → 教训。每个新解决的问题追加一行，永不删除。
+
+| 日期 | 现象 | 根因 | 修复 | 教训 |
+|---|---|---|---|---|
+| 2026-11-19 | 本地旧仓库目录 `tabharbor` 改名 `tabharbor-old` 被拒（Access denied），ACL 诊断证实用户有完全控制权 | 工作区沙箱对顶层目录有 `Everyone Deny DeleteSubdirectoriesAndFiles` 预期保护项，目录改名/删除属策略性禁止，非 ACL 故障 | 不改本地目录名：旧仓库本地保留 `tabharbor/`，新工程本地用 `tabharbor-v2/`，远程已用 `tabharbor` / `tabharbor-old` | Windows 目录改名需要目录自身的 DELETE 权利；沙箱 deny 是设计而非故障，遇改名拒绝先走 diagnose-windows-sandbox-acl 判类，`NOT_THIS_CLASS` 即换路径方案 |
+| （继承自旧项目 tabharbor-old，作为种子教训） | PS5.1 `Get-Content|Set-Content -Encoding UTF8` 把 UTF-8 文件写成 ANSI 误读 + BOM + 吃引号 | PS5.1 管道默认 ANSI 读入 | 一律 node 脚本或 `[IO.File]::ReadAllText/WriteAllText(UTF8Encoding($false))` 或 edit 工具改跨编码文件 | 跨编码文件改动禁用 PS5.1 Get-Content/Set-Content 管道 |
+| （继承） | Chrome commands 带 suggested_key 上限 4 个，5 个全带键加载报错 | Chrome 硬约束 | 只给 4 个预置键，第 5 个去 suggested_key 留手动绑定 | commands 预置键 ≤4；多余 command 去键不占配额 |
+| 2026-11-19 | gh-project-flow 脚本 scope 检查误报 false、setup-board 连环 GraphQL 报错 | ①`sed 's/.*:…/'` 贪婪匹配吃到 scopes 行内最后一个冒号（write:packages）只剩 packages；②ownerId 需 ID! 非 String!；③updateProjectV2SingleSelectFieldOption/createProjectV2SingleSelectFieldOption 两个 mutation 不存在（schema 无选项级 mutation），payload 字段是 projectV2Field 非 field；④选项输入 ProjectV2SingleSelectFieldOptionInput 的 color/description 为 NON_NULL | 修 gh-lib.sh sed 为非贪婪锚定 `^[^:]*:`；面板改用 `updateProjectV2Field`（singleSelectOptions 整体替换）+ `createProjectV2Field`，且用 `gh api graphql --input payload.json`（gh -F 传 JSON 数组会被当标量）传 JSON | gh 的 `-F` 不适合结构化 JSON 数组；GraphQL mutation 名以 `__type(name:"Mutation")` 内省为准，不猜 |
+| 2026-11-19 | `gh issue create --milestone` 报 milestone not found，M0 六卡未创建 | 参数经 PowerShell 数组展开时嵌了引号 | 重建时直接传无引号标题 | PowerShell 数组展开给原生命令时不要在值里手工嵌引号 |
+| 2026-11-19 | 新仓库跑门禁三连败：committer `unknown revision 'HEAD'` / prettier `No files matching` / BDD `Cannot find module tests/bdd.steps.mjs` | 空仓库无提交历史；glob 无匹配即报错；runner CLI 无条件 import 步骤文件 | committer 捕获 unknown revision 空跑通过；format 脚本加 `--no-error-on-unmatched-pattern`；建最小 `tests/bdd.steps.mjs` + `features/00_smoke.feature` 冒烟 | M0 骨架期门禁必须「空态可跑」；冒烟 feature 同时验证 runner 本身 |
+| 2026-11-19 | runner 步骤函数里 `ctx.smoke = …` 报 Cannot set properties of undefined | runner 调 `found.fn(...args)` 不传 ctx（旧仓库用模块级上下文） | 步骤文件改用模块级 ctx 对象跨步骤传值 | runner 接口无 ctx 参数；步骤间传值靠模块级状态 |

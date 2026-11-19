@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TabHarbor 原型 v16</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect x='3' y='4' width='18' height='16' rx='3' fill='%234f7cff'/><path d='M7 9h10M7 13h7' stroke='white' stroke-width='1.8' stroke-linecap='round'/></svg>">
+<style>
+  :root{
+    --bg:#eef1f6; --panel:#fff; --panel-2:#f6f8fc; --border:#e2e7f0;
+    --text:#1d2533; --text-2:#667085; --text-3:#98a2b3;
+    --accent:#4f7cff; --accent-soft:#eaf0ff; --hover:#f0f4ff;
+    --danger:#e5484d; --shadow:0 18px 50px rgba(29,37,51,.14);
+  }
+  [data-theme="dark"]{
+    --bg:#10141c; --panel:#1a202c; --panel-2:#222a37; --border:#2e3746;
+    --text:#e6ebf3; --text-2:#9aa6b8; --text-3:#6b7688;
+    --accent:#7ba0ff; --accent-soft:#26334d; --hover:#26303f;
+    --shadow:0 18px 50px rgba(0,0,0,.5);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:32px 24px}
+
+  .page-head{max-width:1100px;margin:0 auto 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .page-head h1{font-size:18px;font-weight:700}
+  .mode-tabs{display:flex;gap:6px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:4px}
+  .mode-tabs button{border:0;background:transparent;color:var(--text-2);font-size:13px;padding:7px 16px;border-radius:9px;cursor:pointer;font-family:inherit}
+  .mode-tabs button.active{background:var(--accent);color:#fff}
+
+  .app{background:var(--panel);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column;height:640px}
+  .app.sidebar-mode{max-width:380px}
+  .hidden{display:none !important}
+  .app.hidden{display:none}
+
+  .titlebar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .brand{display:flex;align-items:center;gap:10px;min-width:0}
+  .brand .logo{width:26px;height:26px;border-radius:8px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none}
+  .brand .name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .win-ctrl{display:flex;gap:14px;align-items:center;flex:none;padding-left:24px}
+  .win-ctrl .wi{width:15px;height:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-2)}
+  .win-ctrl .wi.close:hover{color:var(--danger)}
+
+  .searchbar{display:flex;gap:10px;align-items:center;padding:12px 16px}
+  .search-box{flex:1;display:flex;align-items:center;gap:8px;background:var(--panel-2);border:1px solid var(--border);border-radius:11px;padding:8px 12px;min-width:0}
+  .search-box svg{flex:none}
+  .search-box input{border:0;background:transparent;outline:0;font-size:13px;color:var(--text);flex:1;min-width:0;font-family:inherit}
+  .search-box input::placeholder{color:var(--text-3)}
+
+  .toolbar{display:flex;gap:4px;padding:0 16px 10px;align-items:center;flex-wrap:wrap}
+  .tbtn{position:relative;width:34px;height:34px;border:1px solid transparent;background:transparent;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-2);flex:none}
+  .tbtn:hover{background:var(--hover);color:var(--text)}
+  .tbtn.active{color:var(--accent);background:var(--accent-soft)}
+  .tbtn svg{width:18px;height:18px}
+  .tbtn::after{content:attr(data-tip);position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#26303f;color:#fff;font-size:12px;padding:5px 10px;border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:30}
+  .tbtn:hover::after{opacity:1}
+  .tbtn .badge{position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--danger);color:#fff;font-size:9px;line-height:14px;text-align:center}
+
+  .body{flex:1;overflow:auto;padding:10px 14px;min-height:0}
+  .node-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;line-height:1.4}
+  .node-row:hover{background:var(--hover)}
+  .node-row .row-ops{margin-left:auto;display:flex;gap:2px;flex:none}
+  .node-row .row-ops .copy-x{width:18px;height:18px;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--text-3);border-radius:6px;cursor:pointer}
+  .node-row .row-ops .copy-x:hover{background:var(--accent-soft);color:var(--accent)}
+  .node-row .tri{width:14px;flex:none;color:var(--text-3);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+  .node.collapsed > .node-row .tri{transform:rotate(-90deg)}
+  .node-children{padding-left:22px}
+  .node.collapsed > .node-children{display:none}
+  .leaf{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 30px;border-radius:8px;cursor:pointer;line-height:1.4}
+  .leaf:hover{background:var(--hover)}
+  .leaf.selected{background:var(--accent-soft);outline:1.5px solid var(--accent)}
+  .switch-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border);border-radius:11px;margin-bottom:10px}
+  .switch-row .t{font-size:13px;font-weight:600}
+  .switch-row .d{font-size:12px;color:var(--text-2);margin-top:3px}
+  .switch{width:42px;height:24px;border-radius:13px;background:var(--text-3);position:relative;cursor:pointer;flex:none;transition:background .15s;border:0}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s}
+  .switch.on{background:var(--accent)}
+  .switch.on::after{transform:translateX(18px)}
+  .sub-block{padding-left:16px;border-left:2px solid var(--border);margin-top:12px}
+  .req-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .req-table th{text-align:left;font-size:11px;color:var(--text-3);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .req-table td{padding:9px 10px;border-bottom:1px dashed var(--border);vertical-align:top;line-height:1.5}
+  .req-table tr:last-child td{border-bottom:0}
+  .req-table .cat{display:inline-flex;padding:2px 8px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:11px;white-space:nowrap}
+  .req-table td:nth-child(2){min-width:150px}
+  .req-table td:nth-child(4){color:var(--text-2)}
+  .cat-bar{display:flex;gap:4px;background:var(--panel-2);border:1px solid var(--border);border-radius:11px;padding:4px;margin-bottom:16px}
+  .cat-tab{border:0;background:transparent;color:var(--text-2);font-size:12.5px;padding:7px 12px;border-radius:8px;cursor:pointer;font-family:inherit;flex:1;white-space:nowrap}
+  .cat-tab:hover{color:var(--text)}
+  .cat-tab.active{background:var(--accent);color:#fff}
+  .field-row{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .field-row label{width:88px;flex:none;font-size:12.5px;color:var(--text-2)}
+  .field-row select{appearance:none}
+  .cat-panel.hidden{display:none}
+  .req-page{max-width:1100px;margin:0 auto}
+  .req-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+  .req-head h2{font-size:20px;margin-bottom:6px}
+  .req-head p{font-size:13px;color:var(--text-2);max-width:640px;line-height:1.6}
+  .req-meta{display:flex;gap:16px;font-size:12px;color:var(--text-2)}
+  .req-meta b{color:var(--text);font-size:15px}
+  .req-card{background:var(--panel);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+  .req-card .req-table th{padding:14px 18px}
+  .req-card .req-table td{padding:13px 18px}
+  .leaf.open{background:var(--accent-soft)}
+  .leaf.open .title{color:var(--text)}
+  .leaf:not(.open){color:var(--text-3)}
+  .leaf:not(.open) .title{color:var(--text-3)}
+  .leaf .dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);flex:none}
+  .leaf.open .dot{background:var(--accent)}
+  .leaf .title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .leaf .link{color:var(--text-3);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .leaf .note{color:var(--text-3);font-size:11px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .leaf .close-x{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--text-3);border-radius:6px;cursor:pointer}
+  .leaf .close-x:hover{background:var(--danger);color:#fff}
+  .leaf .copy-x{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;border:0;background:transparent;color:var(--text-3);border-radius:6px;cursor:pointer}
+  .leaf .copy-x:hover{background:var(--accent-soft);color:var(--accent)}
+  .app:not(.show-link) .link{display:none}
+  .win-name{font-weight:600;color:var(--accent)}
+  .group-name{font-weight:600}
+  .node.dimmed .node-row{color:var(--text-3)}
+  .node.dimmed .group-name, .node.dimmed .win-name{color:var(--text-3)}
+  .node-children .node-children{padding-left:22px}
+  .node.dragover>.node-row, .node-row.dragover, .leaf.dragover{background:var(--accent-soft);outline:1.5px dashed var(--accent)}
+  .node.dragover{outline:1.5px dashed var(--accent);outline-offset:-1px;border-radius:8px}
+  .dragging{opacity:.45}
+  .leaf, .node{user-select:none}
+
+  .footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--border)}
+  .stats{display:flex;gap:16px;font-size:12px;color:var(--text-2);min-width:0;flex-wrap:wrap}
+  .stats b{color:var(--text);font-size:13px}
+  .footer-actions{display:flex;gap:6px;flex:none}
+
+  .ctx-menu{position:fixed;z-index:80;background:var(--panel);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);min-width:180px;padding:6px;display:none}
+  .ctx-menu.show{display:block}
+  .ctx-menu .mi{display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:13px;border-radius:8px;cursor:pointer;color:var(--text)}
+  .ctx-menu .mi:hover{background:var(--hover)}
+  .ctx-menu .mi svg{width:15px;height:15px;color:var(--text-2);flex:none}
+  .ctx-menu .mi.danger:hover{color:var(--danger)}
+  .ctx-menu .mi.danger:hover svg{color:var(--danger)}
+  .ctx-menu .sep{height:1px;background:var(--border);margin:6px 8px}
+
+  .mask{position:fixed;inset:0;background:rgba(15,20,30,.45);display:none;align-items:center;justify-content:center;z-index:60}
+  .mask.show{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:400px;max-width:90vw;box-shadow:var(--shadow);overflow:hidden}
+  .modal.wide{width:560px}
+  .modal header{display:flex;justify-content:space-between;align-items:center;padding:16px 18px;border-bottom:1px solid var(--border)}
+  .modal header h3{font-size:15px}
+  .modal .x{cursor:pointer;color:var(--text-2);border:0;background:none}
+  .modal .content{padding:16px 18px;max-height:62vh;overflow:auto}
+  .sec-title{font-size:12px;color:var(--text-3);margin:2px 0 10px}
+  .opt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--border);border-radius:11px;margin-bottom:10px;cursor:pointer}
+  .opt-row:hover{border-color:var(--accent)}
+  .opt-row.selected{border-color:var(--accent);background:var(--accent-soft)}
+  .opt-row .radio{width:16px;height:16px;border:2px solid var(--text-3);border-radius:50%;flex:none;position:relative}
+  .opt-row .ops{margin-left:auto;flex:none;display:flex;gap:6px}
+  .opt-row.selected .radio{border-color:var(--accent)}
+  .opt-row.selected .radio::after{content:"";position:absolute;inset:3px;background:var(--accent);border-radius:50%}
+  .opt-row .t{font-size:13px;font-weight:600}
+  .opt-row .d{font-size:12px;color:var(--text-2);margin-top:3px;line-height:1.5}
+  .gh-row{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--border);border-radius:11px;cursor:pointer;color:var(--text)}
+  .gh-row:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .gh-row svg{width:18px;height:18px;flex:none}
+  .kv{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px dashed var(--border);font-size:13px;gap:12px}
+  .kv:last-child{border-bottom:0}
+  .kv kbd{background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:12px;font-family:inherit}
+  .guide li{margin:10px 0 10px 18px;font-size:13px;color:var(--text-2);line-height:1.6}
+  .guide li b{color:var(--text)}
+  .edit-input{width:100%;border:1px solid var(--border);border-radius:9px;background:var(--panel-2);color:var(--text);padding:10px 12px;font-size:13px;outline:0;font-family:inherit}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
+  .btn{border:1px solid var(--border);background:var(--panel-2);color:var(--text);border-radius:9px;padding:8px 16px;font-size:13px;cursor:pointer;font-family:inherit}
+  .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .btn.danger{color:var(--danger);border-color:var(--danger)}
+
+  /* 回收站列表 */
+  .trash-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px dashed var(--border)}
+  .trash-item:last-child{border-bottom:0}
+  .trash-item .meta{flex:1;min-width:0}
+  .trash-item .t{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .trash-item .s{font-size:11px;color:var(--text-3);margin-top:2px}
+  .trash-item .ops{display:flex;gap:6px;flex:none}
+  .mini-btn{border:1px solid var(--border);background:var(--panel-2);color:var(--text-2);border-radius:7px;padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit}
+  .mini-btn:hover{color:var(--accent);border-color:var(--accent)}
+  .trash-empty{padding:26px 0;text-align:center;color:var(--text-3);font-size:13px}
+
+  /* 全屏抓取视图 */
+  .fs-page{max-width:1100px;margin:0 auto}
+  .fs-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 0 14px;border-bottom:1px solid var(--border);margin-bottom:18px}
+  .fs-head h3{font-size:18px}
+  .fs-head p{font-size:12px;color:var(--text-3);margin-top:4px}
+  .fs-body{overflow:auto}
+  .fs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+  .fs-card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;transition:transform .15s,box-shadow .15s,border-color .15s;cursor:pointer}
+  .fs-card:hover{transform:translateY(-3px);border-color:var(--accent);box-shadow:0 10px 24px rgba(0,0,0,.28)}
+  .fs-card .ft{font-size:14px;font-weight:600;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fs-card .fl{font-size:12px;color:var(--text-2);word-break:break-all;margin-bottom:12px;line-height:1.5}
+  .fs-card .fm{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-3)}
+  .fs-card .dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);display:inline-block;margin-right:6px}
+  .fs-card.open .dot{background:var(--accent)}
+  .tag{display:inline-flex;padding:2px 9px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-size:11px}
+  .fs-group-title{font-size:13px;font-weight:600;color:var(--text-2);margin:18px 0 10px}
+
+  .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:#26303f;color:#fff;font-size:13px;padding:10px 18px;border-radius:10px;z-index:90;opacity:0;transition:opacity .2s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>TabHarbor 标签书签工具 · 第十六版原型</h1>
+  <div class="mode-tabs">
+    <button id="tabWindow" class="active" onclick="switchMode('window')">独立窗口版</button>
+    <button id="tabSide" onclick="switchMode('side')">侧边栏版</button>
+    <button id="tabReq" onclick="switchMode('req')">需求清单</button>
+  </div>
+</div>
+<!-- ============ 独立窗口版 ============ -->
+<div class="app" id="appWindow">
+  <div class="titlebar">
+    <div class="brand">
+      <span class="logo"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h10M7 12h7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="name">TabHarbor 书签标签工具</span>
+    </div>
+    <div class="win-ctrl">
+      <span class="wi" title="最小化"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M5 18h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="wi" title="最大化"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.8"/></svg></span>
+      <span class="wi close" title="关闭"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+    </div>
+  </div>
+
+  <div class="searchbar">
+    <div class="search-box">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input type="text" placeholder="输入搜索关键词…">
+    </div>
+    <button class="tbtn" data-tip="设置" onclick="openModal('modalSetting')">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <div class="toolbar" id="toolbarW">
+    <button class="tbtn" data-tip="新建分组" onclick="newGroupDefault()"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7h6l2 2h10v8H3V7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10.5v3M10.5 12h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="定位当前页" onclick="locateCurrent()"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="展开 / 收起（自动切换）" onclick="toggleAll()"><svg viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="tbtn" data-tip="显示链接（默认关闭）" onclick="toggleLink()"><svg viewBox="0 0 24 24" fill="none"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="回收站" onclick="openTrash()"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10 11v5M14 11v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span class="badge" id="trashBadgeW" style="display:none">0</span></button>
+    <button class="tbtn" data-tip="浏览器历史" onclick="toast('跳转浏览器历史记录（原型演示）')"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="tbtn" data-tip="全屏抓取视图" onclick="openFullscreen()"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="黑白主题切换" onclick="toggleTheme()"><svg viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+    <button class="tbtn" data-tip="置顶（窗口原位不动）" id="btnPinW" onclick="togglePin()"><svg viewBox="0 0 24 24" fill="none"><path d="M12 17v5M9 3h6l1 7 2 3H6l2-3 1-7Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+  </div>
+
+  <div class="body" id="treeWindow" data-mode="window"></div>
+
+  <div class="footer">
+    <div class="stats" id="statsWindow"></div>
+    <div class="footer-actions">
+      <button class="tbtn" data-tip="快捷键表" onclick="openModal('modalKeys')"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 11h.01M11 11h.01M15 11h.01M7 14h.01M11 14h.01M15 14h.01M18 11h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      <button class="tbtn" data-tip="快速上手指南" onclick="openModal('modalGuide')"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .8c0 1.7-2.5 2.1-2.5 3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 17.2h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 侧边栏版（无置顶） ============ -->
+<div class="app sidebar-mode hidden" id="appSide">
+  <div class="titlebar">
+    <div class="brand">
+      <span class="logo"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M7 8h10M7 12h7" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg></span>
+      <span class="name">TabHarbor</span>
+    </div>
+    <div class="win-ctrl">
+      <span class="wi close" title="关闭侧边栏"><svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>
+    </div>
+  </div>
+
+  <div class="searchbar">
+    <div class="search-box">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input type="text" placeholder="搜索标签…">
+    </div>
+    <button class="tbtn" data-tip="设置" onclick="openModal('modalSetting')">
+      <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+
+  <div class="toolbar">
+    <button class="tbtn" data-tip="新建分组" onclick="newGroupDefault()"><svg viewBox="0 0 24 24" fill="none"><path d="M3 7h6l2 2h10v8H3V7Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M12 10.5v3M10.5 12h3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="定位当前页"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="展开 / 收起（自动切换）" onclick="toggleAll()"><svg viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="tbtn" data-tip="显示链接（默认关闭）" onclick="toggleLink()"><svg viewBox="0 0 24 24" fill="none"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="回收站" onclick="openTrash()"><svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M10 11v5M14 11v5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg><span class="badge" id="trashBadgeS" style="display:none">0</span></button>
+    <button class="tbtn" data-tip="浏览器历史" onclick="toast('跳转浏览器历史记录（原型演示）')"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button class="tbtn" data-tip="全屏抓取视图" onclick="openFullscreen()"><svg viewBox="0 0 24 24" fill="none"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    <button class="tbtn" data-tip="黑白主题切换" onclick="toggleTheme()"><svg viewBox="0 0 24 24" fill="none"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+  </div>
+
+  <div class="body" id="treeSide" data-mode="side"></div>
+
+  <div class="footer">
+    <div class="stats" id="statsSide"></div>
+    <div class="footer-actions">
+      <button class="tbtn" data-tip="快捷键表" onclick="openModal('modalKeys')"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="18" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M7 11h.01M11 11h.01M15 11h.01M7 14h.01M11 14h.01M15 14h.01M18 11h.01" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+      <button class="tbtn" data-tip="快速上手指南" onclick="openModal('modalGuide')"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .8c0 1.7-2.5 2.1-2.5 3.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M12 17.2h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 独立界面：需求清单 ============ -->
+<div class="req-page hidden" id="pageReq">
+  <div class="req-head">
+    <div>
+      <h2>需求清单与实现方式</h2>
+      <p>独立于独立窗口版 / 侧边栏版之外的需求台账界面，逐条记录已确认需求及其在原型中的落地方式。</p>
+    </div>
+    <div class="req-meta" id="reqMeta"></div>
+  </div>
+  <div class="req-card">
+    <table class="req-table">
+      <thead><tr><th style="width:44px">#</th><th>需求</th><th style="width:92px">类别</th><th>原型实现方式</th></tr></thead>
+      <tbody id="reqBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="ctx-menu" id="ctxMenu"></div>
+
+<!-- 设置 -->
+<div class="mask" id="modalSetting">
+  <div class="modal">
+    <header><h3>设置</h3><button class="x" onclick="closeModal('modalSetting')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content">
+      <div class="cat-bar">
+        <button class="cat-tab active" data-cat="appearance" onclick="switchSetCat('appearance')">外观</button>
+        <button class="cat-tab" data-cat="backup" onclick="switchSetCat('backup')">备份与恢复</button>
+        <button class="cat-tab" data-cat="copy" onclick="switchSetCat('copy')">复制</button>
+        <button class="cat-tab" data-cat="feedback" onclick="switchSetCat('feedback')">反馈</button>
+      </div>
+
+      <div class="cat-panel" data-panel="appearance">
+        <div class="sec-title">主题</div>
+        <div class="opt-row selected" data-setting="theme" data-value="dark" onclick="pickTheme(this)">
+          <span class="radio"></span><div><div class="t">深色（默认）</div><div class="d">深色背景，适合长时间整理标签时使用</div></div>
+        </div>
+        <div class="opt-row" data-setting="theme" data-value="light" onclick="pickTheme(this)">
+          <span class="radio"></span><div><div class="t">浅色</div><div class="d">浅色背景，白天或强光环境下更清晰</div></div>
+        </div>
+
+        <div class="sec-title" style="margin-top:18px">打开方式</div>
+        <div class="opt-row selected" data-setting="startup" data-value="window" onclick="pickSetting(this)">
+          <span class="radio"></span><div><div class="t">独立窗口</div><div class="d">打开为独立浮动窗口，可置顶悬浮在其他窗口之上</div></div>
+        </div>
+        <div class="opt-row" data-setting="startup" data-value="side" onclick="pickSetting(this)">
+          <span class="radio"></span><div><div class="t">侧边栏</div><div class="d">依附浏览器侧边展示，无独立窗口置顶能力</div></div>
+        </div>
+
+        <div class="sec-title" style="margin-top:18px">窗口位置</div>
+        <div class="switch-row">
+          <div><div class="t">在上次位置打开</div><div class="d">开启后每次唤起窗口沿用上次的屏幕位置与尺寸，默认启用</div></div>
+          <button class="switch on" id="lastPosSwitch" onclick="toggleLastPos()"></button>
+        </div>
+      </div>
+
+      <div class="cat-panel hidden" data-panel="backup">
+        <div class="sec-title">备份方式</div>
+        <div class="opt-row selected" data-setting="backup" data-value="local" onclick="pickBackup(this)">
+          <span class="radio"></span><div><div class="t">备份到本地</div><div class="d">按所选格式导出备份文件，可手动导入浏览器书签完成恢复</div></div>
+        </div>
+        <div class="opt-row" data-setting="backup" data-value="github" onclick="pickBackup(this)">
+          <span class="radio"></span><div><div class="t">备份到 GitHub 仓库</div><div class="d">固定使用浏览器标准 HTML 书签格式，定时覆盖远端同一份文件，版本由 Git 历史管理</div></div>
+        </div>
+
+        <!-- 本地备份子区 -->
+        <div class="sub-block" id="localBackupSub">
+          <div class="sec-title">本地备份格式</div>
+          <div class="opt-row selected" data-setting="localFormat" data-value="json" onclick="pickSetting(this)">
+            <span class="radio"></span><div><div class="t">JSON 备份格式</div><div class="d">完整结构与状态，便于后续导入恢复</div></div>
+          </div>
+          <div class="opt-row" data-setting="localFormat" data-value="html" onclick="pickSetting(this)">
+            <span class="radio"></span><div><div class="t">标准 HTML 书签格式</div><div class="d">通用书签文件，可导入多数浏览器</div></div>
+          </div>
+          <div class="opt-row" data-setting="localFormat" data-value="native" onclick="pickSetting(this)">
+            <span class="radio"></span><div><div class="t">当前浏览器原生格式</div><div class="d">按当前浏览器原生书签结构导出</div></div>
+          </div>
+          <div class="modal-actions" style="margin-top:14px">
+            <button class="btn primary" onclick="localBackup()">按所选格式备份到本地</button>
+          </div>
+        </div>
+
+        <!-- GitHub 备份子区 -->
+        <div class="sub-block hidden" id="ghBackupSub">
+          <div class="sec-title">GitHub 配置参数</div>
+          <div class="field-row"><label>仓库地址</label><input class="edit-input" id="ghRepo" type="text" placeholder="https://github.com/owner/repo"></div>
+          <div class="field-row"><label>分支</label><input class="edit-input" id="ghBranch" type="text" placeholder="main" value="main"></div>
+          <div class="field-row"><label>文件路径</label><input class="edit-input" id="ghPath" type="text" placeholder="bookmarks.html" value="bookmarks.html"></div>
+          <div class="field-row"><label>定时备份</label>
+            <select class="edit-input" id="ghFreq">
+              <option>每 10 分钟</option><option>每 30 分钟</option><option selected>每小时</option><option>每天</option>
+            </select>
+          </div>
+          <div class="modal-actions" style="margin-top:14px">
+            <button class="btn primary" onclick="saveGhConfig()">保存 GitHub 配置</button>
+          </div>
+        </div>
+
+        <div class="sec-title" style="margin-top:18px">导入</div>
+        <div class="opt-row" onclick="importBrowserBookmark()">
+          <div><div class="t">直接导入浏览器书签</div><div class="d">读取当前浏览器书签目录，按层级并入标签树</div></div>
+          <span class="ops"><button class="mini-btn" onclick="event.stopPropagation();importBrowserBookmark()">立即导入</button></span>
+        </div>
+        <div class="sub-block">
+          <div class="sec-title">手动选择文件导入（三类结构）</div>
+          <div class="opt-row" onclick="importFile('json')">
+            <div><div class="t">JSON 备份文件</div><div class="d">完整结构与状态，可完整恢复分组与开关状态</div></div>
+            <span class="ops"><button class="mini-btn" onclick="event.stopPropagation();importFile('json')">选择文件</button></span>
+          </div>
+          <div class="opt-row" onclick="importFile('html')">
+            <div><div class="t">标准 HTML 书签文件</div><div class="d">通用书签导出文件，解析书签条目与层级</div></div>
+            <span class="ops"><button class="mini-btn" onclick="event.stopPropagation();importFile('html')">选择文件</button></span>
+          </div>
+          <div class="opt-row" onclick="importFile('native')">
+            <div><div class="t">浏览器原生书签结构</div><div class="d">按当前浏览器原生书签目录结构导入</div></div>
+            <span class="ops"><button class="mini-btn" onclick="event.stopPropagation();importFile('native')">选择文件</button></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cat-panel hidden" data-panel="copy">
+        <div class="sec-title">复制默认参数</div>
+        <div class="sub-block">
+          <div class="sec-title">复制内容（默认）</div>
+          <div class="opt-row selected" data-defcopy="content" data-value="url" onclick="pickDefCopy(this)"><span class="radio"></span><div><div class="t">仅 URL</div></div></div>
+          <div class="opt-row" data-defcopy="content" data-value="title" onclick="pickDefCopy(this)"><span class="radio"></span><div><div class="t">标题 + URL</div></div></div>
+          <div class="sec-title" style="margin-top:16px">输出格式（默认）</div>
+          <div class="opt-row selected" data-defcopy="format" data-value="markdown" onclick="pickDefCopy(this)"><span class="radio"></span><div><div class="t">Markdown</div><div class="d">如 [标题](URL)</div></div></div>
+          <div class="opt-row" data-defcopy="format" data-value="txt" onclick="pickDefCopy(this)"><span class="radio"></span><div><div class="t">纯文本 TXT</div><div class="d">标题与 URL 分行排列</div></div></div>
+        </div>
+      </div>
+
+      <div class="cat-panel hidden" data-panel="feedback">
+        <div class="sec-title">反馈</div>
+      <div class="gh-row" onclick="toast('跳转 GitHub Issues（原型演示）')">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5A11.5 11.5 0 0 0 .5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.55v-2.15c-3.2.7-3.87-1.36-3.87-1.36-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.41-2.69 5.39-5.25 5.67.41.35.77 1.05.77 2.13v3.16c0 .3.21.66.8.55A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z"/></svg>
+        <div><div class="t">GitHub Issue 反馈</div><div class="d">点击图标跳转项目提问题页面</div></div>
+      </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 回收站 -->
+<div class="mask" id="modalTrash">
+  <div class="modal wide">
+    <header><h3>回收站</h3><button class="x" onclick="closeModal('modalTrash')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content" id="trashList"></div>
+  </div>
+</div>
+
+<!-- 快捷键 -->
+<div class="mask" id="modalKeys">
+  <div class="modal">
+    <header><h3>快捷键表</h3><button class="x" onclick="closeModal('modalKeys')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content">
+      <div class="kv"><span>上 / 下选择标签</span><kbd>↑ / ↓</kbd></div>
+      <div class="kv"><span>打开选中标签（也可双击）</span><kbd>Enter</kbd></div>
+      <div class="kv"><span>打开整组已关闭标签</span><kbd>Ctrl + O</kbd></div>
+      <div class="kv"><span>定位当前标签</span><kbd>Ctrl + L</kbd></div>
+      <div class="kv"><span>展开 / 收起全部</span><kbd>Ctrl + E</kbd></div>
+      <div class="kv"><span>切换显示链接</span><kbd>Ctrl + Shift + L</kbd></div>
+      <div class="kv"><span>复制当前选中标签 / 右键对象（按默认参数直出）</span><kbd>Ctrl + C</kbd></div>
+      <div class="kv"><span>删除到回收站</span><kbd>Delete</kbd></div>
+      <div class="kv"><span>打开回收站</span><kbd>Ctrl + Backspace</kbd></div>
+      <div class="kv"><span>浏览器历史</span><kbd>Ctrl + H</kbd></div>
+      <div class="kv"><span>全屏抓取视图</span><kbd>F11</kbd></div>
+      <div class="kv"><span>导出书签（设置内）</span><kbd>Ctrl + S</kbd></div>
+      <div class="kv"><span>切换主题</span><kbd>Ctrl + D</kbd></div>
+      <div class="kv"><span>置顶 / 取消置顶（仅独立窗口）</span><kbd>Ctrl + P</kbd></div>
+    </div>
+  </div>
+</div>
+
+<!-- 指南 -->
+<div class="mask" id="modalGuide">
+  <div class="modal">
+    <header><h3>快速上手指南</h3><button class="x" onclick="closeModal('modalGuide')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content guide">
+      <ol>
+        <li><b>双击打开：</b>双击标签即在浏览器打开；行内复制图标一键复制，末尾 X 关闭网页（仅已打开显示）。</li>
+        <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
+        <li><b>右键菜单：</b>标签上仅编辑、备注、删除；分组/窗口可整组打开、重命名、关闭、展开收起切换、删除；删除项进入回收站。</li>
+        <li><b>双向拖拽：</b>标签拖到其他组；组拖到其他组（子组）或其他窗口；窗口合并到其他窗口；拖动高亮目标容器，结束后树结构刷新并同步浏览器标签。</li>
+        <li><b>状态颜色：</b>标签按打开高亮 / 灰显；组内有任一打开标签则组亮色、全关则灰色；窗口同理，全灰组时窗口灰色。</li>
+        <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
+        <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
+        <li><b>全屏视图：</b>抓取标签标题、URL、状态并保存展示；历史按钮跳转浏览器历史。</li>
+        <li><b>设置分类：</b>设置内分外观、备份与恢复、复制、反馈四类；外观里可改主题（默认深色）、打开方式和「在上次位置打开」。</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑 -->
+<div class="mask" id="modalEdit">
+  <div class="modal" style="width:340px">
+    <header><h3>编辑名称</h3><button class="x" onclick="closeModal('modalEdit')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content">
+      <input class="edit-input" id="editInput" type="text">
+      <div class="modal-actions"><button class="btn" onclick="closeModal('modalEdit')">取消</button><button class="btn primary" onclick="confirmEdit()">保存</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建 / 备注 -->
+<div class="mask" id="modalNew">
+  <div class="modal" style="width:340px">
+    <header><h3 id="newTitle">新建</h3><button class="x" onclick="closeModal('modalNew')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button></header>
+    <div class="content">
+      <input class="edit-input" id="newInput" type="text" placeholder="输入名称或备注">
+      <div class="modal-actions"><button class="btn" onclick="closeModal('modalNew')">取消</button><button class="btn primary" onclick="confirmNew()">确定</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 全屏视图（独立页面，Raindrop 卡片风格） -->
+<div class="req-page hidden" id="pageFull">
+  <div class="fs-head">
+    <div>
+      <h3>标签库 · 全屏视图</h3>
+      <p>与标签树共享同一套数据；卡片按分组聚合展示标题、链接与开关状态，点击卡片可打开标签。</p>
+    </div>
+    <div class="footer-actions">
+      <button class="btn" onclick="toast('已保存当前抓取结果')">保存</button>
+      <button class="btn primary" onclick="closeFullscreen()">返回标签树</button>
+    </div>
+  </div>
+  <div class="fs-body"><div class="fs-grid" id="fsGrid"></div></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 示例数据 ================= */
+let data = [
+  { id:'w1', title:'当前浏览器窗口', collapsed:false, groups:[
+    { id:'g1', title:'工作文档', collapsed:false, leaves:[
+      { id:'l1', title:'项目需求文档.html', link:'docs.example.com/req', open:true },
+      { id:'l2', title:'原型图.png', link:'img.example.com/proto', open:true },
+      { id:'l3', title:'会议纪要.md', link:'notes.example.com/m1', open:false }
+    ], children:[
+      { id:'g4', title:'子分组 · 草稿', collapsed:false, leaves:[
+        { id:'l7', title:'草稿大纲.doc', link:'docs.example.com/draft', open:true },
+        { id:'l8', title:'待整理链接', link:'links.example.com/todo', open:false }
+      ]}
+    ]},
+    { id:'g2', title:'资料参考', collapsed:false, leaves:[
+      { id:'l4', title:'竞品分析表', link:'sheet.example.com/cmp', open:false }
+    ]}
+  ]},
+  { id:'w2', title:'浏览器窗口 2', collapsed:false, groups:[
+    { id:'g3', title:'娱乐页', collapsed:false, leaves:[
+      { id:'l5', title:'音乐播放页', link:'music.example.com/play', open:false },
+      { id:'l6', title:'视频收藏夹', link:'video.example.com/fav', open:false }
+    ]}
+  ]}
+];
+let deleted = []; // {kind:'leaf'|'group'|'window', payload, parentId, time}
+let selectedId = null; // 键盘 / 单击选中的标签
+
+/* ================= 渲染 ================= */
+const tri = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const xIco = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const cpIco = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="1.8"/></svg>';
+
+/* 递归：分组是否含任一打开标签 */
+function groupHasOpen(g){
+  return g.leaves.some(l=>l.open) || (g.children||[]).some(groupHasOpen);
+}
+function windowHasOpen(w){ return w.groups.some(groupHasOpen); }
+function allGroupLeaves(g){
+  let out=[...g.leaves];
+  (g.children||[]).forEach(c=>out=out.concat(allGroupLeaves(c)));
+  return out;
+}
+
+function renderGroup(g){
+  const dim = groupHasOpen(g) ? '' : 'dimmed';
+  let html = `<div class="node ${g.collapsed?'collapsed':''} ${dim}" data-id="${g.id}" data-kind="group" draggable="true">
+    <div class="node-row" data-target="${g.id}" data-kind="group"><span class="tri">${tri}</span><span class="group-name">${g.title}</span><span class="row-ops"><button class="copy-x" title="复制整组" onclick="event.stopPropagation();copyGroup('${g.id}')">${cpIco}</button></span></div><div class="node-children">`;
+  (g.children||[]).forEach(c=>{ html += renderGroup(c); });
+  g.leaves.forEach(l=>{
+    const closeBtn = l.open ? `<button class="close-x" title="关闭网页" onclick="event.stopPropagation();closeLeaf('${l.id}')">${xIco}</button>` : '';
+    const copyBtn = `<button class="copy-x" title="复制标签" onclick="event.stopPropagation();copyLeaf('${l.id}')">${cpIco}</button>`;
+    html += `<div class="leaf ${l.open?'open':''} ${selectedId===l.id?'selected':''}" data-id="${l.id}" data-kind="leaf" draggable="true" onclick="setSelected('${l.id}')" ondblclick="openLeaf('${l.id}')">
+      <span class="dot"></span><span class="title">${l.title}</span><span class="link">${l.link}</span>${l.note?`<span class="note">· ${l.note}</span>`:''}${copyBtn}${closeBtn}</div>`;
+  });
+  html += `</div></div>`;
+  return html;
+}
+
+function renderTree(mode){
+  const box = document.getElementById(mode==='window'?'treeWindow':'treeSide');
+  let html = '';
+  data.forEach(w=>{
+    const dim = windowHasOpen(w) ? '' : 'dimmed';
+    html += `<div class="node ${w.collapsed?'collapsed':''} ${dim}" data-id="${w.id}" data-kind="window" draggable="true">
+      <div class="node-row" data-target="${w.id}" data-kind="window"><span class="tri">${tri}</span><span class="win-name">${w.title}</span><span class="row-ops"><button class="copy-x" title="复制整窗" onclick="event.stopPropagation();copyWindow('${w.id}')">${cpIco}</button></span></div><div class="node-children">`;
+    w.groups.forEach(g=>{ html += renderGroup(g); });
+    html += `</div></div>`;
+  });
+  box.innerHTML = html;
+  bindDrag(box);
+  bindRowClick(box);
+  renderStats();
+  renderTrashBadge();
+}
+
+function bindRowClick(box){
+  box.querySelectorAll('.node-row').forEach(r=>{
+    r.onclick = ()=>toggleNode(r.dataset.target);
+  });
+}
+
+function countGroups(groups){
+  let n=0;
+  groups.forEach(g=>{ n+=1+(g.children?countGroups(g.children):0); });
+  return n;
+}
+function countLeaves(groups){
+  let n=0;
+  groups.forEach(g=>{ n+=g.leaves.length+(g.children?countLeaves(g.children):0); });
+  return n;
+}
+function countOpened(groups){
+  let n=0;
+  groups.forEach(g=>{ n+=g.leaves.filter(l=>l.open).length+(g.children?countOpened(g.children):0); });
+  return n;
+}
+function renderStats(){
+  const allGroups=data.flatMap(w=>w.groups);
+  const wins=data.length, groups=countGroups(allGroups);
+  const leaves=countLeaves(allGroups);
+  const opened=countOpened(allGroups);
+  const txt=`<span><b>${wins}</b> 窗口</span><span><b>${groups}</b> 分组</span><span><b>${leaves}</b> 标签</span><span><b>${opened}</b> 已打开</span>`;
+  document.getElementById('statsWindow').innerHTML=txt;
+  document.getElementById('statsSide').innerHTML=txt;
+}
+
+/* ================= 查找 ================= */
+function searchGroup(groups, id, parent){
+  for(const g of groups){
+    if(g.id===id) return {parent, g};
+    if(g.children){ const r=searchGroup(g.children,id,g); if(r) return r; }
+  }
+  return null;
+}
+function findLeafIn(groups, id, parent){
+  for(const g of groups){
+    const l=g.leaves.find(x=>x.id===id);
+    if(l) return {g, l};
+    if(g.children){ const r=findLeafIn(g.children,id,g); if(r) return r; }
+  }
+  return null;
+}
+function findLeaf(id){
+  for(const w of data){ const r=findLeafIn(w.groups,id,w); if(r) return {w, g:r.g, l:r.l}; }
+  return null;
+}
+function findGroup(id){
+  for(const w of data){ const r=searchGroup(w.groups,id,w); if(r) return {w, parent:r.parent, g:r.g}; }
+  return null;
+}
+function findWindow(id){ return data.find(w=>w.id===id); }
+function curMode(){ if(document.getElementById('tabReq').classList.contains('active')) return 'req'; return document.getElementById('tabWindow').classList.contains('active')?'window':'side'; }
+
+/* ================= 节点动作 ================= */
+function toggleNode(id){
+  const w=findWindow(id); if(w){ w.collapsed=!w.collapsed; renderTree(curMode()); return; }
+  const g=findGroup(id); if(g){ g.g.collapsed=!g.g.collapsed; renderTree(curMode()); }
+}
+function openLeaf(id){ const f=findLeaf(id); if(f){ f.l.open=true; renderTree(curMode()); toast('已在浏览器打开：'+f.l.title); } }
+function openGroup(id){ const g=findGroup(id); if(g){ allGroupLeaves(g.g).forEach(l=>l.open=true); renderTree(curMode()); toast('已打开整组「'+g.g.title+'」'); } }
+function openWindow(id){ const w=findWindow(id); if(w){ w.groups.forEach(g=>g.leaves.forEach(l=>l.open=true)); renderTree(curMode()); toast('已打开窗内全部标签'); } }
+function closeLeaf(id){ const f=findLeaf(id); if(f){ f.l.open=false; renderTree(curMode()); toast('标签已关闭'); } }
+function copyLeaf(id){ const f=findLeaf(id); if(!f) return; doCopy({kind:'leaf',id}, defaultCopy); }
+function closeGroup(id){ const g=findGroup(id); if(g){ allGroupLeaves(g.g).forEach(l=>l.open=false); renderTree(curMode()); toast('已关闭整组已打开标签'); } }
+function closeWindow(id){ const w=findWindow(id); if(w){ w.groups.forEach(g=>g.leaves.forEach(l=>l.open=false)); renderTree(curMode()); toast('已关闭窗内已打开标签'); } }
+
+/* 删除进回收站 */
+function removeLeaf(id){
+  const f=findLeaf(id); if(!f) return;
+  deleted.push({kind:'leaf', payload:f.l, parentId:f.g.id, time:now()});
+  f.g.leaves=f.g.leaves.filter(x=>x.id!==id);
+  renderTree(curMode()); toast('已移入回收站');
+}
+function removeGroup(id){
+  const g=findGroup(id); if(!g) return;
+  const parent=g.parent;
+  const list=parent && parent.children ? parent.children : g.w.groups;
+  deleted.push({kind:'group', payload:g.g, parentId:parent?parent.id:null, time:now()});
+  const idx=list.findIndex(x=>x.id===id); if(idx>=0) list.splice(idx,1);
+  renderTree(curMode()); toast('整组已移入回收站');
+}
+function removeWindow(id){
+  const w=findWindow(id); if(!w) return;
+  deleted.push({kind:'window', payload:w, parentId:null, time:now()});
+  data=data.filter(x=>x.id!==id);
+  renderTree(curMode()); toast('整窗已移入回收站');
+}
+
+/* 全部展开 / 收起 */
+let allOpen=true;
+function setGroupsCollapsed(groups, v){ groups.forEach(g=>{ g.collapsed=v; if(g.children) setGroupsCollapsed(g.children,v); }); }
+function toggleAll(){ allOpen=!allOpen; data.forEach(w=>{w.collapsed=!allOpen; setGroupsCollapsed(w.groups,!allOpen);}); renderTree(curMode()); }
+function expandAll(){ data.forEach(w=>{w.collapsed=false; setGroupsCollapsed(w.groups,false);}); renderTree(curMode()); }
+function collapseAll(){ data.forEach(w=>{w.collapsed=true; setGroupsCollapsed(w.groups,true);}); renderTree(curMode()); }
+function expandGroup(id){ const g=findGroup(id); if(g){ g.g.collapsed=false; if(g.w) g.w.collapsed=false; renderTree(curMode()); } }
+function collapseGroup(id){ const g=findGroup(id); if(g){ g.g.collapsed=true; renderTree(curMode()); } }
+
+/* ================= 工具栏 ================= */
+function toggleLink(){ document.querySelectorAll('.app').forEach(a=>a.classList.toggle('show-link')); }
+let dark=true; // 默认深色主题
+function applyTheme(){
+  document.documentElement.dataset.theme = dark?'dark':'light';
+  document.querySelectorAll('.opt-row[data-setting="theme"]').forEach(r=>{
+    r.classList.toggle('selected', r.dataset.value===(dark?'dark':'light'));
+  });
+}
+function toggleTheme(){ dark=!dark; applyTheme(); toast(dark?'已切换为深色主题':'已切换为浅色主题'); }
+function pickTheme(row){ dark = row.dataset.value==='dark'; applyTheme(); toast(dark?'已切换为深色主题':'已切换为浅色主题'); }
+function togglePin(){ document.getElementById('btnPinW').classList.toggle('active'); toast('置顶状态已切换（窗口原位保持不动）'); }
+function locateCurrent(){ const f=document.querySelector('.leaf.open'); if(f){ f.scrollIntoView({block:'center'}); f.style.background='var(--accent-soft)'; setTimeout(()=>f.style.background='',600);} }
+
+let prevMode='window';
+function switchMode(m){
+  const w=document.getElementById('appWindow'), s=document.getElementById('appSide'), p=document.getElementById('pageReq'), f=document.getElementById('pageFull');
+  const tw=document.getElementById('tabWindow'), ts=document.getElementById('tabSide'), tr=document.getElementById('tabReq');
+  [w,s,p,f].forEach(x=>x.classList.add('hidden'));
+  [tw,ts,tr].forEach(x=>x.classList.remove('active'));
+  if(m==='window'){ w.classList.remove('hidden'); tw.classList.add('active'); prevMode='window'; }
+  else if(m==='side'){ s.classList.remove('hidden'); ts.classList.add('active'); prevMode='side'; }
+  else { p.classList.remove('hidden'); tr.classList.add('active'); prevMode='req'; }
+}
+
+/* ================= 右键菜单 ================= */
+const menuIcon={
+  open:'<svg viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+  copy:'<svg viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="1.7"/></svg>',
+  close:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  del:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  exp:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 15l6-6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  col:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  add:'<svg viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  fold:'<svg viewBox="0 0 24 24" fill="none"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  note:'<svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v12l-4 4H5V4Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 9h6M9 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>'
+};
+let ctxTarget=null;
+document.addEventListener('contextmenu', e=>{
+  const el=e.target.closest('[data-kind]');
+  if(!el){ closeMenu(); return; }
+  e.preventDefault();
+  ctxTarget={kind:el.dataset.kind, id:el.dataset.id||el.dataset.target};
+  buildMenu(e.clientX, e.clientY, ctxTarget);
+});
+
+function buildMenu(x,y,t){
+  const m=document.getElementById('ctxMenu');
+  let items=[];
+  if(t.kind==='leaf'){
+    items=[
+      ['edit','编辑',()=>openEdit(t.id)],
+      ['note','添加备注',()=>openNew('note',t.id)],
+      ['sep'],
+      ['del','删除到回收站','danger',()=>removeLeaf(t.id)]
+    ];
+  } else if(t.kind==='group'){
+    items=[
+      ['open','打开整组',()=>openGroup(t.id)],
+      ['edit','重命名分组',()=>openEdit(t.id)],
+      ['sep'],
+      ['close','关闭整组已打开标签',()=>closeGroup(t.id)],
+      ['sep'],
+      ['del','删除整组到回收站','danger',()=>removeGroup(t.id)]
+    ];
+  } else {
+    items=[
+      ['open','打开窗内全部标签',()=>openWindow(t.id)],
+      ['edit','重命名窗口',()=>openEdit(t.id)],
+      ['add','新建分组',()=>openNew('newGroup',t.id)],
+      ['sep'],
+      ['close','关闭窗内已打开标签',()=>closeWindow(t.id)],
+      ['fold','展开 / 收起（切换）',()=>toggleNode(t.id)],
+      ['sep'],
+      ['del','删除整窗到回收站','danger',()=>removeWindow(t.id)]
+    ];
+  }
+  m.innerHTML=items.map(it=>{
+    if(it[0]==='sep') return '<div class="sep"></div>';
+    const [icon,label,danger,fn]=it.length===4?it:[it[0],it[1],'',it[2]];
+    return `<div class="mi ${danger}" data-act="${icon}">${menuIcon[icon]}<span>${label}</span></div>`;
+  }).join('');
+  m.querySelectorAll('.mi').forEach(mi=>{
+    mi.onclick=()=>{ const act=mi.dataset.act; const it=items.find(i=>i[0]===act); if(it){ const fn=it[it.length-1]; if(fn) fn(); } closeMenu(); };
+  });
+  m.classList.add('show');
+  const r=m.getBoundingClientRect();
+  m.style.left=Math.min(x, innerWidth-r.width-8)+'px';
+  m.style.top=Math.min(y, innerHeight-r.height-8)+'px';
+}
+function closeMenu(){ document.getElementById('ctxMenu').classList.remove('show'); }
+document.addEventListener('click', e=>{ if(!e.target.closest('#ctxMenu')) closeMenu(); });
+
+/* ================= 编辑 ================= */
+let editTarget=null;
+function openEdit(id){
+  editTarget=id; let name='';
+  const f=findLeaf(id); if(f) name=f.l.title;
+  const g=findGroup(id); if(g) name=g.g.title;
+  const w=findWindow(id); if(w) name=w.title;
+  document.getElementById('editInput').value=name;
+  openModal('modalEdit');
+}
+function confirmEdit(){
+  const v=document.getElementById('editInput').value.trim(); if(!v) return;
+  const f=findLeaf(editTarget); if(f) f.l.title=v;
+  const g=findGroup(editTarget); if(g) g.g.title=v;
+  const w=findWindow(editTarget); if(w) w.title=v;
+  renderTree(curMode()); closeModal('modalEdit'); toast('已保存');
+}
+
+/* 新建分组 / 新建标签 / 添加备注 */
+function newGroupDefault(){
+  if(!data[0]){ toast('暂无窗口'); return; }
+  openNew('newGroup', data[0].id);
+}
+let newCtx={mode:null, targetId:null};
+let seq=1;
+function openNew(mode, targetId){
+  newCtx={mode, targetId};
+  const titles={newGroup:'新建分组', newLeaf:'新建标签', note:'添加备注'};
+  document.getElementById('newTitle').textContent=titles[mode];
+  const input=document.getElementById('newInput');
+  input.value='';
+  if(mode==='note'){ const f=findLeaf(targetId); if(f) input.value=f.l.note||''; }
+  openModal('modalNew');
+}
+function confirmNew(){
+  const v=document.getElementById('newInput').value.trim();
+  if(!v){ toast('请输入内容'); return; }
+  const {mode, targetId}=newCtx;
+  if(mode==='newGroup'){
+    const w=findWindow(targetId); if(!w) return;
+    w.groups.push({id:'g'+Date.now()+seq++, title:v, collapsed:false, leaves:[]});
+    w.collapsed=false; toast('已新建分组「'+v+'」');
+  } else if(mode==='newLeaf'){
+    const g=findGroup(targetId); if(!g) return;
+    g.g.leaves.push({id:'l'+Date.now()+seq++, title:v, link:'', open:false, note:''});
+    g.collapsed=false; toast('已新建标签「'+v+'」');
+  } else if(mode==='note'){
+    const f=findLeaf(targetId); if(!f) return;
+    f.l.note=v; toast('备注已保存');
+  }
+  renderTree(curMode()); closeModal('modalNew');
+}
+
+/* ================= 拖拽（标签 / 组 / 窗口全层级） ================= */
+let dragId=null, dragKind=null;
+function bindDrag(box){
+  box.querySelectorAll('[draggable="true"]').forEach(el=>{
+    el.addEventListener('dragstart', e=>{
+      e.stopPropagation();
+      dragId=el.dataset.id; dragKind=el.dataset.kind; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain', dragId);
+    });
+    el.addEventListener('dragend', e=>{ e.stopPropagation(); el.classList.remove('dragging'); clearDropOver(box); });
+    // 标签 / 分组 / 窗口都可作为放置目标，实现跨树归位与同级排序
+    el.addEventListener('dragover', e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect='move';
+      clearDropOver(box);
+      el.classList.add('dragover');
+    });
+    el.addEventListener('dragleave', e=>{ if(!el.contains(e.relatedTarget)) el.classList.remove('dragover'); });
+    el.addEventListener('drop', e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      clearDropOver(box);
+      if(!dragId) return;
+      dropTo(dragKind, dragId, el.dataset.kind, el.dataset.id);
+    });
+  });
+}
+function clearDropOver(box){ box.querySelectorAll('.dragover').forEach(x=>x.classList.remove('dragover')); }
+
+function dropTo(kind, srcId, targetKind, targetId){
+  if(kind==='leaf'){
+    if(targetKind==='leaf'){
+      const tf=findLeaf(targetId), sf=findLeaf(srcId);
+      if(!tf||!sf||(tf.g.id===sf.g.id&&tf.l.id===sf.l.id)) return;
+      sf.g.leaves=sf.g.leaves.filter(x=>x.id!==srcId);
+      const idx=tf.g.leaves.findIndex(x=>x.id===targetId);
+      tf.g.leaves.splice(idx+1,0,sf.l); tf.g.collapsed=false;
+      renderTree(curMode()); toast('标签已排到「'+tf.l.title+'」之后，浏览器已执行对应移动');
+      return;
+    }
+    let g=findGroup(targetId);
+    let targetWin=null;
+    if(!g){ targetWin=findWindow(targetId); if(targetWin&&targetWin.groups.length) g={w:targetWin,g:targetWin.groups[0]}; }
+    if(!g){ toast(targetWin&&!targetWin.groups.length?'该窗口暂无分组，请先新建分组':'请拖到分组或窗口上'); return; }
+    const f=findLeaf(srcId); if(!f) return;
+    if(f.g.id===g.g.id) return;
+    f.g.leaves=f.g.leaves.filter(x=>x.id!==srcId); g.g.leaves.push(f.l); g.g.collapsed=false;
+    renderTree(curMode()); toast('标签已移入「'+g.g.title+'」，浏览器已执行对应移动');
+  } else if(kind==='group'){
+    const sg=findGroup(srcId); if(!sg) return;
+    const detach=(gObj)=>{
+      const parent=gObj.parent;
+      const list=parent&&parent.children?parent.children:gObj.w.groups;
+      const i=list.findIndex(x=>x.id===gObj.g.id); if(i>=0) list.splice(i,1);
+    };
+    if(targetKind==='window'){
+      const w=findWindow(targetId); if(!w) return;
+      const alreadyTop = sg.parent===w;
+      if(alreadyTop){ toast('分组已在「'+w.title+'」顶层'); return; }
+      detach(sg); w.groups.push(sg.g); w.collapsed=false;
+      renderTree(curMode()); toast('整组及子网页已移入「'+w.title+'」');
+    } else if(targetKind==='leaf'){
+      const tf=findLeaf(targetId); if(!tf) return;
+      const tg=findGroup(tf.g.id); if(!tg) return;
+      const inTree=(anc,g)=>{ return (g.children||[]).some(c=>c.id===anc.g.id||inTree(anc,c)); };
+      if(inTree(sg,tg.g)){ toast('不能拖入自身子组'); return; }
+      detach(sg);
+      tg.g.children=tg.g.children||[]; tg.g.children.push(sg.g); tg.g.collapsed=false;
+      renderTree(curMode()); toast('整组已挂到「'+tg.g.title+'」下');
+      return;
+    } else if(targetKind==='group'){
+      const tg=findGroup(targetId); if(!tg||sg.g.id===tg.g.id) return;
+      // 禁止把祖先组拖进自己的子组，避免环
+      const inTree=(anc,g)=>{ return (g.children||[]).some(c=>c.id===anc.g.id||inTree(anc,c)); };
+      if(inTree(sg,tg.g)){ toast('不能拖入自身子组'); return; }
+      detach(sg);
+      tg.g.children=tg.g.children||[]; tg.g.children.push(sg.g); tg.g.collapsed=false;
+      renderTree(curMode()); toast('已作为子组挂到「'+tg.g.title+'」下，整组网页随行');
+    }
+  } else if(kind==='window' && targetKind==='window'){
+    const sw=findWindow(srcId), tw=findWindow(targetId);
+    if(!sw||!tw||sw.id===tw.id) return;
+    // 合并：源窗口全部分组并入目标窗口，源窗口移除；浏览器标签树同步变更
+    tw.groups.push(...sw.groups);
+    data.splice(data.indexOf(sw),1);
+    renderTree(curMode()); toast('已将「'+sw.title+'」合并到「'+tw.title+'」，分组与标签随行');
+  } else { toast('不支持该放置位置'); }
+}
+
+/* ================= 复制选项（范围按对象自动判定） ================= */
+let copyTarget=null;
+
+const defaultCopy={enabled:true, content:'url', format:'markdown'};
+
+function openCopy(t){ doCopy(t, defaultCopy); }
+function copyGroup(id){ const g=findGroup(id); if(!g) return; doCopy({kind:'group',id}, defaultCopy); }
+function copyWindow(id){ const w=findWindow(id); if(!w) return; doCopy({kind:'window',id}, defaultCopy); }
+function pickDefCopy(row){
+  const k=row.dataset.defcopy; defaultCopy[k]=row.dataset.value;
+  row.parentElement.querySelectorAll(`.opt-row[data-defcopy="${k}"]`).forEach(r=>r.classList.remove('selected'));
+  row.classList.add('selected');
+}
+function collectLeaves(target){
+  if(!target) return [];
+  if(target.kind==='leaf'){ const f=findLeaf(target.id); return f?[f.l]:[]; }
+  if(target.kind==='group'){ const g=findGroup(target.id); return g?allGroupLeaves(g.g):[]; }
+  const w=findWindow(target.id); const out=[];
+  if(w) w.groups.forEach(g=>out.push(...g.leaves));
+  return out;
+}
+function doCopy(target, opts){
+  const leaves=collectLeaves(target);
+  if(!leaves.length){ toast('无可复制内容'); return; }
+  const lines=leaves.map(l=>{
+    if(opts.content==='url') return l.link;
+    if(opts.format==='markdown') return '['+l.title+']('+l.link+')';
+    return l.title+'\n'+l.link;
+  });
+  const text=opts.format==='markdown'?lines.join('\n'):lines.join('\n\n');
+  const scopeLabel=target.kind==='leaf'?'单标签':(target.kind==='group'?'整组':'整窗');
+  // 原型：真实场景写入剪贴板
+  toast('已复制 '+leaves.length+' 条（'+scopeLabel+' · '+(opts.format==='markdown'?'Markdown':'TXT')+'）');
+}
+
+
+/* ================= 回收站 ================= */
+function openTrash(){ renderTrash(); openModal('modalTrash'); }
+function renderTrash(){
+  const box=document.getElementById('trashList');
+  if(!deleted.length){ box.innerHTML='<div class="trash-empty">回收站为空，删除的标签 / 分组 / 窗口会先存放在这里</div>'; }
+  else{
+    box.innerHTML=deleted.map((d,i)=>{
+      const label=d.kind==='leaf'?d.payload.title:(d.kind==='group'?d.payload.title:d.payload.title);
+      const kindLabel=d.kind==='leaf'?'标签':(d.kind==='group'?'分组':'窗口');
+      return `<div class="trash-item">
+        <div class="meta"><div class="t">${label}</div><div class="s">${kindLabel} · 删除于 ${d.time}</div></div>
+        <div class="ops">
+          <button class="mini-btn" onclick="restoreItem(${i})">恢复</button>
+          <button class="mini-btn" style="color:var(--danger)" onclick="purgeItem(${i})">彻底删除</button>
+        </div></div>`;
+    }).join('');
+  }
+  renderTrashBadge();
+}
+function renderTrashBadge(){
+  const n=deleted.length;
+  ['trashBadgeW','trashBadgeS'].forEach(id=>{ const b=document.getElementById(id); if(b){ b.style.display=n?'inline-block':'none'; b.textContent=n; } });
+}
+function restoreItem(i){
+  const d=deleted[i];
+  if(d.kind==='leaf'){
+    let g=d.parentId?findGroup(d.parentId):null;
+    if(!g){ if(data.length&&data[0].groups.length) g={w:data[0],g:data[0].groups[0]}; }
+    if(g){ g.g.leaves.push(d.payload); } else { data=[{id:'w'+Date.now(),title:'浏览器窗口',collapsed:false,groups:[{id:'g'+Date.now(),title:'默认分组',collapsed:false,leaves:[d.payload]}]}]; }
+  } else if(d.kind==='group'){
+    d.payload.children=d.payload.children||[];
+    const parentG=d.parentId?findGroup(d.parentId):null;
+    if(parentG){ parentG.g.children=parentG.g.children||[]; parentG.g.children.push(d.payload); }
+    else { const w=findWindow(d.parentId)||data[0]; if(w) w.groups.push(d.payload); else data=[{id:'w'+Date.now(),title:'浏览器窗口',collapsed:false,groups:[d.payload]}]; }
+  } else { data.push(d.payload); }
+  deleted.splice(i,1); renderTree(curMode()); renderTrash(); toast('已恢复');
+}
+function purgeItem(i){ deleted.splice(i,1); renderTrash(); renderTree(curMode()); toast('已彻底删除'); }
+
+/* ================= 全屏抓取视图 ================= */
+function openFullscreen(){
+  prevMode=curMode();
+  const w=document.getElementById('appWindow'), s=document.getElementById('appSide'), p=document.getElementById('pageReq'), f=document.getElementById('pageFull');
+  [w,s,p].forEach(x=>x.classList.add('hidden'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  const grid=document.getElementById('fsGrid');
+  let cards=[];
+  data.forEach(win=>win.groups.forEach(g=>{
+    const leaves=allGroupLeaves(g);
+    if(!leaves.length) return;
+    cards.push(`<div class="fs-group-title">${win.title} · ${g.title}</div>`);
+    leaves.forEach(l=>{
+      cards.push(`<div class="fs-card ${l.open?'open':''}" onclick="openLeaf('${l.id}')" title="点击打开 ${l.title}">
+        <div class="ft">${l.title}</div>
+        <div class="fl">${l.link||'未填写链接'}</div>
+        <div class="fm"><span class="tag">${g.title}</span><span><span class="dot"></span>${l.open?'已打开':'已关闭'}</span></div>
+      </div>`);
+    });
+  }));
+  grid.innerHTML=cards.join('')||'<div class="trash-empty">暂无可抓取标签</div>';
+  f.classList.remove('hidden');
+}
+function closeFullscreen(){
+  document.getElementById('pageFull').classList.add('hidden');
+  switchMode(prevMode||'window');
+}
+
+/* ================= 通用 ================= */
+function openModal(id){ document.getElementById(id).classList.add('show'); }
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+document.querySelectorAll('.mask').forEach(m=>m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('show'); }));
+
+let toastTimer=null;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1600); }
+
+function pickSetting(row){ const name=row.dataset.setting; document.querySelectorAll(`.opt-row[data-setting="${name}"]`).forEach(r=>r.classList.remove('selected')); row.classList.add('selected');
+  if(name==='startup') toast('打开方式已设为：'+(row.dataset.value==='window'?'独立窗口':'侧边栏'));
+}
+function pickBackup(row){
+  document.querySelectorAll('.opt-row[data-setting="backup"]').forEach(r=>r.classList.remove('selected'));
+  row.classList.add('selected');
+  const v=row.dataset.value;
+  document.getElementById('localBackupSub').classList.toggle('hidden', v!=='local');
+  document.getElementById('ghBackupSub').classList.toggle('hidden', v!=='github');
+  toast(v==='local'?'本地备份：选择格式后导出文件':'GitHub 备份：固定 HTML 书签格式，按配置定时覆盖');
+}
+
+/* 设置分类切换 */
+function switchSetCat(cat){
+  document.querySelectorAll('.cat-tab').forEach(t=>t.classList.toggle('active', t.dataset.cat===cat));
+  document.querySelectorAll('.cat-panel').forEach(p=>p.classList.toggle('hidden', p.dataset.panel!==cat));
+}
+
+/* 上次位置打开 */
+let lastPosEnabled=true;
+function toggleLastPos(){
+  lastPosEnabled=!lastPosEnabled;
+  const el=document.getElementById('lastPosSwitch');
+  if(el) el.classList.toggle('on', lastPosEnabled);
+  toast(lastPosEnabled?'已启用：在上次位置打开窗口':'已关闭：每次居中打开窗口');
+}
+
+/* 导入 / 导出（设置面板） */
+function importBrowserBookmark(){ toast('正在读取浏览器书签并并入标签树（原型演示）'); }
+function importFile(fmt){
+  const names={json:'JSON 备份文件',html:'标准 HTML 书签文件',native:'浏览器原生书签结构'};
+  toast('选择 '+names[fmt]+' 并导入（原型演示）');
+}
+function localBackup(){
+  const row=document.querySelector('.opt-row[data-setting="localFormat"].selected');
+  const fmt=row?row.dataset.value:'json';
+  const names={json:'JSON 备份格式',html:'标准 HTML 书签格式',native:'当前浏览器原生格式'};
+  toast('已按'+names[fmt]+'备份到本地（原型演示）');
+}
+function saveGhConfig(){
+  const repo=document.getElementById('ghRepo').value.trim();
+  if(!repo){ toast('请填写 GitHub 仓库地址'); return; }
+  const branch=document.getElementById('ghBranch').value.trim()||'main';
+  const path=document.getElementById('ghPath').value.trim()||'bookmarks.html';
+  const freq=document.getElementById('ghFreq').value;
+  toast('GitHub 配置已保存：'+repo+' · '+branch+' · '+path+' · '+freq);
+}
+
+function now(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+/* ================= 标签选中与键盘导航 ================= */
+function collectVisibleGroups(groups, out, parentCollapsed){
+  groups.forEach(g=>{ if(parentCollapsed||g.collapsed) return; g.leaves.forEach(l=>out.push(l)); if(g.children) collectVisibleGroups(g.children,out,false); });
+}
+function visibleLeaves(){
+  const out=[];
+  data.forEach(w=>{ if(w.collapsed) return; collectVisibleGroups(w.groups,out,false); });
+  return out;
+}
+function setSelected(id){
+  selectedId=id;
+  const box=document.getElementById(curMode()==='window'?'treeWindow':'treeSide');
+  box.querySelectorAll('.leaf').forEach(x=>x.classList.toggle('selected', x.dataset.id===id));
+  const el=box.querySelector(`.leaf[data-id="${id}"]`);
+  if(el) el.scrollIntoView({block:'nearest'});
+}
+function moveSelection(dir){
+  const leaves=visibleLeaves();
+  if(!leaves.length) return;
+  let idx=leaves.findIndex(l=>l.id===selectedId);
+  idx = idx<0 ? (dir>0?0:leaves.length-1) : (idx+dir+leaves.length)%leaves.length;
+  setSelected(leaves[idx].id);
+}
+function openSelected(){
+  let target=selectedId;
+  if(!target){ const leaves=visibleLeaves(); if(leaves.length) target=leaves[0].id; }
+  if(target) openLeaf(target);
+}
+
+/* 键盘快捷键：与现有功能一一对应 */
+function currentTarget(){
+  if(ctxTarget) return ctxTarget;
+  if(selectedId){ const f=findLeaf(selectedId); if(f) return {kind:'leaf', id:selectedId}; }
+  return null;
+}
+document.addEventListener('keydown', e=>{
+  const tag=(e.target.tagName||'').toLowerCase(); if(/input|textarea/.test(tag)) return;
+  const k=e.key.toLowerCase();
+  if(e.key==='ArrowUp'){ e.preventDefault(); moveSelection(-1); }
+  else if(e.key==='ArrowDown'){ e.preventDefault(); moveSelection(1); }
+  else if(e.key==='Enter'){ openSelected(); }
+  else if(e.key==='Delete'){
+    const t=currentTarget();
+    if(!t){ toast('先选中或右键选择要删除的对象'); return; }
+    if(t.kind==='leaf') removeLeaf(t.id);
+    else if(t.kind==='group') removeGroup(t.id);
+    else removeWindow(t.id);
+  }
+  else if(e.ctrlKey && e.shiftKey && k==='l'){ e.preventDefault(); toggleLink(); }
+  else if(e.ctrlKey && k==='l'){ e.preventDefault(); locateCurrent(); }
+  else if(e.ctrlKey && k==='e'){ e.preventDefault(); toggleAll(); }
+  else if(e.ctrlKey && k==='o'){
+    e.preventDefault();
+    const t=currentTarget();
+    if(t&&t.kind==='group') openGroup(t.id);
+    else { const g=document.querySelector('.node[data-kind="group"] .node-row'); if(g) openGroup(g.dataset.target); }
+  }
+  else if(e.ctrlKey && k==='c'){
+    e.preventDefault();
+    const t=currentTarget();
+    if(t&&t.kind==='leaf') copyLeaf(t.id);
+    else if(t&&t.kind==='group') copyGroup(t.id);
+    else if(t&&t.kind==='window') copyWindow(t.id);
+    else toast('先选中标签或右键选择分组 / 窗口再复制');
+  }
+  else if(e.ctrlKey && k==='h'){ e.preventDefault(); toast('跳转浏览器历史记录（原型演示）'); }
+  else if(e.key==='F11'){ e.preventDefault(); openFullscreen(); }
+  else if(e.ctrlKey && k==='backspace'){ e.preventDefault(); openTrash(); }
+  else if(e.ctrlKey && k==='s'){ e.preventDefault(); localBackup(); }
+  else if(e.ctrlKey && k==='d'){ e.preventDefault(); toggleTheme(); }
+  else if(e.ctrlKey && k==='p'){ e.preventDefault(); togglePin(); }
+});
+
+/* ================= 需求清单 ================= */
+const reqData=[
+  ['双模式：独立窗口 / 侧边栏','布局','顶部 tab 切换两套面板，复用同一棵标签树数据'],
+  ['窗口标题栏：图标+名称，右侧最小化/最大化/关闭','布局','titlebar 右侧 win-ctrl 三个浏览器系统按钮'],
+  ['侧边栏标题栏：图标+名称，仅关闭侧边栏叉号','布局','侧边栏 win-ctrl 只保留 close，不显示系统按钮'],
+  ['搜索栏：通栏搜索框 + 后置设置按钮','布局','searchbar 左侧搜索框，右侧设置入口'],
+  ['快捷栏图标顺序与悬浮汉字提示','布局','toolbar 按 定位/展收/链接/回收站/历史/全屏/主题/置顶 排列，data-tip 悬浮显示（导入导出已移入设置）'],
+  ['侧边栏不提供置顶按钮','布局','侧边栏 toolbar 不渲染置顶（依附浏览器，无需悬浮置顶）'],
+  ['统计信息放底栏左侧，右侧快捷键与指南','布局','footer 左侧 stats 实时统计，右侧 footer-actions，标签树区拉满宽度'],
+  ['链接开关默认关闭，开启后名称后浅灰短链接','树操作','show-link 类控制 .link 显隐，短链接用浅灰小字'],
+  ['双击标签打开网页','树操作','leaf ondblclick 调 openLeaf，标签置为已打开'],
+  ['标签右键精简：仅编辑/备注/删除','树操作','标签行已有叉号与复制按钮，右键不再放打开、复制、关闭；组右键无展开收起，窗右键保留折叠切换'],
+  ['分组 / 窗口行内复制按钮','复制','组行、窗行末尾独立复制图标，点击复制整组 / 整窗全部标签，按默认参数直出'],
+  ['组 / 窗重命名走右键菜单','树操作','组、窗右键「重命名」打开编辑弹窗；行节点 id 从 data-id / data-target 兼容取值；双击组名不再触发改名'],
+  ['分组单击名称切换折叠；分组右键移除展开收起','树操作','分组行单击节点即 toggleNode 切换展开/收起；分组右键菜单不再放展开/收起项；窗口右键保留折叠切换'],
+  ['新建分组入口','树操作','工具栏保留新建分组按钮；窗口右键可新建分组；组右键不再提供新建标签'],
+  ['移除复制选项弹窗与选框','复制','不再弹内容 / 格式选择框，复制一律按设置默认参数执行'],
+  ['标签行内复制按钮','复制','每个标签末尾独立复制图标，点击按默认参数复制该标签，无需走右键菜单'],
+  ['右键菜单项','树操作','窗口：打开全部 / 重命名 / 新建分组 / 关闭 / 折叠 / 删除；组：打开整组 / 重命名 / 关闭 / 删除（无折叠项）；标签：编辑 / 备注 / 删除；组右键不提供新建标签'],
+  ['备份与导出融合','设置','备份到本地即选格式后导出；备份到 GitHub 固定标准 HTML 书签格式'],
+  ['GitHub 备份配置参数','设置','仓库地址、分支、文件路径、定时周期，保存后按配置定时覆盖远端'],
+  ['分组/窗口操作作用于整组及其子标签','树操作','closeGroup/closeWindow/removeGroup 遍历全部子标签'],
+  ['打开整组 / 整窗已关闭标签','树操作','openGroup/openWindow 批量将子标签置为已打开'],
+  ['关闭按钮仅已打开标签显示','树操作','关闭按钮按 l.open 条件渲染，关闭态不显示 X'],
+  ['打开行高亮 / 关闭行灰色','树操作','已打开标签整行浅蓝高亮、标题深色；关闭标签整行灰显，仅保留灰点'],
+  ['启动归类：已打开网页归入当前窗口节点','树操作','打开插件时，当前浏览器已打开标签统一归入「当前浏览器窗口」节点'],
+  ['多窗口数据实时同步','架构','独立窗口版与侧边栏版共享同一棵标签树数据，一处改动两侧实时一致'],
+  ['分组真正嵌套为子组层级','树操作','分组可拖到另一分组下成为子组（children 递归树），也可拖到另一浏览器窗口；禁止拖入自身子组形成环，子组支持再下钻一层'],
+  ['分组按打开标签亮 / 灰','树操作','组内任一标签（含子组递归）已打开则组名亮色；全部关闭则整组灰色'],
+  ['窗口按打开标签亮 / 灰','树操作','窗口内所有分组均无打开标签则窗口灰色，存在任一打开标签则亮色'],
+  ['标签拖到其他组内','树操作','标签可落到另一标签之后、另一分组、另一窗口首个分组；跨组 / 跨窗随行'],
+  ['组拖到其他组 / 其他窗口','树操作','分组可嵌套到另一分组下（子组），也可搬入另一浏览器窗口；整组网页随行，子组可拖回顶层'],
+  ['窗口合并到其他窗口','树操作','源窗口全部分组并入目标窗口后源窗口移除；仅窗口之间可合并，窗口不可拖入组'],
+  ['拖拽交互细节','树操作','dragstart 拦截冒泡，避免外层窗口 / 分组覆盖拖拽源对象；拖动时高亮目标容器；禁止拖入自身 / 自身子组防环；结束后树结构实时刷新，持久化并同步浏览器标签树变更'],
+  ['拖拽完成后浏览器执行对应移动操作','树操作','原型 toast 提示；真实场景调用浏览器标签移动 API'],
+  ['键盘 ↑↓ 在标签间移动选中，Enter 跳转打开','树操作','visibleLeaves 按可见顺序遍历，setSelected 高亮描边，keydown 响应方向键与回车'],
+  ['快捷键与真实功能一一对应','其他','↑↓ 选中移动、Enter 打开、Delete 删除对象、Ctrl+L 定位当前、Ctrl+E 展收全部、Ctrl+Shift+L 显隐链接、Ctrl+O 打开整组、Ctrl+C 复制选中对象、Ctrl+H 历史、F11 全屏、Ctrl+Backspace 回收站、Ctrl+S 本地备份、Ctrl+D 切主题、Ctrl+P 置顶；未实现动作不列入表'],
+  ['单击标签设为选中','树操作','leaf onclick 调 setSelected'],
+  ['删除项进入回收站，可恢复或彻底删除','工具','deleted 数组暂存，回收站弹窗支持恢复 / 彻底删除，工具栏带数量角标'],
+  ['历史按钮跳转浏览器历史','工具','历史按钮演示 toast；真实场景打开浏览器 history 页面'],
+  ['全屏视图：独立页面 Raindrop 卡片风格','工具','新建独立全屏页面（非遮罩弹窗），与标签树共享同一 data；按分组聚合卡片，展示标题/URL/分组标签/开关状态，点击卡片打开标签，可保存抓取结果，退出返回原视图'],
+  ['复制范围按对象自动判定','复制','collectLeaves 按类型：单标签取一条，分组/窗口取整组全部'],
+  ['复制内容可选 仅 URL / 标题+URL','复制','content 选项，doCopy 分支拼接对应文本'],
+  ['复制格式可选 Markdown / TXT','复制','format 选项；Markdown 输出 [标题](URL)，TXT 标题与 URL 分行'],
+  ['复制按默认参数直出','复制','内容（URL / 标题+URL）与格式（Markdown / TXT）在设置内配好后一键复制，不再弹选项窗'],
+  ['设置中复制参数二级缩进排列','设置','“复制”为一级标题，内容/格式参数包进 sub-block 左缩进容器'],
+  ['外观分类：主题（默认深色，可选浅色）','设置','设置内「外观」Tab，主题单选默认深色，即时切换全站配色'],
+  ['外观分类：打开方式选框（独立窗口 / 侧边栏）','设置','「外观」内打开方式单选，点击选择独立窗口或侧边栏'],
+  ['外观分类：上次位置打开开关（默认启用）','设置','「窗口位置」开关默认开启，控制窗口沿用上次位置与尺寸'],
+
+  ['GitHub Issue 反馈入口','设置','gh-row 点击图标跳转项目提问题页面'],
+  ['设置归类为四个分类','设置','设置顶部 Tab：外观 / 备份与恢复 / 复制 / 反馈，点击切换分类面板'],
+
+  ['手动导入三类结构数据','设置','JSON 备份 / HTML 书签 / 浏览器原生，sub-block 内各带选择文件入口'],
+
+  ['快捷键表弹窗','其他','modalKeys 集中列出全部操作快捷键'],
+  ['需求清单独立成页，不放在应用底栏','其他','顶部第三个 Tab 打开独立台账页面，应用面板内不再保留清单入口'],
+  ['快速上手指南弹窗','其他','modalGuide 分步说明主要用法'],
+  ['黑白主题切换','其他','toggleTheme 切换根节点 data-theme 深浅色变量'],
+  ['置顶（仅独立窗口）：窗口原位保持不动','其他','置顶按钮高亮状态；侧边栏无此功能']
+];
+function renderReq(){
+  document.getElementById('reqBody').innerHTML = reqData.map((r,i)=>
+    `<tr><td>${i+1}</td><td>${r[0]}</td><td><span class="cat">${r[1]}</span></td><td>${r[2]}</td></tr>`
+  ).join('');
+  const cats={};
+  reqData.forEach(r=>cats[r[1]]=(cats[r[1]]||0)+1);
+  const meta=`<span><b>${reqData.length}</b> 项需求</span>`+Object.entries(cats).map(([k,v])=>`<span><b>${v}</b> ${k}</span>`).join('');
+  document.getElementById('reqMeta').innerHTML=meta;
+}
+
+applyTheme();
+renderTree('window');
+renderTree('side');
+renderReq();
+toast('已将当前浏览器已打开网页归入当前窗口节点，多窗口数据实时同步');
+</script>
+</body>
+</html>
