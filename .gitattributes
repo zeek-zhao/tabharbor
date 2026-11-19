@@ -1,0 +1,8 @@
+# 统一换行与编码（跨平台一致，CI 与本地无差异）
+* text=auto eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.zip binary
+*.woff binary

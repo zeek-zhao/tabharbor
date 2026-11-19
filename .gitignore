@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+*.zip
+
+# 系统与编辑器
+Thumbs.db
+.DS_Store
+*.swp
+
+# 日志与临时
+*.log
+tmp/
+
+# 本地凭据（绝不入库：token 只在 CI secret 与本地 git credential 中）
+.env
+.env.*
+credentials*
+*.pem
+
+# Git 工作区临时
+*.orig

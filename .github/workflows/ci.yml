@@ -1,0 +1,62 @@
+# TH2-CI-001 · 持续集成门禁：语法 / 红线 / 合规 / 格式化 / 提交人 / BDD / 打包
+# M0 精简集：静态实现验证与对比度随里程碑加入（见 docs/TH2-CI-001）
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # check-committer 需要完整提交历史
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 语法检查（全部 ESM 源码与工具脚本）
+        run: |
+          mkdir -p /tmp/th-chk
+          fail=0
+          for f in src/background/*.js src/core/*.js src/ui/*.js tools/*.mjs tests/*.mjs; do
+            [ -e "$f" ] || continue
+            cp "$f" /tmp/th-chk/check.mjs
+            node --check /tmp/th-chk/check.mjs || fail=1
+          done
+          exit $fail
+
+      - name: 红线扫描（0 命中）
+        run: npm run constraints
+
+      - name: 开源合规检查（LICENSE + 敏感信息扫描）
+        run: npm run compliance
+
+      - name: 代码格式化检查（Prettier）
+        run: npm run format:check
+
+      - name: 单一提交人门禁
+        run: npm run committer
+
+      - name: BDD 全量场景（TH2-BDD-001）
+        run: npm test
+
+      - name: 打包扩展（src → zip）
+        run: |
+          cd src
+          zip -r ../tabharbor-src.zip .
+        if: hashFiles('src/**') != ''
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabharbor-src
+          path: tabharbor-src.zip
+        if: hashFiles('src/**') != ''

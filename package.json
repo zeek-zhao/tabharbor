@@ -1,0 +1,19 @@
+{
+  "name": "tabharbor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TabHarbor v2 — Chrome MV3 标签管理扩展（窗口/分组/标签三层树，严格实时同步；TDD+BDD 闭环）",
+  "scripts": {
+    "test": "node tools/bdd-runner.mjs features",
+    "constraints": "node tools/check-constraints.mjs",
+    "compliance": "node tools/check-compliance.mjs",
+    "committer": "node tools/check-committer.mjs",
+    "contrast": "node tools/contrast-check.mjs prototypes/tabharbor.html",
+    "format": "prettier --no-error-on-unmatched-pattern --write \"src/**/*.js\" \"tools/*.mjs\" \"tests/*.mjs\"",
+    "format:check": "prettier --no-error-on-unmatched-pattern --check \"src/**/*.js\" \"tools/*.mjs\" \"tests/*.mjs\""
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}

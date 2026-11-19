@@ -1,0 +1,44 @@
+# TH2-CI-001 · 发布流水线：tag v* → 全部门禁 → 打包 zip → GitHub Release
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 发布前全量门禁
+        run: |
+          npm run constraints
+          npm run compliance
+          npm run format:check
+          npm run committer
+          npm test
+
+      - name: 打包扩展 zip（下载后解压即可加载）
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd src
+          zip -r "../tabharbor-v${VERSION}.zip" .
+
+      - name: 创建 GitHub Release 并上传资产
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tabharbor-v*.zip
+          generate_release_notes: true
