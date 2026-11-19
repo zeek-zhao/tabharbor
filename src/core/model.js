@@ -30,8 +30,9 @@ export function addGroup(m, title, parentId, id) {
 
 export function addTab(m, title, url, parentId, id) {
   const parent = findNode(m, parentId);
-  if (!parent || parent.kind !== "group") {
-    throw new Error(`标签必须挂在分组下：${parentId}`);
+  // M1-1（FR-024）：放开窗口容器——「当前浏览器窗口」节点的标签直接挂窗口下
+  if (!parent || parent.kind === "tab") {
+    throw new Error(`标签必须挂在分组或窗口下：${parentId}`);
   }
   const node = { id: id || newId("t"), kind: "tab", title, url, parentId, note: "" };
   m.tabs.push(node);
