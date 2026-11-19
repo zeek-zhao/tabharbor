@@ -14,10 +14,26 @@ function byTitle(title) {
 }
 
 /* ---------- mock chrome v2（SRS §3.2 同步模型最小集，随里程碑扩展） ---------- */
+function mkListener() {
+  const fns = [];
+  return {
+    fns,
+    addListener: (fn) => {
+      if (!fns.includes(fn)) fns.push(fn); // 幂等：SW 顶层自启 + 步骤显式重注册不产生重复
+    },
+  };
+}
+
 export function makeChromeMock() {
   const store = new Map();
-  const listeners = { storage: [] };
-  const calls = { storageSet: [] };
+  const listeners = {
+    storage: mkListener(),
+    action: mkListener(),
+    installed: mkListener(),
+    command: mkListener(),
+    ctxMenu: mkListener(),
+  };
+  const calls = { storageSet: [], windowsCreate: [], sidePanelOpen: [], ctxMenuCreate: [] };
   const chrome = {
     storage: {
       local: {
@@ -33,10 +49,10 @@ export function makeChromeMock() {
             store.set(k, v);
             changed[k] = { oldValue: undefined, newValue: v };
           }
-          for (const fn of listeners.storage) fn(changed, "local");
+          for (const fn of listeners.storage.fns) fn(changed, "local");
         },
       },
-      onChanged: { addListener: (fn) => listeners.storage.push(fn) },
+      onChanged: { addListener: (fn) => listeners.storage.addListener(fn) },
     },
     tabs: {
       onCreated: { addListener: () => {} },
@@ -47,8 +63,25 @@ export function makeChromeMock() {
       onDetached: { addListener: () => {} },
     },
     windows: {
+      create: async (o) => {
+        calls.windowsCreate.push(o);
+        return { id: 100 + calls.windowsCreate.length };
+      },
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
+    },
+    action: { onClicked: { addListener: (fn) => listeners.action.addListener(fn) } },
+    runtime: { onInstalled: { addListener: (fn) => listeners.installed.addListener(fn) } },
+    commands: { onCommand: { addListener: (fn) => listeners.command.addListener(fn) } },
+    contextMenus: {
+      create: (o) => calls.ctxMenuCreate.push(o),
+      removeAll: (cb) => cb && cb(),
+      onClicked: { addListener: (fn) => listeners.ctxMenu.addListener(fn) },
+    },
+    sidePanel: {
+      open: async (o) => {
+        calls.sidePanelOpen.push(o);
+      },
     },
   };
   return { chrome, store, listeners, calls };
@@ -296,4 +329,55 @@ step("那么", "窗口位置读回为 {} {} {} {}", async (x, y, w, h) => {
   const exp = { x: Number(x), y: Number(y), w: Number(w), h: Number(h) };
   if (JSON.stringify(b) !== JSON.stringify(exp))
     throw new Error(`lastBounds=${JSON.stringify(b)} ≠ ${JSON.stringify(exp)}`);
+});
+
+/* ---------- 场景组：manifest 与 service worker（FR-012~016） ---------- */
+step("假如", "service worker 监听已注册", async () => {
+  const sw = await import("../src/background/service-worker.js");
+  sw.initServiceWorker(); // ESM 缓存：每场景在当前 mock 上重新注册
+  ctx.sw = true;
+});
+
+step("当", "打开模式为 {}", async (v) => {
+  await ctx.mock.chrome.storage.local.set({ settings: { openMode: v } });
+});
+
+step("当", "点击工具栏图标", async () => {
+  for (const fn of ctx.mock.listeners.action.fns) await fn({ windowId: 7 });
+});
+
+step("那么", "打开了侧边栏且未新建窗口", () => {
+  if (ctx.mock.calls.sidePanelOpen.length !== 1)
+    throw new Error(`sidePanel.open=${ctx.mock.calls.sidePanelOpen.length} ≠ 1`);
+  if (ctx.mock.calls.windowsCreate.length !== 0)
+    throw new Error(`windows.create=${ctx.mock.calls.windowsCreate.length} ≠ 0`);
+});
+
+step("那么", "独立窗口已创建且地址为 {}", (url) => {
+  const c = ctx.mock.calls.windowsCreate;
+  if (c.length !== 1) throw new Error(`windows.create=${c.length} ≠ 1`);
+  if (c[0].url !== url || c[0].type !== "popup")
+    throw new Error(`窗口参数不符：url=${c[0].url} type=${c[0].type}`);
+});
+
+step("当", "右键工具栏图标选择打开侧边栏", async () => {
+  for (const fn of ctx.mock.listeners.ctxMenu.fns)
+    await fn({ menuItemId: "open-side" }, { windowId: 7 });
+});
+
+step("那么", "右键菜单包含 {}", (id) => {
+  if (!ctx.mock.calls.ctxMenuCreate.some((o) => o.id === id)) throw new Error(`右键菜单缺 ${id}`);
+});
+
+step("当", "插件首次安装", async () => {
+  for (const fn of ctx.mock.listeners.installed.fns) await fn({ reason: "install" });
+});
+
+step("当", "按下快捷键 {}", async (name) => {
+  for (const fn of ctx.mock.listeners.command.fns) await fn(name);
+});
+
+step("那么", "存储命令键为 {}", async (name) => {
+  const got = await ctx.mock.chrome.storage.local.get(["cmd"]);
+  if (!got.cmd || got.cmd.name !== name) throw new Error(`cmd.name=${got.cmd?.name} ≠ ${name}`);
 });
