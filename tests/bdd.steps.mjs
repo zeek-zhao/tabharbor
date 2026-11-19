@@ -381,3 +381,96 @@ step("那么", "存储命令键为 {}", async (name) => {
   const got = await ctx.mock.chrome.storage.local.get(["cmd"]);
   if (!got.cmd || got.cmd.name !== name) throw new Error(`cmd.name=${got.cmd?.name} ≠ ${name}`);
 });
+
+/* ---------- M1-1 启动归类与打开态派生（05_align.feature，FR-024/025/027/028，issue #17） ---------- */
+import * as align from "../src/core/align.js";
+
+const tabUrl = (t) => `https://example.com/${encodeURIComponent(t)}`;
+const SAMPLE_3 = [
+  { title: "MDN IndexedDB", url: "https://developer.mozilla.org/docs/Web/API/IndexedDB" },
+  { title: "GitHub", url: "https://github.com/zeek-zhao/tabharbor" },
+  { title: "邮件", url: "https://mail.example.com/" },
+];
+
+step("假如", "浏览器打开了 {} 个标签页", (n) => {
+  const k = Number(n);
+  ctx.openTabs = k === 0 ? [] : SAMPLE_3.slice(0, k);
+});
+
+step("假如", "浏览器打开了标签 {}", (title) => {
+  ctx.openTabs = [{ title, url: tabUrl(title) }];
+});
+
+step("假如", "浏览器标签页变为 {} 个", (n) => {
+  const k = Number(n);
+  ctx.openTabs = k === 0 ? [] : SAMPLE_3.slice(0, k);
+});
+
+step("假如", "树模型有手工窗口含开发分组和标签 {}", (tabTitle) => {
+  const w = model.addWindow(ctx.m, "手工窗口");
+  const g = model.addGroup(ctx.m, "开发", w.id);
+  const t = model.addTab(ctx.m, tabTitle, tabUrl(tabTitle), g.id);
+  ctx.named["手工窗口"] = w;
+  ctx.named["开发"] = g;
+  ctx.named[tabTitle] = t;
+});
+
+step("当", "执行启动归类", () => {
+  align.bootAlign(ctx.m, ctx.openTabs || []);
+});
+
+step("当", "再次执行启动归类", () => {
+  align.bootAlign(ctx.m, ctx.openTabs || []);
+});
+
+step("当", "计算打开态", () => {
+  ctx.openIds = align.computeOpenIds(
+    ctx.m,
+    (ctx.openTabs || []).map((t) => t.url)
+  );
+});
+
+function openStateOf(title) {
+  const node = ctx.named[title] || findAnyByTitle(title);
+  return ctx.openIds && ctx.openIds.has(node.id) ? "打开" : "关闭";
+}
+
+function findAnyByTitle(title) {
+  for (const k of ["windows", "groups", "tabs"]) {
+    const hit = ctx.m[k].find((x) => x.title === title);
+    if (hit) return hit;
+  }
+  throw new Error(`未找到节点：${title}`);
+}
+
+step("那么", "存在窗口节点 {}", (title) => {
+  const hit = ctx.m.windows.find((w) => w.title === title);
+  if (!hit) throw new Error(`窗口节点不存在：${title}`);
+  ctx.named[title] = hit;
+  ctx.curWin = hit;
+});
+
+step("那么", "该窗口含 {} 个标签节点", (n) => {
+  const win = ctx.m.windows.find((w) => w.title === "当前浏览器窗口");
+  const kids = model.childrenOf(ctx.m, win.id).filter((x) => x.kind === "tab");
+  if (kids.length !== Number(n)) throw new Error(`标签数=${kids.length} ≠ ${n}`);
+});
+
+step("那么", "窗口节点总数为 {}", (n) => {
+  if (ctx.m.windows.length !== Number(n)) throw new Error(`窗口数=${ctx.m.windows.length} ≠ ${n}`);
+});
+
+step("那么", "标签 {} 的打开态为 {}", (title, s) => {
+  const got = openStateOf(title);
+  if (got !== s) throw new Error(`标签 ${title}=${got} ≠ ${s}`);
+});
+
+step("那么", "分组 {} 的打开态为 {}", (title, s) => {
+  const got = openStateOf(title);
+  if (got !== s) throw new Error(`分组 ${title}=${got} ≠ ${s}`);
+});
+
+step("那么", "窗口 {} 的打开态为 {}", (title, s) => {
+  const got = openStateOf(title);
+  if (got !== s) throw new Error(`窗口 ${title}=${got} ≠ ${s}`);
+});
