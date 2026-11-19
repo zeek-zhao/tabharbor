@@ -33,7 +33,17 @@ export function makeChromeMock() {
     command: mkListener(),
     ctxMenu: mkListener(),
   };
-  const calls = { storageSet: [], windowsCreate: [], sidePanelOpen: [], ctxMenuCreate: [] };
+  const calls = {
+    storageSet: [],
+    windowsCreate: [],
+    sidePanelOpen: [],
+    ctxMenuCreate: [],
+    tabsCreate: [],
+    tabsUpdate: [],
+    tabsRemove: [],
+    winFocus: [],
+    clipboard: [],
+  };
   const chrome = {
     storage: {
       local: {
@@ -55,6 +65,18 @@ export function makeChromeMock() {
       onChanged: { addListener: (fn) => listeners.storage.addListener(fn) },
     },
     tabs: {
+      create: async (o) => {
+        calls.tabsCreate.push(o);
+        return { id: 900 + calls.tabsCreate.length };
+      },
+      update: async (id, o) => {
+        calls.tabsUpdate.push({ id, o });
+        return { id };
+      },
+      remove: async (ids) => {
+        calls.tabsRemove.push(...(Array.isArray(ids) ? ids : [ids]));
+      },
+      query: async () => ctx.openTabs.map((t, i) => ({ id: i + 1, url: t.url, windowId: 1 })),
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
       onUpdated: { addListener: () => {} },
@@ -66,6 +88,10 @@ export function makeChromeMock() {
       create: async (o) => {
         calls.windowsCreate.push(o);
         return { id: 100 + calls.windowsCreate.length };
+      },
+      update: async (id, o) => {
+        if (o && o.focused) calls.winFocus.push(id);
+        return { id };
       },
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
@@ -546,4 +572,79 @@ step("那么", "主题设置缺省解析为 {}", (want) => {
 step("那么", "主题设置 {} 解析为 {}", (theme, want) => {
   const got = shell.themeOf({ theme });
   if (got !== want) throw new Error(`themeOf({theme:${theme}})=${got} ≠ ${want}`);
+});
+
+/* ---------- M1-3 打开/关闭/复制（07_ops.feature，FR-009/011/016/020/021，issue #19） ---------- */
+import * as ops from "../src/core/tabs-op.js";
+
+const openUrlsOf = () => new Set((ctx.openTabs || []).map((t) => t.url));
+
+step("假如", "标签 {} 的网页已在浏览器打开", (title) => {
+  ctx.openTabs = ctx.openTabs || [];
+  const url = tabUrl(title);
+  if (!ctx.openTabs.some((t) => t.url === url)) ctx.openTabs.push({ title, url });
+});
+
+step("假如", "开发分组含子分组 {} 且含标签 {} 与 {}", (subTitle, t1, t2) => {
+  const dev = ctx.named["开发"];
+  const sub = model.addGroup(ctx.m, subTitle, dev.id);
+  ctx.named[subTitle] = sub;
+  // 背景里可能已建过 t1（如 GitHub）——存在则复用，避免重复节点
+  if (!ctx.named[t1]) ctx.named[t1] = model.addTab(ctx.m, t1, tabUrl(t1), sub.id);
+  ctx.named[t2] = model.addTab(ctx.m, t2, tabUrl(t2), sub.id);
+});
+
+step("当", "双击标签 {}", async (title) => {
+  ctx.openResult = await ops.openTab(ctx.mock.chrome, ctx.named[title], openUrlsOf());
+});
+
+step("当", "复制 {} 的整树内容", (title) => {
+  ctx.copied = ops.formatCopy(ctx.m, ctx.named[title].id, {
+    copyContent: "both",
+    copyFormat: "md",
+  });
+});
+
+step("当", "把复制内容写入剪贴板", async () => {
+  const fake = { writeText: async (t) => ctx.mock.calls.clipboard.push(t) };
+  await ops.copyToClipboard(ctx.copied, fake);
+});
+
+step("当", "关闭 {} 的全部网页", async (title) => {
+  ctx.closeCount = await ops.closeNode(ctx.mock.chrome, ctx.m, ctx.named[title].id);
+});
+
+step("当", "对 {} 执行打开全部", async (title) => {
+  ctx.openCount = await ops.openAll(ctx.mock.chrome, ctx.m, ctx.named[title].id, openUrlsOf());
+});
+
+step("那么", "新建了 {} 个浏览器标签页", (n) => {
+  if (ctx.mock.calls.tabsCreate.length !== Number(n))
+    throw new Error(`tabs.create=${ctx.mock.calls.tabsCreate.length} ≠ ${n}`);
+});
+
+step("那么", "现有标签页被聚焦且未新建", () => {
+  const c = ctx.mock.calls;
+  if (c.tabsCreate.length !== 0) throw new Error(`tabs.create=${c.tabsCreate.length} ≠ 0`);
+  if (c.tabsUpdate.length !== 1) throw new Error(`tabs.update=${c.tabsUpdate.length} ≠ 1`);
+  if (c.tabsUpdate[0].o.active !== true) throw new Error("update 未置 active");
+  if (c.winFocus.length !== 1) throw new Error(`windows.update focused=${c.winFocus.length} ≠ 1`);
+});
+
+step("那么", "复制内容包含 {}", (needle) => {
+  if (!String(ctx.copied).includes(needle)) throw new Error(`复制内容缺少：${needle}`);
+});
+
+step("那么", "剪贴板收到 {} 次写入", (n) => {
+  if (ctx.mock.calls.clipboard.length !== Number(n))
+    throw new Error(`clipboard=${ctx.mock.calls.clipboard.length} ≠ ${n}`);
+});
+
+step("那么", "浏览器关闭了 {} 个标签页", (n) => {
+  if (ctx.mock.calls.tabsRemove.length !== Number(n))
+    throw new Error(`tabs.remove=${ctx.mock.calls.tabsRemove.length} ≠ ${n}`);
+});
+
+step("那么", "树模型中的标签节点仍保留 {} 个", (n) => {
+  if (ctx.m.tabs.length !== Number(n)) throw new Error(`模型标签=${ctx.m.tabs.length} ≠ ${n}`);
 });
