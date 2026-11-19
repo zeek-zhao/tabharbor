@@ -23,10 +23,10 @@
 那么 "src/window/window.html" 包含 "btnSettings"
 
 场景: 快捷栏图标序号统一（FR-005）
-那么 "src/window/window.html" 的快捷栏图标序为 "locate,expand,collapse,links,trash,history,fullscreen,theme,pip"
+那么 "src/window/window.html" 的快捷栏图标序为 "locate,expand,collapse,add-group,links,trash,history,fullscreen,theme,pip"
 
 场景: 侧边栏快捷栏无置顶（FR-006）
-那么 "src/sidebar/sidebar.html" 的快捷栏图标序为 "locate,expand,collapse,links,trash,history,fullscreen,theme"
+那么 "src/sidebar/sidebar.html" 的快捷栏图标序为 "locate,expand,collapse,add-group,links,trash,history,fullscreen,theme"
 那么 "src/sidebar/sidebar.html" 不包含 "btnPip"
 
 场景: 底栏统计与快捷键指南入口（FR-007）
