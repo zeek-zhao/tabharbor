@@ -3,6 +3,7 @@
 //   opts.openIds   Set<nodeId> —— 打开态派生集合（align.computeOpenIds 产出，组/窗含其中即亮）
 //   opts.linkShow  boolean —— 链接开关（settings.linkShow，默认关）
 //   opts.selectedId string —— 当前选中节点（单击设置）
+// M1-4：opts.collapsed Set<groupId>（FR-013 折叠的分组不渲染子树）
 
 export function renderTree(m, opts = {}) {
   const out = [];
@@ -19,6 +20,8 @@ function renderChildren(m, parentId, opts, depth) {
   const out = [];
   for (const g of groups) {
     out.push(nodeRow(g, opts, depth));
+    // FR-013：折叠的分组不渲染子树
+    if (opts.collapsed && opts.collapsed.has(g.id)) continue;
     out.push(renderChildren(m, g.id, opts, depth + 1));
   }
   for (const t of tabs) out.push(nodeRow(t, opts, depth));

@@ -240,7 +240,7 @@ step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
   const html = repoFile(rel);
   const m = html.match(/<div id="quickbar"[\s\S]*?<\/div>/);
   if (!m) throw new Error(`${rel} 缺少快捷栏`);
-  const acts = [...m[0].matchAll(/data-act="([a-z]+)"/g)].map((x) => x[1]).join(",");
+  const acts = [...m[0].matchAll(/data-act="([a-z-]+)"/g)].map((x) => x[1]).join(",");
   if (acts !== expect) throw new Error(`快捷栏图标序不符：${acts} ≠ ${expect}`);
 });
 
@@ -647,4 +647,99 @@ step("那么", "浏览器关闭了 {} 个标签页", (n) => {
 
 step("那么", "树模型中的标签节点仍保留 {} 个", (n) => {
   if (ctx.m.tabs.length !== Number(n)) throw new Error(`模型标签=${ctx.m.tabs.length} ≠ ${n}`);
+});
+
+/* ---------- M1-4 右键菜单全集与编辑（08_menu.feature，FR-004/010/012/013/014/017，issue #20） ---------- */
+import * as editOp from "../src/core/edit-op.js";
+import * as menu from "../src/ui/menu.js";
+
+step("那么", "{}右键菜单模板的菜单项数为 {}", (kind, n) => {
+  const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
+  const count = (html.match(/data-act=/g) || []).length;
+  if (count !== Number(n)) throw new Error(`菜单项数=${count} ≠ ${n}`);
+});
+
+step("那么", "{}右键菜单模板包含 {}", (kind, needle) => {
+  const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
+  if (!html.includes(needle)) throw new Error(`${kind}菜单缺 ${needle}`);
+});
+
+step("那么", "{}右键菜单模板不包含 {}", (kind, needle) => {
+  const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
+  if (html.includes(needle)) throw new Error(`${kind}菜单不应含 ${needle}`);
+});
+
+step("那么", "编辑弹窗模板包含 {}", (needle) => {
+  if (!menu.editDialogHtml().includes(needle)) throw new Error(`编辑弹窗缺 ${needle}`);
+});
+
+step("那么", "编辑弹窗模板不包含 {}", (needle) => {
+  if (menu.editDialogHtml().includes(needle)) throw new Error(`编辑弹窗不应含 ${needle}`);
+});
+
+step("当", "通过重命名把 {} 改为 {}", (oldTitle, newTitle) => {
+  const n = ctx.named[oldTitle];
+  editOp.renameNode(ctx.m, n.id, newTitle);
+  ctx.named[newTitle] = n;
+});
+
+step("那么", "节点 {} 的标题为 {}", (title, expect) => {
+  const n = ctx.named[title];
+  if (n.title !== expect) throw new Error(`标题=${n.title} ≠ ${expect}`);
+});
+
+step("那么", "双击分组名不触发重命名", () => {
+  const shellSrc = repoFile("src/ui/shell.js");
+  const renderSrc = repoFile("src/ui/render.js");
+  if (/dblclick[\s\S]{0,200}rename/.test(shellSrc) || /rename/.test(renderSrc)) {
+    throw new Error("存在双击重命名路径");
+  }
+});
+
+step("当", "设置 {} 的备注为 {}", (title, note) => {
+  editOp.setNote(ctx.m, ctx.named[title].id, note);
+});
+
+step("那么", "节点 {} 的备注为 {}", (title, note) => {
+  if (ctx.named[title].note !== note) throw new Error(`备注=${ctx.named[title].note} ≠ ${note}`);
+});
+
+step("当", "按关键词 {} 过滤树视图", (q) => {
+  ctx.view = editOp.searchFilter(ctx.m, q);
+});
+
+step("那么", "过滤视图包含 {}", (title) => {
+  const all = [...ctx.view.windows, ...ctx.view.groups, ...ctx.view.tabs];
+  if (!all.some((n) => n.title === title)) throw new Error(`过滤视图缺 ${title}`);
+});
+
+step("那么", "过滤视图不包含 {}", (title) => {
+  const all = [...ctx.view.windows, ...ctx.view.groups, ...ctx.view.tabs];
+  if (all.some((n) => n.title === title)) throw new Error(`过滤视图不应含 ${title}`);
+});
+
+step("当", "在 {} 下新建分组 {}", (winTitle, gTitle) => {
+  const w = ctx.named[winTitle];
+  ctx.named[gTitle] = editOp.createGroupAt(ctx.m, w.id, gTitle);
+});
+
+step("那么", "侧边栏页快捷栏包含新建分组按钮", () => {
+  if (!repoFile("src/sidebar/sidebar.html").includes('data-act="add-group"')) {
+    throw new Error("侧边栏快捷栏缺新建分组按钮");
+  }
+});
+
+step("当", "折叠分组 {}", (title) => {
+  const g = ctx.named[title];
+  ctx.collapsed = editOp.collapsedToggle(ctx.collapsed || new Set(), g.id);
+});
+
+step("那么", "渲染的树视图不包含 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (html.includes(`>${title}<`)) throw new Error(`渲染视图不应含 ${title}`);
+});
+
+step("那么", "渲染的树视图包含 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (!html.includes(`>${title}<`)) throw new Error(`渲染视图缺 ${title}`);
 });
