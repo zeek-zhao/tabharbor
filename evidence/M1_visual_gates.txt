@@ -1,0 +1,95 @@
+M1-2 树渲染视觉态 · 本地门禁证据（2026-11-19 23:08)
+== BDD ==
+
+> tabharbor@0.1.0 test
+> node tools/bdd-runner.mjs features
+
+== TabHarbor BDD 回归（TH-BDD-001，零依赖 runner）==
+功能: 工程骨架冒烟（00_smoke.feature）
+  PASS  场景: 冒烟流水线可用（2 步骤）
+功能: 树数据模型 v2 与存储持久化（01_model.feature）
+  PASS  场景: 三层树模型正确组装（窗口→嵌套分组→标签）（9 步骤）
+  PASS  场景: 分组拖入另一分组成为真嵌套子组（9 步骤）
+  PASS  场景: 拖入自身子分组形成环被拒绝（8 步骤）
+  PASS  场景: 窗口拖到分组下被拒绝（窗口只能合并到另一窗口）（8 步骤）
+  PASS  场景: 递归后代覆盖子组与其标签（整组复制/关闭的数据基础）（8 步骤）
+  PASS  场景: 模型快照写入 chrome.storage 后读回一致（9 步骤）
+功能: 双模式壳窗口（侧边栏页 / 独立窗口页）（02_shell.feature）
+  PASS  场景: 双模式复用同一渲染入口与数据源（4 步骤）
+  PASS  场景: 独立窗口标题栏有三个窗口按钮（3 步骤）
+  PASS  场景: 侧边栏标题栏只有关闭按钮（2 步骤）
+  PASS  场景: 两页均有搜索栏与设置入口（4 步骤）
+  PASS  场景: 快捷栏图标序号统一（FR-005）（1 步骤）
+  PASS  场景: 侧边栏快捷栏无置顶（FR-006）（2 步骤）
+  PASS  场景: 底栏统计与快捷键指南入口（FR-007）（5 步骤）
+功能: 存储层 v2（默认设置 / 合并写入 / 模型持久化 / 回收站 / 变更广播）（03_storage.feature）
+  PASS  场景: 空存储读出全部默认设置（FR-009）（10 步骤）
+  PASS  场景: 设置合并写入不覆盖其他项（FR-009）（6 步骤）
+  PASS  场景: 模型三键持久化读回一致（FR-008）（7 步骤）
+  PASS  场景: 回收站先入后出可读回（FR-010）（6 步骤）
+  PASS  场景: 模型写入触发变更广播（FR-008 实时同步基础）（4 步骤）
+  PASS  场景: 窗口位置记忆读写一致（FR-011）（3 步骤）
+功能: manifest 与 service worker（M0-6）（04_manifest_sw.feature）
+  PASS  场景: manifest 权限最小化（FR-012）（6 步骤）
+  PASS  场景: 快捷键命令四个预置键（FR-012）（5 步骤）
+  PASS  场景: 点击图标在侧边栏模式下打开侧边栏（FR-013）（5 步骤）
+  PASS  场景: 点击图标在窗口模式下打开独立窗口（FR-013）（5 步骤）
+  PASS  场景: 右键工具栏图标打开侧边栏（FR-014）（5 步骤）
+  PASS  场景: 全新安装写入默认设置（FR-015）（5 步骤）
+  PASS  场景: 快捷键命令广播到存储（FR-016）（4 步骤）
+功能: M1-1 启动归类与打开态派生（05_align.feature）
+  PASS  场景: 启动归类建立当前浏览器窗口节点（6 步骤）
+  PASS  场景: 启动归类幂等不重复建窗（7 步骤）
+  PASS  场景: 启动归类同步已关闭的标签（7 步骤）
+  PASS  场景: 打开态派生标签命中（7 步骤）
+  PASS  场景: 分组与窗口递归点亮（8 步骤）
+  PASS  场景: 全部关闭时窗口灰显（8 步骤）
+  PASS  场景: 模型变更实时广播（4 步骤）
+功能: 树渲染视觉态（06_visual.feature）
+  PASS  场景: 关闭按钮仅已打开标签显示（8 步骤）
+  PASS  场景: 打开行高亮关闭行灰色（8 步骤）
+  PASS  场景: 单击标签设为选中（9 步骤）
+  PASS  场景: 链接开关默认关开启后显示短链接（10 步骤）
+  PASS  场景: 主题默认深色即时切换（8 步骤）
+  PASS  场景: 样式类与状态按钮齐备（8 步骤）
+
+汇总: 40/40 场景 PASS
+
+== 红线 ==
+
+> tabharbor@0.1.0 constraints
+> node tools/check-constraints.mjs
+
+D-016 静态禁止清单 · A 类红线（CR-005 修订 v1.0）
+扫描目录：C:\Users\zeek.zhao.ROLLINGWIRELESS\.dsh\bot\workspace\tabharbor-v2\src
+扫描文件：7 个（*.js / *.json / *.mjs）
+规则条数：12
+
+结果：0 项命中 —— 静态红线检查通过。
+
+== 合规 ==
+
+> tabharbor@0.1.0 compliance
+> node tools/check-compliance.mjs
+
+开源合规检查 · LICENSE + 敏感信息扫描
+LICENSE：存在且为 MIT License
+扫描文件：42 个 · 模式：7 组
+
+结果：合规 0 项命中 —— 开源合规检查通过。
+
+== 格式 ==
+
+> tabharbor@0.1.0 format:check
+> prettier --no-error-on-unmatched-pattern --check "src/**/*.js" "tools/*.mjs" "tests/*.mjs"
+
+Checking formatting...
+All matched files use Prettier code style!
+
+== 提交人 ==
+
+> tabharbor@0.1.0 committer
+> node tools/check-committer.mjs
+
+扫描提交数: 11/18（基点 HEAD，merge commit 跳过）
+汇总: 全部提交人均为唯一授权邮箱 —— 门禁通过

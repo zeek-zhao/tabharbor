@@ -30,3 +30,13 @@ body { background: var(--bg1); color: var(--fg1); font: 13px/1.5 "Segoe UI", "Mi
 .footer { display: flex; align-items: center; justify-content: space-between; padding: 5px 10px; border-top: 1px solid var(--line1); background: var(--bg2); color: var(--fg2); font-size: 12px; }
 .footer-actions { display: flex; gap: 2px; }
 .tip { position: fixed; display: none; background: var(--bg3); color: var(--fg1); border: 1px solid var(--line2); border-radius: 6px; padding: 3px 8px; font-size: 12px; pointer-events: none; z-index: 9; }
+
+/* M1-2 视觉态（FR-022/023/036/008，issue #18） */
+.node-open .tt { color: var(--fg1); }
+.node-open .nico { color: var(--ok); }
+.node-closed .tt { color: var(--fg2); }
+.node-closed .nico { color: var(--line2); }
+.node-selected { outline: 1px solid var(--accent); background: var(--accent-bg); }
+.node-link { color: var(--fg2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.close { flex: 0 0 auto; background: transparent; color: var(--fg2); border: none; border-radius: 4px; padding: 0 4px; cursor: pointer; font-size: 12px; line-height: 1.4; }
+.close:hover { background: var(--bg3); color: var(--warn); }
