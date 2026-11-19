@@ -184,3 +184,116 @@ step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
   const acts = [...m[0].matchAll(/data-act="([a-z]+)"/g)].map((x) => x[1]).join(",");
   if (acts !== expect) throw new Error(`快捷栏图标序不符：${acts} ≠ ${expect}`);
 });
+
+/* ---------- 场景组：存储层 v2（FR-008~011，SRS §3.2） ---------- */
+import * as store from "../src/core/store.js";
+
+step("当", "首次读取存储层", async () => {
+  ctx.all = await store.loadAll();
+});
+
+step("那么", "默认主题是 {}", (v) => {
+  if (ctx.all.settings.theme !== v) throw new Error(`theme=${ctx.all.settings.theme} ≠ ${v}`);
+});
+
+step("那么", "默认打开模式是 {}", (v) => {
+  if (ctx.all.settings.openMode !== v)
+    throw new Error(`openMode=${ctx.all.settings.openMode} ≠ ${v}`);
+});
+
+step("那么", "默认恢复上次会话是 {}", (v) => {
+  const got = String(ctx.all.settings.restoreLast);
+  if (got !== (v === "on" ? "true" : "false")) throw new Error(`restoreLast=${got} ≠ ${v}`);
+});
+
+step("那么", "默认复制内容是 {}", (v) => {
+  if (ctx.all.settings.copyContent !== v)
+    throw new Error(`copyContent=${ctx.all.settings.copyContent} ≠ ${v}`);
+});
+
+step("那么", "默认复制格式是 {}", (v) => {
+  if (ctx.all.settings.copyFormat !== v)
+    throw new Error(`copyFormat=${ctx.all.settings.copyFormat} ≠ ${v}`);
+});
+
+step("那么", "默认链接徽标是 {}", (v) => {
+  const got = String(ctx.all.settings.linkShow);
+  if (got !== (v === "on" ? "true" : "false")) throw new Error(`linkShow=${got} ≠ ${v}`);
+});
+
+step("那么", "默认备份频率是 {}", (v) => {
+  if (ctx.all.settings.bkFreq !== v) throw new Error(`bkFreq=${ctx.all.settings.bkFreq} ≠ ${v}`);
+});
+
+step("那么", "模型三键为空数组", () => {
+  for (const k of store.MODEL_KEYS) {
+    if (!Array.isArray(ctx.all[k]) || ctx.all[k].length !== 0) throw new Error(`${k} 应为空数组`);
+  }
+});
+
+step("当", "把复制格式改为 {}", async (v) => {
+  await store.saveSettings({ copyFormat: v });
+  ctx.all = await store.loadAll();
+});
+
+step("那么", "复制格式是 {}", (v) => {
+  if (ctx.all.settings.copyFormat !== v)
+    throw new Error(`copyFormat=${ctx.all.settings.copyFormat} ≠ ${v}`);
+});
+
+step("那么", "默认主题仍是 {}", (v) => {
+  if (ctx.all.settings.theme !== v) throw new Error(`theme=${ctx.all.settings.theme} ≠ ${v}`);
+});
+
+step("那么", "默认备份频率仍是 {}", (v) => {
+  if (ctx.all.settings.bkFreq !== v) throw new Error(`bkFreq=${ctx.all.settings.bkFreq} ≠ ${v}`);
+});
+
+step("当", "保存模型快照", async () => {
+  ctx.saved = { windows: ctx.m.windows, groups: ctx.m.groups, tabs: ctx.m.tabs };
+  await store.saveModel(ctx.saved);
+});
+
+step("那么", "模型三键读回与写入一致", async () => {
+  const all = await store.loadAll();
+  for (const k of store.MODEL_KEYS) {
+    if (JSON.stringify(all[k]) !== JSON.stringify(ctx.saved[k])) throw new Error(`${k} 读回不一致`);
+  }
+});
+
+step("当", "把标题为 {} 的窗口快照放入回收站", async (title) => {
+  ctx.trash = await store.appendTrash({ kind: "window", title, payload: null });
+});
+
+step("那么", "回收站栈顶的标题是 {}", (title) => {
+  if (!ctx.trash.length || ctx.trash[0].title !== title)
+    throw new Error(`栈顶=${ctx.trash[0]?.title} ≠ ${title}`);
+});
+
+step("那么", "回收站共 {} 条", (n) => {
+  if (ctx.trash.length !== Number(n)) throw new Error(`trash=${ctx.trash.length} ≠ ${n}`);
+});
+
+step("假如", "已订阅存储层模型变更", () => {
+  ctx.modelEvents = 0;
+  store.onModelChanged(() => {
+    ctx.modelEvents += 1;
+  });
+});
+
+step("那么", "收到至少 {} 次存储变更广播", (n) => {
+  if (ctx.modelEvents < Number(n)) throw new Error(`广播数=${ctx.modelEvents} < ${n}`);
+});
+
+step("当", "保存窗口位置 {} {} {} {}", (x, y, w, h) => {
+  ctx.bounds = { x: Number(x), y: Number(y), w: Number(w), h: Number(h) };
+  return store.saveBounds(ctx.bounds);
+});
+
+step("那么", "窗口位置读回为 {} {} {} {}", async (x, y, w, h) => {
+  const all = await store.loadAll();
+  const b = all.lastBounds;
+  const exp = { x: Number(x), y: Number(y), w: Number(w), h: Number(h) };
+  if (JSON.stringify(b) !== JSON.stringify(exp))
+    throw new Error(`lastBounds=${JSON.stringify(b)} ≠ ${JSON.stringify(exp)}`);
+});
