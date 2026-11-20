@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node tools/bdd-runner.mjs features && node samples/validate-samples.mjs",
     "test:samples": "node samples/validate-samples.mjs",
+    "test:e2e": "node tests/e2e-chromium.mjs",
     "constraints": "node tools/check-constraints.mjs",
     "compliance": "node tools/check-compliance.mjs",
     "committer": "node tools/check-committer.mjs",
@@ -15,6 +16,7 @@
     "format:check": "prettier --no-error-on-unmatched-pattern --check \"src/**/*.js\" \"tools/*.mjs\" \"tests/*.mjs\""
   },
   "devDependencies": {
+    "playwright": "^1.65.1",
     "prettier": "^3.3.3"
   }
 }

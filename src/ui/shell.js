@@ -241,3 +241,9 @@ export async function bootShell(root) {
   });
   return m;
 }
+
+// TH2-E2E-001：真实浏览器页面装载本模块时自动启动（此前仅 BDD 直接调用 bootShell，
+// 真实页面从未启动——Playwright 冒烟发现）。Node/BDD 导入环境无 document，守卫跳过。
+if (typeof document !== "undefined" && document.querySelector("#side")) {
+  void bootShell(document);
+}

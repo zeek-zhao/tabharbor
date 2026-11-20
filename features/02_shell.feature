@@ -35,3 +35,7 @@
 那么 "src/sidebar/sidebar.html" 包含 "btnGuide"
 那么 "src/window/window.html" 包含 "stats"
 那么 "src/window/window.html" 包含 "btnGuide"
+
+场景: 页面装载壳模块即自动启动（TH2-E2E-001 真实页面渲染契约）
+那么 "src/ui/shell.js" 包含 "document.querySelector"
+那么 "src/ui/shell.js" 包含 "bootShell(document)"

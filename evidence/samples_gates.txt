@@ -36,3 +36,9 @@ LICENSE：存在且为 MIT License · 扫描文件：88 个 · 模式：7 组
    并补上缺失的「JSON 样例网址全部是 example.com 占位地址」注册。
 3. 样例数据不含真实 URL（example.com 占位）；HTML 格式天然无法保存窗口/设置/备注/回收站。
 4. M3-1（issue #27 / PR #28）仍待用户手工 Chrome 验收；本批改动未触碰 src/ 发布代码。
+
+## E2E 集成证据（TH2-E2E-001）2026-11-20 22:30
+- Playwright chromium 安装 OK；tests/e2e-chromium.mjs 本机 6/6 PASS（真实 chrome-extension:// 加载、空态渲染、样例实时渲染 2窗/5组/10标、嵌套组+单击选中、侧边栏同源渲染）
+- 发现并修复真实缺陷：bootShell 无页面调用方 → src/ui/shell.js 自启动守卫；02_shell.feature 增静态契约场景，npm test 78/78
+- 门禁：format:check OK / constraints 0 命中 / compliance 0 命中 / committer 唯一邮箱 / contrast 全达标 / node --check tests/e2e-chromium.mjs OK
+- CI 新增 e2e job：ubuntu-latest + npx playwright install chromium --with-deps + npm run test:e2e

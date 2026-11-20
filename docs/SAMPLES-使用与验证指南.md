@@ -83,6 +83,18 @@ npm run format:check
 
 当前 BDD runner 通过 mock Chrome API 检查业务逻辑；它并非真实 Chrome MV3 Service Worker / Permissions API / Side Panel 集成测试。Playwright 是否能加载浏览器扩展还需通过 CI 环境实测；测试名称、报告必须区分“模拟 DOM/浏览器 API”与真实 Chrome 手工验收。任何真实浏览器手工检查结果应记录 Chrome 版本、操作步骤、预期/实际结果与截图或日志，且不可提交敏感 token。
 
-## 7. 问题记录模板
+## 7. 真实浏览器自动化冒烟（Playwright，TH2-E2E-001）
+
+本仓库已加入真实 Chromium 冒烟测试 `tests/e2e-chromium.mjs`（`npm run test:e2e`），并在 CI `e2e` job（ubuntu-latest，新无头 Chromium + `--load-extension`）中执行。它验证的是真实 MV3 页面，而非 mock：
+
+1. 扩展以 `--disable-extensions-except`/`--load-extension` 加载，Service Worker 真实注册；
+2. 独立窗口页空存储渲染空态（真实 `chrome.storage.local`）；
+3. 通过页面内真实 `chrome.storage.local.set` 播种 `samples/datasets/tabharbor-sample.json`，`chrome.storage.onChanged` 触发实时重渲染（2 窗口 / 5 分组 / 10 标签）；
+4. 嵌套组「浏览器 API」可见；单击标签出现 `node-selected`（FR-036）；
+5. 侧边栏页从同一存储渲染同一棵树（FR-001 双模式同数据源）。
+
+诚实边界：这只覆盖「扩展能加载 + 壳页面渲染 + 存储联动」，不等于 tabs/sidePanel/contextMenus/downloads 等 API 的完整 MV3 覆盖；后者仍以人工 Chrome 验收为准（见第 5 节）。该冒烟曾发现真实缺陷：`bootShell` 仅被测试调用、真实页面从未启动（TH2-LEARNINGS 2026-11-20 条目），修复方式为 `src/ui/shell.js` 页面环境自启动守卫 + `02_shell.feature` 静态契约场景。
+
+## 8. 问题记录模板
 
 每次发现偏差，请记录：阶段/Issue、需求编号、样例文件、Chrome/Node 版本、操作步骤、预期结果、实际结果、复现率、日志或截图、是否触碰真实网络/用户数据、回归用例。通过分支和 PR 修复，不直接在已发布 M0/M1 中改动历史版本。
