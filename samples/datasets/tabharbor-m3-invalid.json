@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "exportedAt": "2026-11-21T00:00:00.000Z",
+  "windows": [{ "id": "w_bad", "kind": "window", "title": "坏版本演练", "collapsed": false }],
+  "groups": [
+    { "id": "g_bad", "parentId": "w_bad", "title": "坏分组", "collapsed": false }
+  ],
+  "tabs": [
+    { "id": "t_bad", "parentId": "g_bad", "title": "坏标签", "url": "https://example.com/bad" }
+  ],
+  "settings": {},
+  "trash": []
+}

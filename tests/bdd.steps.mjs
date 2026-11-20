@@ -1503,3 +1503,112 @@ step("那么", "备份文件已写入 GitHub", () => {
   if (!ctx.fetchCalls.some((call) => call.options.method === "PUT"))
     throw new Error("自动备份未写入 GitHub");
 });
+
+// —— #32 备份演练：快照上限 / 损坏恢复 / GitHub 失败 ——
+step("当", "连续保存 21 次本地快照", async () => {
+  ctx.snapshotStore = makeChromeMock();
+  ctx.snapshotIds = [];
+  for (let i = 0; i < 21; i++) {
+    const bm = model.buildModel();
+    const w = model.addWindow(bm, `快照窗口${i + 1}`, `w_snap_${i + 1}`);
+    const g = model.addGroup(bm, `快照分组${i + 1}`, w.id, `g_snap_${i + 1}`);
+    model.addTab(
+      bm,
+      `快照标签${i + 1}`,
+      `https://example.com/snap/${i + 1}`,
+      g.id,
+      `t_snap_${i + 1}`
+    );
+    const entry = await io.saveLocalBackup(ctx.snapshotStore.chrome, bm, { theme: "dark" });
+    ctx.snapshotIds.push(entry.id);
+  }
+  ctx.snapshotList = await io.getBackupList(ctx.snapshotStore.chrome);
+});
+
+step("那么", "本地快照仓库最多保留 20 条", () => {
+  if (ctx.snapshotList.length !== 20)
+    throw new Error(`快照仓库保留 ${ctx.snapshotList.length} 条，期望 20`);
+});
+
+step("那么", "最新一次快照仍在仓库顶部", () => {
+  if (ctx.snapshotList[0].id !== ctx.snapshotIds[20]) throw new Error("最新快照不在仓库顶部");
+});
+
+step("那么", "最早一次快照已被淘汰", () => {
+  if (ctx.snapshotList.some((b) => b.id === ctx.snapshotIds[0]))
+    throw new Error("最早的快照未被滚动淘汰");
+});
+
+step("假如", "本地备份仓库存在一条损坏的快照", async () => {
+  ctx.corruptStore = makeChromeMock();
+  await ctx.corruptStore.chrome.storage.local.set({
+    localBackups: [
+      {
+        id: "backup-corrupt",
+        filename: "tabharbor-backup-corrupt.json",
+        createdAt: "2026-11-21T00:00:00.000Z",
+        content: "{broken-json",
+        count: 0,
+      },
+    ],
+  });
+});
+
+step("当", "尝试恢复该损坏快照", async () => {
+  try {
+    await io.restoreBackup("backup-corrupt", ctx.m, ctx.corruptStore.chrome);
+    ctx.restoreCorruptError = null;
+  } catch (error) {
+    ctx.restoreCorruptError = error;
+  }
+});
+
+step("那么", "恢复被拒绝并提示备份内容损坏", () => {
+  if (!ctx.restoreCorruptError) throw new Error("损坏快照未被拒绝");
+  if (!String(ctx.restoreCorruptError.message).includes("本地备份内容损坏"))
+    throw new Error(`错误提示不明确：${ctx.restoreCorruptError.message}`);
+});
+
+step("假如", "GitHub 备份配置完整且已授权", () => {
+  ctx.githubWriteSettings = {
+    backupTarget: "github",
+    ghRepo: "https://github.com/acme/bookmarks",
+    ghBranch: "main",
+    ghPath: "exports/bookmarks.html",
+    ghToken: "fixture-token",
+  };
+  ctx.githubWriteChrome = {
+    permissions: { contains: async ({ origins }) => origins.includes("https://api.github.com/*") },
+  };
+});
+
+step("假如", "GitHub 写入接口返回 403", () => {
+  ctx.githubWriteCalls = [];
+  ctx.githubWriteFetch = async (url, options) => {
+    ctx.githubWriteCalls.push({ url, options });
+    if (options.method === "GET") return { status: 404, ok: false, json: async () => ({}) };
+    return { status: 403, ok: false, json: async () => ({ message: "Forbidden" }) };
+  };
+});
+
+step("当", "尝试上传备份到 GitHub", async () => {
+  try {
+    await io.uploadGitHubFile(
+      ctx.githubWriteChrome,
+      ctx.githubWriteSettings,
+      await io.exportHTML(ctx.m),
+      ctx.githubWriteFetch
+    );
+    ctx.githubWriteError = null;
+  } catch (error) {
+    ctx.githubWriteError = error;
+  }
+});
+
+step("那么", "备份失败并提示 HTTP 403", () => {
+  if (!ctx.githubWriteError) throw new Error("GitHub 403 未被报告为失败");
+  if (!String(ctx.githubWriteError.message).includes("HTTP 403"))
+    throw new Error(`错误提示不包含状态码：${ctx.githubWriteError.message}`);
+  if (ctx.githubWriteCalls.some((call) => !String(call.url).startsWith("https://api.github.com/")))
+    throw new Error("失败路径仍访问了非 api.github.com 域名");
+});

@@ -329,6 +329,31 @@ try {
   assert.equal(sideWindows, 2, `侧边栏页窗口节点数异常: ${sideWindows}`);
   console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
+  // —— #32 M3 演练：真实文件导入（JSON 全量替换 + 非法版本拒绝）——
+  win.on("dialog", (dialog) => void dialog.accept()); // 导入确认弹窗
+  const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-import.json");
+  const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-invalid.json");
+  await win.setInputFiles("#importFile", m3ImportPath);
+  await win.waitForFunction(
+    () => document.querySelectorAll('.node[data-kind="window"]').length === 1,
+    undefined,
+    { timeout: 5000 }
+  );
+  const importedTitle = await win.textContent(".group-name");
+  assert.equal(importedTitle, "演练-研究", "M3 JSON 导入后树未替换为演练数据");
+  const statusOk = await win.textContent("#dataStatus");
+  assert.ok(statusOk.includes("导入完成"), `导入完成提示缺失: ${statusOk}`);
+
+  await win.setInputFiles("#importFile", m3InvalidPath);
+  await win.waitForFunction(
+    () => document.querySelector("#dataStatus").textContent.includes("导入失败"),
+    undefined,
+    { timeout: 5000 }
+  );
+  const statusFail = await win.textContent("#dataStatus");
+  assert.ok(statusFail.includes("版本不兼容"), `非法版本拒绝提示缺失: ${statusFail}`);
+  console.log("E2E 13/7 M3 导入演练（合法替换 + 非法版本拒绝）通过");
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();
