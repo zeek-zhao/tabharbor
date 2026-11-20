@@ -1,0 +1,21 @@
+TabHarbor v2 — M3-1 import/export and backup verification
+Date: 2026-11-20 (Asia/Shanghai)
+Scope: local JSON/standard Netscape HTML import-export, local snapshots, GitHub HTML backup protocol and service-worker alarms.
+Network policy: all GitHub requests in BDD use mock fetch; no real GitHub write was performed.
+
+BDD
+- Command: npm test
+- Result: 74/74 scenarios PASS (includes switching backup target to local clears auto-backup alarm).
+
+Implementation gates (final run after source, feature, and documentation edits)
+- npm run constraints — PASS, 0 hits; 11 source files / 9 rules.
+- npm run compliance — PASS, 0 findings; 54 files scanned.
+- npm run committer — PASS; 15/26 commits checked, GitHub-generated merge commits skipped.
+- npm run contrast — PASS; 9 token pairs for each of dark and light themes (design-state calculation).
+- npm run format:check — PASS.
+- src/manifest.json — valid JSON.
+
+Manual Chrome acceptance is intentionally pending for the user’s download test:
+- Load unpacked extension from src/ and exercise both sidebar and independent-window modes.
+- Test file picker/import full replacement, local backup restore, optional permission grant/denial, and a scheduled GitHub HTML update in a dedicated test repository.
+- GitHub BDD uses mocked fetch; no live backup request was made.

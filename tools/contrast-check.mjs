@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * TH-WIRE-001 可重复验证脚本 · WCAG 2.1 AA 对比度计算
- * 零依赖；从原型 HTML 的 CSS 变量实时读取色值，避免文档与原型漂移。
- * 用法：node tools/contrast-check.mjs [prototypes/vX.Y.html]
- *   缺省 prototypes/v5.1.html（G1 已批准基线，证据可复现）；
- *   传 prototypes/v5.2.html 校验 CR-002 增量（同一 token，结果应一致）。
+ * TH2 数据面板样式 · WCAG 2.1 AA 对比度计算
+ * 零依赖；默认从当前 UI 样式表读取 CSS 变量，旧版 HTML 原型路径仍可显式传入。
+ * 用法：node tools/contrast-check.mjs [src/assets/m2.css|prototypes/vX.Y.html]
+ *   缺省 src/assets/m2.css，确保实际 dark/light UI token 被检查。
  * 退出码：全部达标 0；任一未达标 1。
  *
  * 说明（TH-TP-001 §6）：本脚本给出的是「设计态计算值」，
@@ -12,7 +11,7 @@
  */
 import fs from "node:fs";
 
-const TARGET = process.argv[2] || "prototypes/v5.1.html";
+const TARGET = process.argv[2] || "src/assets/m2.css";
 const html = fs.readFileSync(new URL("../" + TARGET, import.meta.url), "utf8");
 
 function pickVars(re) {
@@ -23,8 +22,19 @@ function pickVars(re) {
     out[x[1]] = x[2].toLowerCase();
   return out;
 }
-const dark = pickVars(/:root\{([\s\S]*?)\}/);
-const light = pickVars(/html\[data-theme="light"\]\{([\s\S]*?)\}/);
+const dark = pickVars(/:root\s*\{([\s\S]*?)\}/);
+const light = pickVars(/html\[data-theme="light"\]\s*\{([\s\S]*?)\}/);
+const UI_PAIRS = [
+  ["fg1", "bg1", 4.5, "正文文字 / 页面背景"],
+  ["fg1", "bg2", 4.5, "正文文字 / 面板背景"],
+  ["fg2", "bg2", 4.5, "次要文字 / 面板背景"],
+  ["fg1", "bg3", 4.5, "正文文字 / 卡片背景"],
+  ["bg1", "accent", 3, "主按钮文字 / 强调色背景"],
+  ["fg1", "accent-bg", 4.5, "选中态文字 / 选中背景"],
+  ["warn", "bg2", 3, "警告文字 / 面板背景"],
+  ["ok", "bg2", 3, "成功标记 / 面板背景"],
+  ["line2", "bg2", 3, "控件边框 / 面板背景"],
+];
 
 const lin = (c) => {
   c /= 255;
@@ -43,20 +53,22 @@ const ratio = (a, b) => {
 };
 
 /** [前景变量, 背景变量, 阈值, 说明] —— 正文/小字 4.5:1；大字与 UI 组件 3:1 */
-const PAIRS = [
-  ["txt", "bg2", 4.5, "正文文字 / 面板背景"],
-  ["txt2", "bg2", 4.5, "次要文字 / 面板背景"],
-  ["txt3", "bg2", 4.5, "三级文字（分组计数、时间戳）/ 面板背景"],
-  ["txt", "bg3", 4.5, "正文文字 / 卡片与头部背景"],
-  ["accent", "bg3", 4.5, "强调色文字（AC 编号、链接）/ 卡片背景"],
-  ["accent", "accent-bg", 4.5, "强调色文字 / 选中态背景"],
-  ["chip-txt", "chip", 4.5, "标签 chip 文字 / chip 背景"],
-  ["btn-ink", "btn", 4.5, "主按钮文字 / 主按钮背景"],
-  ["danger", "danger-bg", 4.5, "危险文字 / 危险底色"],
-  ["ok", "bg3", 3.0, "状态点·UI 组件（3:1）"],
-  ["warn", "bg3", 3.0, "警告标记·UI 组件（3:1）"],
-  ["line2", "bg3", 3.0, "控件边框·UI 组件（3:1）"],
-];
+const PAIRS = TARGET.endsWith(".css")
+  ? UI_PAIRS
+  : [
+      ["txt", "bg2", 4.5, "正文文字 / 面板背景"],
+      ["txt2", "bg2", 4.5, "次要文字 / 面板背景"],
+      ["txt3", "bg2", 4.5, "三级文字（分组计数、时间戳）/ 面板背景"],
+      ["txt", "bg3", 4.5, "正文文字 / 卡片与头部背景"],
+      ["accent", "bg3", 4.5, "强调色文字（AC 编号、链接）/ 卡片背景"],
+      ["accent", "accent-bg", 4.5, "强调色文字 / 选中态背景"],
+      ["chip-txt", "chip", 4.5, "标签 chip 文字 / chip 背景"],
+      ["btn-ink", "btn", 4.5, "主按钮文字 / 主按钮背景"],
+      ["danger", "danger-bg", 4.5, "危险文字 / 危险底色"],
+      ["ok", "bg3", 3.0, "状态点·UI 组件（3:1）"],
+      ["warn", "bg3", 3.0, "警告标记·UI 组件（3:1）"],
+      ["line2", "bg3", 3.0, "控件边框·UI 组件（3:1）"],
+    ];
 
 let failed = 0;
 const fmt = (s, n) => String(s).padEnd(n, " ");

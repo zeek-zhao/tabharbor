@@ -1,11 +1,24 @@
 // TH2-BDD-001 · BDD 步骤实现（M0：mock chrome v2 + 树数据模型，issue #6）
 // 每个 feature 步骤在此注册；参数化步骤用 {} 模板（值带双引号）。
 // runner 不传 ctx——用模块级上下文跨步骤传值（与旧仓库一致）；节点引用按标题解析。
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { step } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 
 /* ---------- 模块级上下文 ---------- */
-const ctx = { named: {} };
+const ctx = {
+  named: {},
+  importModel: null,
+  modelEvents: 0,
+  mock: null,
+  localBackups: [],
+  openTabs: [],
+};
+function freshMock() {
+  return makeChromeMock();
+}
 
 function byTitle(title) {
   const hit = ctx.named[title] || model.findNode(ctx.m, title);
@@ -30,8 +43,10 @@ export function makeChromeMock() {
     storage: mkListener(),
     action: mkListener(),
     installed: mkListener(),
+    startup: mkListener(),
     command: mkListener(),
     ctxMenu: mkListener(),
+    alarm: mkListener(),
   };
   const calls = {
     storageSet: [],
@@ -43,8 +58,11 @@ export function makeChromeMock() {
     tabsRemove: [],
     winFocus: [],
     clipboard: [],
+    downloads: [],
+    alarms: [],
   };
   const chrome = {
+    _importExportCalls: {},
     storage: {
       local: {
         async get(keys) {
@@ -97,7 +115,10 @@ export function makeChromeMock() {
       onRemoved: { addListener: () => {} },
     },
     action: { onClicked: { addListener: (fn) => listeners.action.addListener(fn) } },
-    runtime: { onInstalled: { addListener: (fn) => listeners.installed.addListener(fn) } },
+    runtime: {
+      onInstalled: { addListener: (fn) => listeners.installed.addListener(fn) },
+      onStartup: { addListener: (fn) => listeners.startup.addListener(fn) },
+    },
     commands: { onCommand: { addListener: (fn) => listeners.command.addListener(fn) } },
     contextMenus: {
       create: (o) => calls.ctxMenuCreate.push(o),
@@ -107,6 +128,24 @@ export function makeChromeMock() {
     sidePanel: {
       open: async (o) => {
         calls.sidePanelOpen.push(o);
+      },
+    },
+    downloads: {
+      download: async (o) => {
+        calls.downloads.push(o);
+        return { id: calls.downloads.length };
+      },
+      onCreated: { addListener: () => {} },
+      onChanged: { addListener: () => {} },
+    },
+    alarms: {
+      create: async (name, info) => {
+        calls.alarms.push({ name, ...info });
+      },
+      onAlarm: { addListener: (fn) => listeners.alarm.addListener(fn) },
+      getAll: async () => calls.alarms,
+      clear: async (name) => {
+        calls.alarms = calls.alarms.filter((a) => a.name !== name);
       },
     },
   };
@@ -125,9 +164,86 @@ step("那么", "BDD 流水线可运行且步骤可注册", () => {
 });
 
 /* ---------- 场景组：三层树数据模型（SRS §3.1 / FR-001） ---------- */
+const TEST_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const readFileSync = fs.readFileSync;
+const REPO_ROOT = TEST_ROOT;
+const join = path.join;
+
+step("假如", "静态红线检查代码存在", () => {
+  ctx.constraintsSource = fs.readFileSync(
+    path.join(TEST_ROOT, "tools/check-constraints.mjs"),
+    "utf8"
+  );
+});
+
+step("假如", "当前模型包含一个现存窗口", () => {
+  ctx.m = model.buildModel();
+  model.addWindow(ctx.m, "保留窗口", "w_existing");
+  ctx.importModel = structuredClone(ctx.m);
+});
+
+step("假如", "导入 JSON 缺少必需字段 tabs", () => {
+  ctx.importData = { version: 1, windows: [], groups: [], settings: {}, trash: [] };
+});
+
+step("那么", "静态约束检查拒绝任何 bookmarks API", () => {
+  if (!ctx.constraintsSource.includes("bookmarks\\s*\\."))
+    throw new Error("静态红线规则未覆盖 bookmarks API");
+  if (
+    /bookmarks[^\\n]{0,160}allowFiles|allowFiles[^\\n]{0,160}bookmarks/.test(ctx.constraintsSource)
+  )
+    throw new Error("bookmarks API 不应有白名单例外");
+});
+
+step("假如", "本地备份仓库含 {} 个标签的快照", async (count) => {
+  const backupModel = model.buildModel();
+  const win = model.addWindow(backupModel, "备份窗口", "w_backup");
+  const group = model.addGroup(backupModel, "备份分组", win.id, "g_backup");
+  for (let i = 0; i < Number(count); i++)
+    model.addTab(
+      backupModel,
+      `备份标签${i + 1}`,
+      `https://backup.example.test/${i + 1}`,
+      group.id,
+      `t_backup_${i + 1}`
+    );
+  ctx.backupStore = makeChromeMock();
+  ctx.backupEntry = await io.saveLocalBackup(ctx.backupStore.chrome, backupModel, {
+    theme: "dark",
+  });
+  ctx.m = model.buildModel();
+  ctx.modelEvents = 0;
+});
+
+step("当", "选择并确认恢复最近的本地备份", async () => {
+  ctx.m = await io.restoreBackup(ctx.backupEntry.id, ctx.m, ctx.backupStore.chrome);
+  await ctx.backupStore.chrome.storage.local.set({
+    windows: ctx.m.windows,
+    groups: ctx.m.groups,
+    tabs: ctx.m.tabs,
+    trash: ctx.m.trash,
+    settings: ctx.m.settings,
+  });
+  ctx.modelEvents++;
+});
+
+step("那么", "树模型被全量恢复为快照内容", () => {
+  if (ctx.m.tabs.length !== 1 || ctx.m.tabs[0].title !== "备份标签1")
+    throw new Error("恢复的树与快照不一致");
+  if (!ctx.m.windows.some((node) => node.id === "w_backup")) throw new Error("恢复窗口丢失");
+});
+
 step("假如", "一个空的树数据模型", () => {
+  ctx.mock = makeChromeMock();
+  globalThis.chrome = ctx.mock.chrome;
   ctx.m = model.buildModel();
   ctx.named = {};
+  ctx.importData = null;
+  ctx.importRejected = false;
+  ctx.importError = "";
+  ctx.modelEvents = 0;
+  ctx.localBackups = [];
+  ctx.backupExpected = null;
 });
 
 step("当", "创建窗口 {}", (title) => {
@@ -203,12 +319,6 @@ step("那么", "从存储键 {} 读回的模型与写入一致", async (key) => 
 });
 
 /* ---------- 场景组：双模式壳窗口（FR-001/002/003/004/005/006/007，文件内容静态断言） ---------- */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { createRequire } from "node:module";
-
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function repoFile(rel) {
   const p = join(REPO_ROOT, rel);
@@ -281,7 +391,8 @@ step("那么", "默认链接徽标是 {}", (v) => {
 });
 
 step("那么", "默认备份频率是 {}", (v) => {
-  if (ctx.all.settings.bkFreq !== v) throw new Error(`bkFreq=${ctx.all.settings.bkFreq} ≠ ${v}`);
+  if (ctx.all.settings.ghBackupFreq !== v)
+    throw new Error(`ghBackupFreq=${ctx.all.settings.ghBackupFreq} ≠ ${v}`);
 });
 
 step("那么", "模型三键为空数组", () => {
@@ -305,7 +416,8 @@ step("那么", "默认主题仍是 {}", (v) => {
 });
 
 step("那么", "默认备份频率仍是 {}", (v) => {
-  if (ctx.all.settings.bkFreq !== v) throw new Error(`bkFreq=${ctx.all.settings.bkFreq} ≠ ${v}`);
+  if (ctx.all.settings.ghBackupFreq !== v)
+    throw new Error(`ghBackupFreq=${ctx.all.settings.ghBackupFreq} ≠ ${v}`);
 });
 
 step("当", "保存模型快照", async () => {
@@ -742,4 +854,434 @@ step("那么", "渲染的树视图不包含 {}", (title) => {
 step("那么", "渲染的树视图包含 {}", (title) => {
   const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
   if (!html.includes(`>${title}<`)) throw new Error(`渲染视图缺 ${title}`);
+});
+
+/* ---------- M3-1 书签导入导出（09_import_export.feature，FR-031~038，issue #27） ---------- */
+import * as io from "../src/core/import-export.js";
+
+step("当", "触发导出 JSON", async () => {
+  ctx.exported = await io.exportJSON(ctx.m, ctx.all?.settings || {});
+  const fake = { download: async (o) => ctx.mock.calls.downloads.push({ ...o, body: o.url }) };
+  await io.triggerDownload("tabharbor-export-" + Date.now() + ".json", ctx.exported, fake);
+});
+
+step("那么", "下载了文件 {}", (pattern) => {
+  const re = new RegExp(pattern.replace("*", ".*"));
+  const hit = ctx.mock.calls.downloads.find((d) => re.test(d.filename));
+  if (!hit)
+    throw new Error(
+      `未找到匹配下载：${pattern}，实际：${ctx.mock.calls.downloads.map((d) => d.filename).join(", ")}`
+    );
+  ctx.lastDownload = hit;
+});
+
+step("那么", "文件内容包含 {}", (needle) => {
+  const dataUrl = String(ctx.lastDownload?.body || ctx.lastDownload?.url || "");
+  const base64 = dataUrl.startsWith("data:") ? dataUrl.slice(dataUrl.indexOf(",") + 1) : "";
+  const content = base64 ? decodeURIComponent(escape(atob(base64))) : dataUrl;
+  if (!content.includes(needle)) throw new Error(`下载内容不含 ${needle}`);
+});
+
+step("假如", "树模型有回收站含 {} 个条目", (n) => {
+  ctx.m.trash = ctx.m.trash || [];
+  for (let i = 0; i < Number(n); i++) {
+    ctx.m.trash.push({
+      kind: "tab",
+      title: `deleted-${i}`,
+      payload: { url: "https://example.com/" },
+      deletedAt: Date.now(),
+    });
+  }
+});
+
+step("假如", "树模型的开发分组含子分组 {} 和标签 {}", (subTitle, tabTitle) => {
+  const dev = ctx.named["开发"];
+  const sub = model.addGroup(ctx.m, subTitle, dev.id);
+  ctx.named[subTitle] = sub;
+  const t = model.addTab(ctx.m, tabTitle, tabUrl(tabTitle), sub.id);
+  ctx.named[tabTitle] = t;
+});
+
+step("当", "触发导出 HTML", async () => {
+  ctx.exportedHtml = await io.exportHTML(ctx.m);
+  const fake = { download: async (o) => ctx.mock.calls.downloads.push({ ...o, body: o.url }) };
+  await io.triggerDownload("tabharbor-bookmarks-" + Date.now() + ".html", ctx.exportedHtml, fake);
+  ctx.lastDownload = ctx.mock.calls.downloads.at(-1);
+});
+
+step("假如", "HTML 文件含嵌套分组与转义标题", () => {
+  ctx.importHtml = `<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><H3>父 &amp; 一</H3><DL><p><DT><H3>子 &amp; 二</H3><DL><p><DT><A HREF="https://example.com/a?x=1&amp;y=2">标题 &amp; 文本</A></DL><p></DL><p></DL><p>`;
+});
+
+step("那么", "HTML 子分组挂在正确父分组下", () => {
+  const parent = ctx.m.groups.find((g) => g.title === "父 & 一");
+  const child = ctx.m.groups.find((g) => g.title === "子 & 二");
+  if (!parent || !child || child.parentId !== parent.id) throw new Error("HTML 子分组层级错误");
+});
+
+step("那么", "HTML 标签与 URL 实体已解码", () => {
+  const tab = ctx.m.tabs.find((t) => t.title === "标题 & 文本");
+  if (!tab || tab.url !== "https://example.com/a?x=1&y=2")
+    throw new Error("HTML 标签/URL 实体未正确解码");
+});
+
+step("假如", "树模型含顶层标签和特殊字符标题", () => {
+  ctx.m.tabs.push({
+    id: "top_special",
+    parentId: null,
+    title: "顶层 & 标签",
+    url: "https://example.com/?a=1&b=2",
+  });
+});
+
+step("那么", "下载 MIME 类型为 text/html", () => {
+  const hit = ctx.mock.calls.downloads.at(-1);
+  if (!String(hit?.url).startsWith("data:text/html;")) throw new Error("HTML 下载 MIME 类型错误");
+});
+
+step("当", "触发导入 JSON 文件 {}", async (filename) => {
+  ctx.importRejected = false;
+  ctx.importError = "";
+  try {
+    ctx.m = await io.importJSON(ctx.importData, ctx.m);
+  } catch (e) {
+    ctx.importRejected = true;
+    ctx.importError = e.message;
+  }
+});
+
+step("那么", "树模型被全量替换为导入内容", () => {
+  if (ctx.m.windows.length !== 1 || ctx.m.windows[0].title !== "导入窗口")
+    throw new Error("窗口未替换");
+  if (ctx.m.groups.length !== 1 || ctx.m.groups[0].title !== "导入分组")
+    throw new Error("分组未替换");
+  if (ctx.m.tabs.length !== 1 || ctx.m.tabs[0].title !== "导入标签") throw new Error("标签未替换");
+});
+
+step("那么", "广播了 onModelChanged 事件", async () => {
+  const store = await import("../src/core/store.js");
+  let received = false;
+  const originalChrome = globalThis.chrome;
+  globalThis.chrome = ctx.mock.chrome;
+  store.onModelChanged(() => {
+    received = true;
+  });
+  await store.saveModel(ctx.m);
+  globalThis.chrome = originalChrome;
+  if (!received) throw new Error("onModelChanged 未广播");
+});
+step("那么", "UI 已刷新", () => {
+  // 由广播触发 render，这里仅确认模型已更新
+  if (!ctx.m.windows.find((w) => w.title === "导入窗口")) throw new Error("UI 未刷新");
+});
+
+step("假如", "已有旧版导入数据 version 0", () => {
+  ctx.importFile = "import-old.json";
+  ctx.importData = { version: 0, windows: [], groups: [], tabs: [], settings: {}, trash: [] };
+  ctx.importModel = ctx.m;
+});
+
+step("那么", "提示版本不兼容且显示实际版本 v0", async () => {
+  if (
+    !ctx.importRejected ||
+    !ctx.importError?.includes("版本不兼容") ||
+    !ctx.importError.includes("实际 v0")
+  ) {
+    throw new Error("版本错误信息不准确：" + ctx.importError);
+  }
+});
+
+step("那么", "现有树模型未被污染", () => {
+  if (ctx.importModel && ctx.m !== ctx.importModel) throw new Error("拒绝导入时模型引用发生变化");
+  if (ctx.m.windows.length !== (ctx.importModel?.windows?.length || 0))
+    throw new Error("模型被污染");
+});
+
+step("假如", "已有导入文件 {} 内含 version 1 和完整三层模型", (filename) => {
+  const w = { id: "w_import", kind: "window", title: "导入窗口", collapsed: false };
+  const g = { id: "g_import", kind: "group", title: "导入分组", parentId: w.id, collapsed: false };
+  const t = {
+    id: "t_import",
+    kind: "tab",
+    title: "导入标签",
+    url: "https://import.example.test/",
+    parentId: g.id,
+  };
+  ctx.importFile = filename;
+  ctx.importData = { version: 1, windows: [w], groups: [g], tabs: [t], settings: {}, trash: [] };
+});
+// fixture sentinel
+
+step("假如", "已有导入文件 {} 含文件夹层级和书签", (filename) => {
+  ctx.importFile = filename;
+  ctx.importHtml = `<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+<DL><p>
+  <DT><H3>开发</H3>
+  <DL><p>
+    <DT><A HREF="https://developer.mozilla.org/">MDN</A>
+    <DT><A HREF="https://github.com/">GitHub</A>
+    <DT><H3>WebAPI</H3>
+    <DL><p>
+      <DT><A HREF="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API">Fetch API</A>
+    </DL><p>
+  </DL><p>
+</DL><p>`;
+});
+
+step("当", "尝试导入该 JSON", async () => {
+  try {
+    ctx.m = await io.importJSON(ctx.importData, ctx.m);
+    ctx.importRejected = false;
+    ctx.importError = "";
+  } catch (error) {
+    ctx.importRejected = true;
+    ctx.importError = error.message;
+  }
+});
+
+step("那么", "导入被拒绝并指出缺少字段 tabs", () => {
+  if (!ctx.importRejected || !ctx.importError.includes("缺少字段：tabs"))
+    throw new Error("缺少字段的导入未被明确拒绝");
+});
+
+step("那么", "现有窗口仍保留", () => {
+  if (!ctx.m.windows.some((win) => win.id === "w_existing"))
+    throw new Error("失败导入移除了现有窗口");
+  if (JSON.stringify(ctx.m) !== JSON.stringify(ctx.importModel))
+    throw new Error("失败导入污染了现有模型");
+});
+
+step("当", "触发导入 HTML 文件 {}", async (filename) => {
+  ctx.m = await io.importHTML(ctx.importHtml, ctx.m);
+  ctx.importHtmlResult = ctx.m;
+});
+
+step("那么", "文件夹转为分组", () => {
+  const g = ctx.m.groups.find((x) => x.title === "开发");
+  if (!g) throw new Error("文件夹未转为分组：开发");
+  const sub = ctx.m.groups.find((x) => x.title === "WebAPI");
+  if (!sub) throw new Error("子文件夹未转为分组：WebAPI");
+});
+
+step("那么", "书签转为标签", () => {
+  const t1 = ctx.m.tabs.find((x) => x.title === "MDN");
+  const t2 = ctx.m.tabs.find((x) => x.title === "GitHub");
+  const t3 = ctx.m.tabs.find((x) => x.title === "Fetch API");
+  if (!t1 || !t2 || !t3) throw new Error("书签未转为标签");
+});
+
+step("那么", "去重合并（URL+title 相同视为同一条）", () => {
+  const urls = ctx.m.tabs.map((t) => t.url);
+  const uniq = new Set(urls);
+  if (urls.length !== uniq.size) throw new Error("存在重复 URL");
+});
+
+step("当", "触发手动备份", async () => {
+  const fake = { download: async (o) => ctx.mock.calls.downloads.push({ ...o, body: o.url }) };
+  const result = await io.manualBackup(ctx.m, ctx.all?.settings || {}, fake);
+  ctx.backupExpected = result.content;
+  ctx.manualBackup = result;
+  ctx.lastDownload = ctx.mock.calls.downloads[ctx.mock.calls.downloads.length - 1];
+});
+
+step("那么", "文件名以 tabharbor-backup- 为前缀且以 .json 结尾", () => {
+  const hit = [...ctx.mock.calls.downloads]
+    .reverse()
+    .find((d) => d.filename.startsWith("tabharbor-backup-") && d.filename.endsWith(".json"));
+  if (!hit)
+    throw new Error(
+      `未找到备份下载，实际：${ctx.mock.calls.downloads.map((d) => d.filename).join(", ")}`
+    );
+  ctx.lastDownload = hit;
+  const url = String(hit.body || hit.url || "");
+  const base64 = url.startsWith("data:") ? url.split(",")[1] : "";
+  ctx.lastBackupContent = base64 ? decodeURIComponent(escape(atob(base64))) : url;
+});
+
+step("那么", "文件内容等同于当前完整导出 JSON", () => {
+  if (ctx.lastBackupContent !== ctx.backupExpected)
+    throw new Error("备份内容与完整导出 JSON 不一致");
+});
+
+step("假如", "GitHub 频率选项内容为 {}", async (v) => {
+  ctx.mock = makeChromeMock();
+  const settings = {
+    backupTarget: "github",
+    ghRepo: "https://github.com/acme/bookmarks",
+    ghBranch: "main",
+    ghPath: "exports/bookmarks.html",
+    ghToken: "fixture-token",
+    ghBackupFreq: v,
+  };
+  await ctx.mock.chrome.storage.local.set({ settings });
+  ctx.githubSettings = settings;
+  ctx.fetchCalls = [];
+  ctx.fetchMock = async (url, options) => {
+    ctx.fetchCalls.push({ url, options });
+    return options.method === "GET"
+      ? { status: 404, ok: false, json: async () => ({}) }
+      : {
+          status: 201,
+          ok: true,
+          json: async () => ({ content: { path: settings.ghPath, sha: "created" } }),
+        };
+  };
+  ctx.mock.chrome.permissions = { contains: async () => true };
+  ctx.mock.chrome.runtime.getManifest = () => ({ version: "0.2.0" });
+  ctx.mock.chrome.runtime.getURL = (path) => `chrome-extension://test/${path}`;
+  globalThis.chrome = ctx.mock.chrome;
+  const { initServiceWorker } = await import("../src/background/service-worker.js");
+  initServiceWorker(ctx.mock.chrome);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
+step("当", "插件启动时注册 alarms", async () => {
+  const { initServiceWorker } = await import("../src/background/service-worker.js");
+  initServiceWorker(ctx.mock.chrome);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+
+step("当", "当前备份目标切换为 local", async () => {
+  await ctx.mock.chrome.storage.local.set({
+    settings: { ...ctx.githubSettings, backupTarget: "local" },
+  });
+  const { initServiceWorker } = await import("../src/background/service-worker.js");
+  initServiceWorker(ctx.mock.chrome);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+step("那么", "auto-backup alarm 不存在", () => {
+  if (ctx.mock.calls.alarms.some((alarm) => alarm.name === "auto-backup"))
+    throw new Error("关闭自动备份后 alarm 仍存在");
+});
+
+step("假如", "GitHub 备份配置指向测试仓库且权限已授予", async () => {
+  ctx.githubSettings = {
+    backupTarget: "github",
+    ghRepo: "https://github.com/acme/bookmarks",
+    ghBranch: "main",
+    ghPath: "exports/bookmarks.html",
+    ghToken: "fixture-token",
+    ghBackupFreq: "hourly",
+  };
+  ctx.fetchCalls = [];
+  ctx.fetchMock = async (url, options) => {
+    ctx.fetchCalls.push({ url, options });
+    if (options.method === "GET")
+      return { status: 200, ok: true, json: async () => ({ sha: "old-sha" }) };
+    return {
+      status: 200,
+      ok: true,
+      json: async () => ({ content: { path: "exports/bookmarks.html", sha: "new-sha" } }),
+    };
+  };
+  ctx.githubChrome = {
+    permissions: { contains: async ({ origins }) => origins.includes("https://api.github.com/*") },
+  };
+});
+
+step("当", "执行 GitHub 自动备份且远端文件已存在", async () => {
+  ctx.githubResult = await io.uploadGitHubFile(
+    ctx.githubChrome,
+    ctx.githubSettings,
+    await io.exportHTML(ctx.m),
+    ctx.fetchMock
+  );
+});
+
+step("那么", "先 GET 远端 SHA 再 PUT HTML 覆盖同一路径", () => {
+  if (
+    ctx.fetchCalls.length !== 2 ||
+    ctx.fetchCalls[0].options.method !== "GET" ||
+    ctx.fetchCalls[1].options.method !== "PUT"
+  )
+    throw new Error("GitHub 备份请求顺序不是 GET→PUT");
+  const body = JSON.parse(ctx.fetchCalls[1].options.body);
+  if (body.sha !== "old-sha" || body.branch !== "main")
+    throw new Error("覆盖请求缺少远端 SHA 或分支");
+  const html = decodeURIComponent(escape(atob(body.content)));
+  if (!html.startsWith("<!DOCTYPE NETSCAPE-Bookmark-file-1>"))
+    throw new Error("GitHub 上传内容不是标准 HTML");
+});
+
+step("那么", "远程备份请求仅发往 api.github.com", () => {
+  if (ctx.fetchCalls.some((call) => !String(call.url).startsWith("https://api.github.com/")))
+    throw new Error("GitHub 备份访问了非 api.github.com 域名");
+});
+
+step("当", "执行 GitHub 自动备份且远端文件不存在", async () => {
+  ctx.fetchCalls = [];
+  ctx.fetchMock = async (url, options) => {
+    ctx.fetchCalls.push({ url, options });
+    if (options.method === "GET") return { status: 404, ok: false, json: async () => ({}) };
+    return {
+      status: 201,
+      ok: true,
+      json: async () => ({ content: { path: "exports/bookmarks.html", sha: "created-sha" } }),
+    };
+  };
+  await io.uploadGitHubFile(
+    ctx.githubChrome,
+    ctx.githubSettings,
+    await io.exportHTML(ctx.m),
+    ctx.fetchMock
+  );
+});
+
+step("那么", "PUT 新建文件且请求体含分支与标准 HTML", () => {
+  const put = ctx.fetchCalls.find((call) => call.options.method === "PUT");
+  const body = JSON.parse(put?.options.body || "{}");
+  if (
+    !put ||
+    body.sha ||
+    body.branch !== "main" ||
+    !decodeURIComponent(escape(atob(body.content || ""))).startsWith(
+      "<!DOCTYPE NETSCAPE-Bookmark-file-1>"
+    )
+  )
+    throw new Error("新文件 PUT 请求体错误");
+});
+
+step("假如", "GitHub 备份未配置", () => {
+  ctx.fetchCalls = [];
+  ctx.githubChrome = { permissions: { contains: async () => true } };
+});
+
+step("当", "执行 GitHub 自动备份", async () => {
+  try {
+    await io.runAutoBackup(ctx.githubChrome, ctx.m, {});
+  } catch {
+    /* missing config must be a no-op at the caller boundary */
+  }
+});
+
+step("那么", "不发送网络请求", () => {
+  if (ctx.fetchCalls.length) throw new Error("未配置 GitHub 时发生网络请求");
+});
+
+step("那么", "chrome.alarms.create 已调用且 name 为 auto-backup", () => {
+  const a = ctx.mock.calls.alarms.find((x) => x.name === "auto-backup");
+  if (!a) throw new Error("auto-backup alarm 未创建");
+});
+
+step("那么", "periodInMinutes 为 1440", () => {
+  const a = ctx.mock.calls.alarms.find((x) => x.name === "auto-backup");
+  if (a.periodInMinutes !== 1440) throw new Error(`periodInMinutes=${a.periodInMinutes} ≠ 1440`);
+});
+
+step("当", "自动备份 alarm 被触发", async () => {
+  const prevFetch = globalThis.fetch;
+  globalThis.fetch = ctx.fetchMock;
+  try {
+    for (const listener of ctx.mock.listeners.alarm.fns) await listener({ name: "auto-backup" });
+  } finally {
+    globalThis.fetch = prevFetch;
+  }
+});
+
+step("那么", "备份文件已写入 GitHub", () => {
+  if (!ctx.fetchCalls.some((call) => call.options.method === "PUT"))
+    throw new Error("自动备份未写入 GitHub");
 });

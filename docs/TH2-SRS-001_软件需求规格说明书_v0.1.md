@@ -47,7 +47,7 @@ Chrome MV3 扩展（零构建、ES Modules、Chrome 114+；PiP 置顶需 Chrome 
 
 ### 2.3 约束（红线，tools/check-constraints.mjs 门禁）
 1. 不读取、不删除浏览历史（历史按钮仅 `chrome.tabs.create` 打开 `chrome://history`）；
-2. 不监听书签变更（bookmarks API 仅在「浏览器原生导入」被裁掉后**完全不使用**——见 FR-050 注）；
+2. 不申请、不调用任何浏览器原生书签 API；书签数据只通过标准 Netscape HTML 文件导入导出（Q-D / FR-050）；
 3. 不申请多余权限（权限清单见 §4.4）；
 4. 零出站，唯一例外 `https://api.github.com/*`（仅 backup 模块，GitHub 备份）；
 5. 敏感信息（token/密钥）不入库（check-compliance 门禁）。
@@ -72,7 +72,7 @@ Chrome MV3 扩展（零构建、ES Modules、Chrome 114+；PiP 置顶需 Chrome 
 | `groups` | `GrpNode[]` | 分组节点（含 `parentId` 递归嵌套；窗口/父分组 id 引用） |
 | `tabs` | `TabNode[]` | 标签节点（`winId`/`grpId` 归属、`open` 派生态不入库） |
 | `trash` | `TrashItem[]` | 回收站 `{id, kind, payload, deletedAt}`（FR-037） |
-| `settings` | object | `theme`(默认 dark)/`openMode`/`restoreLast`(默认 on)/`copyContent`/`copyFormat`/`linkShow`(默认 off)/`gh`/`bkFreq`/`onboarded` |
+| `settings` | object | `theme`(默认 dark)/`openMode`/`restoreLast`(默认 on)/`copyContent`/`copyFormat`/`linkShow`(默认 off)/`backupTarget`(local|github)/`ghRepo`/`ghBranch`/`ghPath`/`ghToken`/`ghBackupFreq`(off/every10m/every30m/hourly/daily)/`onboarded` |
 | `lastBounds` | object | 窗口位置与尺寸（FR-047 上次位置） |
 
 设计原则：节点本体与派生态分离——`open`/组窗亮灰（FR-023/027/028）**不入库**，每次渲染由 `chrome.tabs.query` 实时派生（继承旧项目 syncOpenState 思路）。
@@ -182,7 +182,7 @@ Chrome MV3 扩展（零构建、ES Modules、Chrome 114+；PiP 置顶需 Chrome 
 
 ## 5. 外部接口与依赖
 - chrome.* API 白名单以上表为准；`fetch` 仅 backup 模块且 URL 以 `https://api.github.com` 开头（check-constraints C11/C12 强制）；
-- GitHub 备份协议：GET 取 sha（404=新文件）→ PUT contents，commit message 带时间戳；错误信息不含令牌（继承旧实现已验证语义）。
+- GitHub 备份协议：GET 取 sha（404=新文件）→ PUT contents，commit message 带时间戳；错误信息不含令牌。`ghToken` 仅保存在 `chrome.storage.local`（本机扩展配置，不同步、不加密）；界面不回显令牌。仅在用户点击授权按钮时请求 `https://api.github.com/*` 可选主机权限。频率 `off/every10m/every30m/hourly/daily` 分别关闭、10分钟、30分钟、每小时、每天；本地手动备份保留可恢复快照并下载 JSON。
 
 ## 6. 非功能需求
 | NFR | 要求 | 门禁 |
@@ -194,8 +194,16 @@ Chrome MV3 扩展（零构建、ES Modules、Chrome 114+；PiP 置顶需 Chrome 
 | NFR-5 TDD | 每 FR ≥ 1 feature 场景；RED 先行，GREEN 后 PR | npm test |
 | NFR-6 性能 | 千级标签树渲染 < 100ms（渲染节流，渲染期不阻塞 storage 事件） | T（M4 压测） |
 
-## 7. 追溯矩阵（FR ↔ feature ↔ 实现模块）
+## 7. M3-1 实施与验证记录
+
+M3-1（Issue #27：导入导出与备份）实现状态：本地 JSON/标准 Netscape HTML 导入导出、全量导入校验/替换、本地可恢复快照（最多 20 份）、GitHub 标准 HTML 定时覆盖均已接入共享设置面板与 Service Worker。GitHub 写入仅经 `https://api.github.com/*` 可选主机权限；备份凭据保存在 `chrome.storage.local`，不在 UI 回显或日志中输出。未配置 GitHub 时不发起请求。
+
+验收依据：`features/09_import_export.feature` 覆盖 JSON/HTML、结构替换与拒绝、转义/嵌套、权限/请求边界、远端新建与覆盖、alarm 生命周期及恢复；本次回归为 **74/74 场景 PASS**。本次静态门禁均通过：constraints 0 命中（11 个源码文件/9 条规则）、compliance 0 项（54 个文件）、committer 通过（15/26 个提交，自动 merge commit 跳过）、contrast 深浅主题各 9 组通过、format:check 通过、manifest JSON 有效。真实浏览器双模式 UI 手工验收由用户下载后执行；BDD 使用 mock 网络，不进行真实 GitHub 写入。
+
+实现文件：`src/core/import-export.js`、`src/core/store.js`、`src/background/service-worker.js`、`src/ui/shell.js`、`src/sidebar/sidebar.html`、`src/window/window.html`。测试指引见 README「M3-1 导入导出与备份」。
+
+## 8. 追溯矩阵（FR ↔ feature ↔ 实现模块）
 建立方式：`features/NN_*.feature` 文件头注释标注覆盖的 FR 编号；`tools/trace.mjs`（M1 建立）从 feature 文件与 src 模块导出双向矩阵到 `evidence/trace-*.txt`。M0 期先落 FR ↔ 里程碑映射（本文 §4 表列），实现层映射随各里程碑 verify-*-impl 断言回填。
 
-## 8. 验收准则汇总
+## 9. 验收准则汇总
 AC-1~AC-55 除 FR-052 外各 1 条，验证方法随 feature 场景落库（TDD：先 RED 后 GREEN）；门禁类 AC（NFR-1~5）由 CI 步骤持续验证。本 SRS 状态从「v0.1 基线」进入各里程碑 CR 变更控制。

@@ -1,5 +1,6 @@
 // TH2 service worker（FR-013/014/015/016）——点击图标按打开模式分支；右键图标开侧边栏；安装默认值；快捷键命令广播
-import { DEFAULT_SETTINGS, loadAll } from "../core/store.js";
+import { DEFAULT_SETTINGS, loadAll, saveSettings } from "../core/store.js";
+import { registerAutoBackup, runAutoBackup } from "../core/import-export.js";
 
 async function openWindow() {
   return chrome.windows.create({
@@ -14,13 +15,24 @@ async function openWindow() {
 // 导出初始化函数：MV3 每次唤醒顶层执行一次；BDD mock 下按 chrome 实例幂等注册（FR-013~016）
 const registered = new WeakSet();
 
-export function initServiceWorker(chromeApi = chrome) {
+async function syncAutoBackupAlarm(chromeApi) {
+  const { settings } = await loadAll(chromeApi);
+  await registerAutoBackup(chromeApi, settings || DEFAULT_SETTINGS);
+}
+
+async function saveBackupSettings(chromeApi, patch) {
+  const next = await saveSettings(patch, chromeApi);
+  await registerAutoBackup(chromeApi, next);
+  return next;
+}
+
+export function initServiceWorker(chromeApi = globalThis.chrome) {
   if (registered.has(chromeApi)) return;
   registered.add(chromeApi);
 
   // FR-013：点击图标行为由设置 openMode 决定（Q-A 裁决：以 v16 为准）
   chromeApi.action.onClicked.addListener(async (tab) => {
-    const { settings } = await loadAll();
+    const { settings } = await loadAll(chromeApi);
     if (settings.openMode === "window") {
       await openWindow();
     } else {
@@ -38,11 +50,51 @@ export function initServiceWorker(chromeApi = chrome) {
     }
   });
 
-  // FR-015：全新安装写入默认设置（不覆盖已有配置）
+  // FR-015：全新安装写入默认设置（不覆盖已有配置）；升级后也恢复备份计划。
   chromeApi.runtime.onInstalled.addListener(async () => {
     const got = await chromeApi.storage.local.get(["settings"]);
     if (!got.settings) {
       await chromeApi.storage.local.set({ settings: { ...DEFAULT_SETTINGS } });
+    }
+    await syncAutoBackupAlarm(chromeApi);
+  });
+  chromeApi.runtime.onStartup?.addListener(() => syncAutoBackupAlarm(chromeApi));
+  chromeApi.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.settings) void syncAutoBackupAlarm(chromeApi);
+  });
+  void syncAutoBackupAlarm(chromeApi);
+
+  // FR-019：GitHub 标准 HTML 定时覆盖；配置前/关闭时不触发任何网络请求。
+  chromeApi.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name !== "auto-backup") return;
+    const all = await loadAll(chromeApi);
+    const settings = all.settings || {};
+    if (settings.backupTarget !== "github" || !settings.ghToken || !settings.ghRepo) return;
+    const model = {
+      windows: all.windows,
+      groups: all.groups,
+      tabs: all.tabs,
+      trash: all.trash,
+      settings,
+    };
+    try {
+      await runAutoBackup(chromeApi, model, settings);
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: true,
+          message: "GitHub HTML 备份完成",
+          at: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      // Do not log settings/token. Persist a bounded, credential-free outcome for the UI.
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: false,
+          message: String(error.message || "备份失败").slice(0, 180),
+          at: new Date().toISOString(),
+        },
+      });
     }
   });
 
@@ -52,4 +104,4 @@ export function initServiceWorker(chromeApi = chrome) {
   });
 }
 
-initServiceWorker();
+if (globalThis.chrome?.runtime?.id) initServiceWorker(globalThis.chrome);

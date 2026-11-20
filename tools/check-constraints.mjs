@@ -1,18 +1,12 @@
 #!/usr/bin/env node
 /**
- * D-016 第 1 道闸门 · A 类红线静态禁止清单（CR-005 措辞修订 v1.0 生效）
+ * D-016 第 1 道闸门 · A 类红线静态禁止清单（TH2 Q-D：不调用浏览器书签 API）
  * 零依赖；扫描 tabharbor/src/**\/*.js 与 tabharbor/src/manifest.json。
  * 用法：node tools/check-constraints.mjs
  * 退出码：0 = 无命中；1 = 存在命中（G2 阻断发布）。
  *
- * CR-005 修订原则（收窄式修订，非放宽）：红线默认行为不变——对浏览器书签 0 写、对外网络 0 出站；
- * 显式功能的例外必须满足「显式触发 + 预览 + 二次确认」三要素，且白名单机器可查（按文件限定）：
- *   - chrome.bookmarks.create / remove 仅允许出现在 src/core/bookmarks-core.js（写回 / 从书签移除）；
- *   - fetch / XHR 仅允许出现在 src/core/backup-core.js，且 URL 仅 https://api.github.com；
- *   - bookmarks.removeTree / update / move 与 bookmarks.on* 仍然全库禁止（D-026）。
- *
- * 补偿控制说明：Chrome 的书签写能力 manifest 无法表达只读粒度，
- * 故以「本静态禁止清单 + 白名单 + UI 三要素评审」共同作为补偿控制。
+ * TH2 Q-D / FR-050：书签只通过标准 Netscape HTML 文件导入导出，禁止访问浏览器原生书签 API。
+ * GitHub 网络备份仅限 api.github.com，并须由用户显式配置与触发。
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -36,19 +30,8 @@ const RULES = [
   { id: "C04", re: /\bscripting\.executeScript\b/g, desc: "scripting.executeScript（红线 3）" },
   {
     id: "C05",
-    re: /bookmarks\.(onCreated|onChanged|onRemoved|onMoved)\b/g,
-    desc: "注册书签变更监听（红线 4 / D-026：不监听，手动重新同步）",
-  },
-  {
-    id: "C06",
-    re: /chrome\.bookmarks\.remove\b/g,
-    desc: "删除浏览器书签（红线 4 修订白名单：仅 bookmarks-core.js 写回/移除出口）",
-    allowFiles: ["src/core/bookmarks-core.js"],
-  },
-  {
-    id: "C07",
-    re: /chrome\.bookmarks\.(removeTree|update|move)\b/g,
-    desc: "书签 removeTree/update/move 仍全库禁止（红线 4 修订）",
+    re: /\b(?:chrome\s*\.\s*)?bookmarks\s*\.\s*[A-Za-z_$][\w$]*\s*\(/g,
+    desc: "任何浏览器书签 API 调用（Q-D / FR-050：仅支持标准 HTML 导入导出）",
   },
   {
     id: "C08",
@@ -57,21 +40,16 @@ const RULES = [
   },
   { id: "C09", re: /<all_urls>/g, desc: "常驻 <all_urls> 主机权限（红线 2）" },
   {
-    id: "C10",
-    re: /chrome\.bookmarks\.create\b/g,
-    desc: "新建浏览器书签（红线 4 修订白名单：仅 bookmarks-core.js 写回出口）",
-    allowFiles: ["src/core/bookmarks-core.js"],
-  },
-  {
     id: "C11",
     re: /\bfetch\s*\(|XMLHttpRequest\b/g,
-    desc: "网络出站（红线 7 修订白名单：仅 backup-core.js 的 GitHub 备份）",
-    allowFiles: ["src/core/backup-core.js"],
+    desc: "网络出站（红线 7 修订白名单：仅 GitHub 备份模块）",
+    allowFiles: ["src/core/import-export.js"],
   },
   {
     id: "C12",
     re: /https?:\/\/(?!api\.github\.com)/g,
     desc: "出站 URL 必须是 https://api.github.com（红线 7 修订）",
+    allowFiles: ["src/core/import-export.js"],
   },
 ];
 
@@ -94,7 +72,7 @@ for (const f of files) {
   const text = fs.readFileSync(f, "utf8");
   const lines = text.split(/\r?\n/);
   for (const rule of RULES) {
-    if (rule.allowFiles && rule.allowFiles.includes(rel)) continue; // CR-005 白名单
+    if (rule.allowFiles && rule.allowFiles.includes(rel)) continue; // 明确列出的受限例外
     rule.re.lastIndex = 0;
     lines.forEach((line, i) => {
       rule.re.lastIndex = 0;
@@ -124,7 +102,5 @@ for (const h of hits) {
   console.log(h.file.padEnd(46) + String(h.line).padEnd(6) + h.rule.padEnd(7) + h.desc);
   console.log("    > " + h.code);
 }
-console.log(
-  "\n白名单（CR-005）：bookmarks.create/remove 仅限 src/core/bookmarks-core.js；fetch 仅限 src/core/backup-core.js 且仅 https://api.github.com。"
-);
+console.log("\n受限例外：fetch/XHR 仅限 src/core/backup-core.js；书签 API 无例外。");
 process.exit(1);
