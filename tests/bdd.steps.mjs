@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { step } from "../tools/bdd-runner.mjs";
+import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 import * as io from "../src/core/import-export.js";
 
@@ -434,6 +434,15 @@ step("那么", "{} 包含 {}", (rel, needle) => {
 step("那么", "{} 不包含 {}", (rel, needle) => {
   if (repoFile(rel).includes(needle.replace(/\\"/g, '"'))) {
     throw new Error(`${rel} 不应包含 ${needle}`);
+  }
+});
+
+// 兜底：{} 模板用 "([^"]*)" 切参，针内含转义引号（如 data-cat=\"appearance\"）时
+// 通用模板无法匹配——此宽松模板在通用模板失配后接管，剥外引号并反转义。
+stepMatch("那么", '^"([^"]+)" 包含 (.+)$', (rel, rawNeedle) => {
+  const needle = rawNeedle.replace(/^"(.*)"$/, "$1").replace(/\\"/g, '"');
+  if (!repoFile(rel).includes(needle)) {
+    throw new Error(`${rel} 不包含 ${needle}`);
   }
 });
 

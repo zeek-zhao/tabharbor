@@ -132,6 +132,9 @@ try {
   });
   const guideCount = await win.evaluate(() => document.querySelectorAll("#guideBody ol li").length);
   assert.ok(guideCount >= 8, `指南条目数异常: ${guideCount}`);
+  // 关闭指南弹窗——mask 会拦截后续 #btnTrash 的点击
+  await win.evaluate(() => document.querySelector('[data-modal-close="modalGuide"]').click());
+  await win.waitForSelector("#modalGuide[hidden]", { timeout: 5000 });
   console.log("E2E 5/7 快捷键表（14 项）与上手指南弹窗通过");
 
   // 回收站角标：追加一条 trash 记录 → onChanged 实时更新角标；弹窗渲染空态/条目
