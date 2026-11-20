@@ -134,7 +134,9 @@ try {
   assert.ok(guideCount >= 8, `指南条目数异常: ${guideCount}`);
   // 关闭指南弹窗——mask 会拦截后续 #btnTrash 的点击
   await win.evaluate(() => document.querySelector('[data-modal-close="modalGuide"]').click());
-  await win.waitForSelector("#modalGuide[hidden]", { timeout: 5000 });
+  await win.waitForFunction(() => document.querySelector("#modalGuide").hidden, undefined, {
+    timeout: 5000,
+  });
   console.log("E2E 5/7 快捷键表（14 项）与上手指南弹窗通过");
 
   // 回收站角标：追加一条 trash 记录 → onChanged 实时更新角标；弹窗渲染空态/条目
@@ -164,6 +166,11 @@ try {
   );
   assert.equal(trashItems, 1, `回收站条目数异常: ${trashItems}`);
   console.log("E2E 6/7 回收站角标与条目渲染通过");
+  // 关闭回收站弹窗——mask 会拦截后续 #btnTheme 的点击
+  await win.evaluate(() => document.querySelector('[data-modal-close="modalTrash"]').click());
+  await win.waitForFunction(() => document.querySelector("#modalTrash").hidden, undefined, {
+    timeout: 5000,
+  });
 
   // 主题切换持久化：点击主题按钮 → data-theme 变化 + settings.theme 入库 + toast
   const before = await win.evaluate(() => document.documentElement.dataset.theme);
