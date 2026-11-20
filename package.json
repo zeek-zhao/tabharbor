@@ -5,7 +5,8 @@
   "type": "module",
   "description": "TabHarbor v2 — Chrome MV3 标签管理扩展（窗口/分组/标签三层树，严格实时同步；TDD+BDD 闭环）",
   "scripts": {
-    "test": "node tools/bdd-runner.mjs features",
+    "test": "node tools/bdd-runner.mjs features && node samples/validate-samples.mjs",
+    "test:samples": "node samples/validate-samples.mjs",
     "constraints": "node tools/check-constraints.mjs",
     "compliance": "node tools/check-compliance.mjs",
     "committer": "node tools/check-committer.mjs",

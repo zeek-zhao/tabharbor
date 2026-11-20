@@ -6,7 +6,98 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { step } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
+import * as io from "../src/core/import-export.js";
 
+/* ---------- 样例文件合同（真实导入器，不依赖 Chrome） ---------- */
+const SAMPLE_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../samples/datasets"
+);
+step("假如", "JSON 样例文件已读取", async () => {
+  ctx.sampleJson = JSON.parse(
+    await fs.promises.readFile(path.join(SAMPLE_DIR, "tabharbor-sample.json"), "utf8")
+  );
+});
+step("假如", "HTML 样例文件已读取", async () => {
+  ctx.sampleHtml = await fs.promises.readFile(
+    path.join(SAMPLE_DIR, "tabharbor-sample.html"),
+    "utf8"
+  );
+});
+step("当", "用真实导入器校验 JSON 样例", async () => {
+  ctx.sampleImportedJson = await io.importJSON(ctx.sampleJson, {});
+});
+step("当", "用真实导入器校验 HTML 样例", async () => {
+  ctx.sampleImportedHtml = await io.importHTML(ctx.sampleHtml, {});
+});
+step("那么", 'JSON 样例提供了 "2" 个窗口', () => {
+  if (ctx.sampleImportedJson.windows.length < 2) throw new Error("JSON 样例窗口不足");
+});
+// 注意：runner 实现 Gherkin And 继承——紧跟「那么」的「并且」按 then 检索，
+// 因此本组断言统一以「那么」注册（feature 中的「并且」会继承到 then）。
+step("那么", 'JSON 样例至少有 "5" 个分组', () => {
+  if (ctx.sampleImportedJson.groups.length < 5) throw new Error("JSON 样例分组不足");
+});
+step("那么", 'JSON 样例至少有 "10" 个标签', () => {
+  if (ctx.sampleImportedJson.tabs.length < 10) throw new Error("JSON 样例标签不足");
+});
+step("那么", 'HTML 样例至少有 "5" 个分组', () => {
+  if (ctx.sampleImportedHtml.groups.length < 5) throw new Error("HTML 样例分组不足");
+});
+step("那么", 'HTML 样例至少有 "10" 个标签', () => {
+  if (ctx.sampleImportedHtml.tabs.length < 10) throw new Error("HTML 样例标签不足");
+});
+step("那么", "JSON 样例保留嵌套分组", () => {
+  if (
+    !ctx.sampleImportedJson.groups.some((g) =>
+      ctx.sampleImportedJson.groups.some((child) => child.parentId === g.id)
+    )
+  )
+    throw new Error("JSON 样例无嵌套分组");
+});
+step("那么", "HTML 样例保留嵌套分组", () => {
+  if (
+    !ctx.sampleImportedHtml.groups.some((g) =>
+      ctx.sampleImportedHtml.groups.some((child) => child.parentId === g.id)
+    )
+  )
+    throw new Error("HTML 样例无嵌套分组");
+});
+step("那么", 'HTML 样例包含 "1" 个窗口', () => {
+  if (ctx.sampleImportedHtml.windows.length < 1) throw new Error("HTML 样例窗口不足");
+});
+step("那么", "JSON 样例网址全部是 example.com 占位地址", () => {
+  if (ctx.sampleImportedJson.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
+    throw new Error("JSON 样例包含非占位地址");
+});
+step("那么", "HTML 样例网址全部是 example.com 占位地址", () => {
+  if (ctx.sampleImportedHtml.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
+    throw new Error("HTML 样例包含非占位地址");
+});
+step(
+  "那么",
+  '"docs/SAMPLES-使用与验证指南.md" 包含 "M3-1 PR #28 仍需用户手工 Chrome 验收"',
+  async () => {
+    const guide = await fs.promises.readFile(
+      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+      "utf8"
+    );
+    if (!guide.includes("M3-1 PR #28 仍需用户手工 Chrome 验收"))
+      throw new Error("指南未注明 M3-1 手工验收状态");
+  }
+);
+step(
+  "那么",
+  '"docs/SAMPLES-使用与验证指南.md" 包含 "不能将 HTML 控件/需求文字当作已实现功能"',
+  async () => {
+    const guide = await fs.promises.readFile(
+      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+      "utf8"
+    );
+    if (!guide.includes("不能将 HTML 控件/需求文字当作已实现功能"))
+      throw new Error("指南未注明能力边界");
+  }
+);
 /* ---------- 模块级上下文 ---------- */
 const ctx = {
   named: {},
@@ -857,7 +948,6 @@ step("那么", "渲染的树视图包含 {}", (title) => {
 });
 
 /* ---------- M3-1 书签导入导出（09_import_export.feature，FR-031~038，issue #27） ---------- */
-import * as io from "../src/core/import-export.js";
 
 step("当", "触发导出 JSON", async () => {
   ctx.exported = await io.exportJSON(ctx.m, ctx.all?.settings || {});
