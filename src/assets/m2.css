@@ -611,6 +611,13 @@ body {
   cursor: pointer;
   font-size: 11px;
 }
+.mini-btn.danger {
+  color: var(--warn);
+}
+.trash-item .ops {
+  display: flex;
+  gap: 8px;
+}
 
 /* 右键菜单 */
 .ctx-menu {

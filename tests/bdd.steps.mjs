@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 import * as io from "../src/core/import-export.js";
+import * as trashOp from "../src/core/trash-op.js";
+import { entryLabel } from "../src/core/trash-op.js";
 
 /* ---------- 样例文件合同（真实导入器，不依赖 Chrome） ---------- */
 const SAMPLE_DIR = path.resolve(
@@ -353,6 +355,11 @@ step("当", "在分组 {} 下创建标签 {} 指向 {}", (grpTitle, title, url) 
   ctx.named[title] = model.addTab(ctx.m, title, url, byTitle(grpTitle).id);
 });
 
+// FR-024（M1-1）：窗口容器可直挂标签（如「当前浏览器窗口」散页）
+step("当", "在窗口 {} 下创建标签 {} 指向 {}", (winTitle, title, url) => {
+  ctx.named[title] = model.addTab(ctx.m, title, url, byTitle(winTitle).id);
+});
+
 step("那么", "模型的窗口、分组、标签计数分别为 {}、{}、{}", (w, g, t) => {
   const c = model.countByKind(ctx.m);
   if (c.window !== Number(w) || c.group !== Number(g) || c.tab !== Number(t)) {
@@ -361,13 +368,17 @@ step("那么", "模型的窗口、分组、标签计数分别为 {}、{}、{}", 
 });
 
 step("那么", "标签 {} 的父节点是分组 {}", (tabTitle, grpTitle) => {
-  if (byTitle(tabTitle).parentId !== byTitle(grpTitle).id) {
+  const tab = freshByTitle(tabTitle);
+  const grp = freshByTitle(grpTitle);
+  if (tab.parentId !== grp.id) {
     throw new Error(`标签归属不符：${tabTitle} 不在 ${grpTitle} 下`);
   }
 });
 
 step("那么", "分组 {} 的父节点是 {}", (childTitle, parentTitle) => {
-  if (byTitle(childTitle).parentId !== byTitle(parentTitle).id) {
+  const child = freshByTitle(childTitle);
+  const parent = freshByTitle(parentTitle);
+  if (child.parentId !== parent.id) {
     throw new Error(`嵌套不符：${childTitle} 的父节点不是 ${parentTitle}`);
   }
 });
@@ -383,6 +394,95 @@ step("那么", "拖拽被接受", () => {
 
 step("那么", "拖拽被拒绝（防环/非法落点）", () => {
   if (ctx.dropOk) throw new Error("拖拽应被拒绝但被接受");
+});
+
+/* ---------- 场景组：M2 拖拽落点细化（FR-025/027/028/031，#31） ---------- */
+// 按当前模型实时按标题查节点（回收站恢复/移动后 ctx.named 引用可能已脱离模型）
+function freshByTitle(title) {
+  for (const arr of [ctx.m.windows, ctx.m.groups, ctx.m.tabs]) {
+    const hit = arr.find((n) => n.title === title);
+    if (hit) return hit;
+  }
+  throw new Error(`模型中未找到节点：${title}`);
+}
+function hasNode(title) {
+  return [...ctx.m.windows, ...ctx.m.groups, ...ctx.m.tabs].some((n) => n.title === title);
+}
+
+step("当", "把标签 {} 拖到标签 {} 之后", (dragTitle, targetTitle) => {
+  ctx.dropOk = model.moveLeafAfter(ctx.m, freshByTitle(dragTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("当", "把标签 {} 拖入 {}（容器）", (dragTitle, targetTitle) => {
+  ctx.dropOk = model.moveLeafInto(ctx.m, freshByTitle(dragTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("当", "把窗口 {} 合并到窗口 {}", (srcTitle, targetTitle) => {
+  ctx.dropOk = model.mergeWindows(ctx.m, freshByTitle(srcTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("那么", "{} 排在 {} 之后（同父相邻）", (aTitle, bTitle) => {
+  const a = freshByTitle(aTitle);
+  const b = freshByTitle(bTitle);
+  if (a.parentId !== b.parentId) throw new Error(`${aTitle} 与 ${bTitle} 父节点不同`);
+  if (ctx.m.tabs.indexOf(a) !== ctx.m.tabs.indexOf(b) + 1) {
+    throw new Error(`${aTitle} 未紧跟在 ${bTitle} 之后`);
+  }
+});
+
+step("那么", "{} 的父节点是 {}", (childTitle, parentTitle) => {
+  const child = freshByTitle(childTitle);
+  const parent = freshByTitle(parentTitle);
+  if (child.parentId !== parent.id) {
+    throw new Error(`${childTitle} 的父节点不是 ${parentTitle}`);
+  }
+});
+
+step("那么", "{} 不在模型中", (title) => {
+  if (hasNode(title)) throw new Error(`${title} 应已移除但仍在模型中`);
+});
+
+step("那么", "窗口 {} 的分组随行并入窗口 {}", (srcTitle, targetTitle) => {
+  const srcWin = ctx.m.windows.find((w) => w.title === srcTitle);
+  if (srcWin) throw new Error(`源窗口 ${srcTitle} 应已移除`);
+  // 源窗口原有分组（记录于 ctx.named）现在应挂在目标窗口下
+  const named = ctx.named[srcTitle];
+  if (!named) throw new Error(`未找到源窗口记录：${srcTitle}`);
+  const srcGroups = ctx.m.groups.filter(
+    (g) => g.id === named.id || ctx.named[g.title]?.id === g.id
+  );
+  const target = freshByTitle(targetTitle);
+  const childGroups = ctx.m.groups.filter((g) => g.parentId === target.id);
+  if (!childGroups.length) throw new Error(`目标窗口 ${targetTitle} 下没有分组`);
+});
+
+/* ---------- 场景组：回收站（FR-018/037，#31） ---------- */
+step("当", "把 {} 删除到回收站", (title) => {
+  const node = freshByTitle(title);
+  ctx.trashEntry = trashOp.trashNode(ctx.m, node.id, "2026-01-01 08:00");
+});
+
+step("那么", "回收站条目数为 {}", (n) => {
+  const count = (ctx.m.trash || []).length;
+  if (count !== Number(n)) throw new Error(`回收站条目数不符：${count} ≠ ${n}`);
+});
+
+step("当", "恢复回收站条目 {}", (i) => {
+  const entry = trashOp.restoreEntry(ctx.m, Number(i));
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+});
+
+step("当", "彻底删除回收站条目 {}", (i) => {
+  const entry = trashOp.purgeEntry(ctx.m, Number(i));
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+});
+
+step("那么", "回收站条目 {} 的标题是 {}", (i, title) => {
+  const entry = (ctx.m.trash || [])[Number(i)];
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+  if (entryLabel(entry) !== title) {
+    throw new Error(`条目标题不符：${entryLabel(entry)} ≠ ${title}`);
+  }
 });
 
 /* ---------- 场景组：递归后代（FR-020 复制/关闭整组的数据基础） ---------- */

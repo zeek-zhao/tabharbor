@@ -3,12 +3,14 @@
 // #29 壳对齐原型 v16：设置弹窗四分类、toast、回收站角标、快捷键/指南弹窗、统计四项
 // #30 树交互对齐原型 v16：leaf 选中/双击打开、行内复制/关闭、单击折叠、右键菜单、
 //     搜索过滤、定位、新建分组/备注/编辑弹窗、启动归类（bootAlign）
+// #31 M2 整理对齐原型 v16：拖拽落点（leaf/group/window 全层级）、回收站恢复/彻底删除、键盘导航
 import * as store from "../core/store.js";
 import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as editOp from "../core/edit-op.js";
+import * as trashOp from "../core/trash-op.js";
 import { bootAlign, computeOpenIds } from "../core/align.js";
-import { findNode } from "../core/model.js";
+import { findNode, moveLeafAfter, moveLeafInto, moveNode, mergeWindows } from "../core/model.js";
 import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
@@ -270,7 +272,12 @@ export async function bootShell(root) {
   body.addEventListener("dblclick", async (e) => {
     const leaf = e.target.closest(".leaf");
     if (!leaf?.dataset.id) return;
-    const node = findNode(m, leaf.dataset.id);
+    await openLeafById(leaf.dataset.id);
+  });
+
+  // 双击/Enter 共用：打开选中标签（聚焦或新建）
+  const openLeafById = async (id) => {
+    const node = findNode(m, id);
     if (!node?.url) return;
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
@@ -279,6 +286,182 @@ export async function bootShell(root) {
       toast(res.focused ? "已聚焦已打开网页" : "已打开网页");
     } catch (err) {
       say("打开失败：" + err.message);
+    }
+  };
+
+  // ---- #31 拖拽（FR-025~032）：leaf/group/window 全层级事件委托 ----
+  const titleOf = (id) => findNode(m, id)?.title || "";
+  let dragSrc = null; // { id, kind: "leaf"|"group"|"window" }
+
+  // 落点规则（原型 dropTo）：返回是否发生移动（已含 toast 文案）
+  const applyDrop = async (srcId, srcKind, targetKind, targetId) => {
+    if (!srcId || srcId === targetId) return false;
+    const src = findNode(m, srcId);
+    const target = findNode(m, targetId);
+    if (!src || !target) return false;
+    if (srcKind === "leaf") {
+      if (targetKind === "leaf") {
+        if (moveLeafAfter(m, srcId, targetId)) {
+          toast(`已排到「${titleOf(targetId)}」之后`);
+          return true;
+        }
+        return false;
+      }
+      if (targetKind === "group") {
+        if (moveLeafInto(m, srcId, targetId)) {
+          toast(`已移入「${titleOf(targetId)}」`);
+          return true;
+        }
+        toast("不能拖入自身子组");
+        return false;
+      }
+      if (targetKind === "window") {
+        const g0 = m.groups.find((g) => g.parentId === targetId);
+        const dest = g0 ? g0.id : targetId; // 无分组时 FR-024 直挂窗口
+        if (moveLeafInto(m, srcId, dest)) {
+          toast(`已移入「${titleOf(targetId)}」`);
+          return true;
+        }
+        return false;
+      }
+      return false;
+    }
+    if (srcKind === "group") {
+      let dest = targetId;
+      if (targetKind === "leaf") dest = target.parentId; // 挂到标签所在分组/窗口
+      if (moveNode(m, srcId, dest)) {
+        toast(
+          targetKind === "window" || (targetKind === "leaf" && target.parentId === dest)
+            ? `整组已移入「${titleOf(dest)}」`
+            : `已作为子组挂到「${titleOf(dest)}」下`
+        );
+        return true;
+      }
+      toast("不能拖入自身子组");
+      return false;
+    }
+    if (srcKind === "window") {
+      if (targetKind === "window" && mergeWindows(m, srcId, targetId)) {
+        toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
+        return true;
+      }
+      toast("不支持该放置位置");
+      return false;
+    }
+    return false;
+  };
+
+  body.addEventListener("dragstart", (e) => {
+    const el = e.target.closest(".node, .leaf");
+    if (!el) return;
+    e.stopPropagation();
+    dragSrc = { id: el.dataset.id, kind: el.dataset.kind === "leaf" ? "leaf" : el.dataset.kind };
+    el.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    try {
+      e.dataTransfer.setData("text/plain", dragSrc.id);
+    } catch {
+      // 某些环境禁止 setData，拖拽源仍以 dragSrc 记录
+    }
+  });
+  body.addEventListener("dragend", () => {
+    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+    body.querySelectorAll(".dragging").forEach((x) => x.classList.remove("dragging"));
+    dragSrc = null;
+  });
+  body.addEventListener("dragover", (e) => {
+    const el = e.target.closest(".node, .leaf");
+    if (!el || !dragSrc) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+    el.classList.add("dragover");
+  });
+  body.addEventListener("drop", async (e) => {
+    const el = e.target.closest(".node, .leaf");
+    if (!el || !dragSrc) return;
+    e.preventDefault();
+    e.stopPropagation();
+    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+    const src = dragSrc;
+    dragSrc = null;
+    const moved = await applyDrop(src.id, src.kind, el.dataset.kind, el.dataset.id);
+    if (moved) {
+      await store.saveModel(m);
+      await refreshOpen();
+    }
+  });
+
+  // ---- #31 键盘导航（原型 14 键中的已实现子集）----
+  const visibleLeaves = () => [...body.querySelectorAll(".leaf")];
+  const selectLeaf = async (id) => {
+    selectedId = id;
+    await render();
+    const el = body.querySelector(`.leaf[data-id="${id}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  };
+  document.addEventListener("keydown", async (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    const leaves = visibleLeaves();
+    const cur = leaves.findIndex((el) => el.dataset.id === selectedId);
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!leaves.length) return;
+      const next =
+        e.key === "ArrowDown" ? Math.min(cur + 1, leaves.length - 1) : Math.max(cur - 1, 0);
+      const pick = leaves[cur < 0 ? 0 : next];
+      if (pick) await selectLeaf(pick.dataset.id);
+    } else if (e.key === "Enter" && selectedId) {
+      e.preventDefault();
+      await openLeafById(selectedId);
+    } else if (e.key === "Delete" && selectedId) {
+      e.preventDefault();
+      const node = findNode(m, selectedId);
+      if (!node) return;
+      trashOp.trashNode(m, selectedId, new Date().toLocaleString("zh-CN"));
+      await store.saveModel(m);
+      await refreshOpen();
+      toast("已移入回收站（可从工具栏回收站恢复）");
+    } else if (e.key === "c" && (e.ctrlKey || e.metaKey) && !e.shiftKey && selectedId) {
+      e.preventDefault();
+      try {
+        await copyNode(selectedId);
+      } catch (err) {
+        say("复制失败：" + err.message);
+      }
+    } else if (e.key === "l" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      root.querySelector("#btnLocate")?.click();
+    } else if (e.key === "e" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      root.querySelector("#btnToggleAll")?.click();
+    } else if (e.key === "L" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      root.querySelector("#btnLinks")?.click();
+    } else if (e.key === "o" && (e.ctrlKey || e.metaKey) && selectedId) {
+      e.preventDefault();
+      const leaf = findNode(m, selectedId);
+      const gid =
+        leaf?.parentId && findNode(m, leaf.parentId)?.kind === "group" ? leaf.parentId : null;
+      if (gid) {
+        try {
+          const urls = new Set((await chrome.tabs.query({})).map((x) => x.url).filter(Boolean));
+          const n = await tabsOp.openAll(chrome, m, gid, urls);
+          await refreshOpen();
+          toast(`已打开 ${n} 个网页`);
+        } catch (err) {
+          say("打开失败：" + err.message);
+        }
+      }
+    } else if (e.key === "d" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      root.querySelector("#btnTheme")?.click();
+    } else if (e.key === "Backspace" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      renderTrashList();
+      openModal("modalTrash");
     }
   });
 
@@ -341,8 +524,11 @@ export async function bootShell(root) {
         collapsed = editOp.collapsedToggle(collapsed, id);
         await render();
       } else if (act === "del") {
-        // 删除到回收站（恢复 / 彻底删除在 #31 接线）
-        toast("回收站操作即将提供");
+        // FR-018：删除到回收站（节点+后代入站，浏览器标签不动）
+        trashOp.trashNode(m, id, new Date().toLocaleString("zh-CN"));
+        await store.saveModel(m);
+        await refreshOpen();
+        toast("已移入回收站（可从工具栏回收站恢复）");
       }
     } catch (err) {
       say("操作失败：" + err.message);
@@ -491,7 +677,7 @@ export async function bootShell(root) {
     await saveSettingsPatch({ linkShow: !settings.linkShow });
   });
 
-  // 回收站列表（恢复 / 彻底删除在 #31 接线；此处渲染条目与空态）
+  // 回收站列表（#31 接线：恢复 / 彻底删除）
   const renderTrashList = () => {
     const box = root.querySelector("#trashList");
     if (!box) return;
@@ -502,13 +688,34 @@ export async function bootShell(root) {
       return;
     }
     box.innerHTML = trash
-      .map((d) => {
+      .map((d, i) => {
         const kindLabel =
           d.kind === "leaf" || d.kind === "tab" ? "标签" : d.kind === "group" ? "分组" : "窗口";
-        return `<div class="trash-item"><div class="meta"><div class="t">${d.payload?.title ?? d.payload?.url ?? ""}</div><div class="s">${kindLabel}</div></div></div>`;
+        const sub = [kindLabel, d.time ? `删除于 ${d.time}` : ""].filter(Boolean).join(" · ");
+        return `<div class="trash-item"><div class="meta"><div class="t">${d.payload?.title ?? d.payload?.url ?? ""}</div><div class="s">${sub}</div></div><div class="ops"><button class="mini-btn" data-trash-act="restore" data-i="${i}">恢复</button><button class="mini-btn danger" data-trash-act="purge" data-i="${i}">彻底删除</button></div></div>`;
       })
       .join("");
   };
+  root.querySelector("#trashList")?.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-trash-act]");
+    if (!btn) return;
+    const i = Number(btn.dataset.i);
+    if (btn.dataset.trashAct === "restore") {
+      const entry = trashOp.restoreEntry(m, i);
+      if (!entry) return;
+      await store.saveModel(m);
+      renderTrashList();
+      await refreshOpen();
+      toast("已恢复");
+    } else {
+      const entry = trashOp.purgeEntry(m, i);
+      if (!entry) return;
+      await store.saveModel(m);
+      renderTrashList();
+      await render();
+      toast("已彻底删除");
+    }
+  });
 
   // ---- 备份与导入导出（原 dataPanel 迁入设置-备份与恢复） ----
   const syncBackupFields = () => {

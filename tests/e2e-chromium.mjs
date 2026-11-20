@@ -213,11 +213,112 @@ try {
   assert.ok(expandedAgain, "再次单击未展开子树");
   console.log("E2E 8/7 原型树标记 + 单击选中/折叠（FR-036/013）通过");
 
+  // —— #31 M2 整理：拖拽落点 / 键盘导航 / 回收站恢复与彻底删除 ——
+  // 拖拽：t_project_1（学习组）拖到 g_design 分组 → 移入
+  await win.evaluate(() => {
+    const src = document.querySelector('.leaf[data-id="t_project_1"]');
+    const dst = document.querySelector('.node[data-id="g_design"]');
+    const dt = new DataTransfer();
+    src.dispatchEvent(
+      new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt })
+    );
+    dst.dispatchEvent(
+      new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt })
+    );
+    dst.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
+    src.dispatchEvent(
+      new DragEvent("dragend", { bubbles: true, cancelable: true, dataTransfer: dt })
+    );
+  });
+  await win.waitForFunction(
+    () => !!document.querySelector('.node[data-id="g_design"] .leaf[data-id="t_project_1"]'),
+    { timeout: 5000 }
+  );
+  console.log("E2E 10/7 拖拽落点（标签移入分组）通过");
+
+  // 键盘：清空回收站（E2E 6 曾种入 1 条）→ ↓ 选中 → Enter 打开 → Delete 移入回收站
+  await win.evaluate(() => chrome.storage.local.set({ trash: [] }));
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return !b || b.style.display === "none";
+    },
+    undefined,
+    { timeout: 5000 }
+  );
+  await win.keyboard.press("ArrowDown");
+  await win.waitForFunction(() => !!document.querySelector(".leaf.selected"), undefined, {
+    timeout: 5000,
+  });
+  await win.keyboard.press("Enter");
+  await win.waitForFunction(() => document.querySelector("#toast").classList.contains("show"), {
+    timeout: 5000,
+  });
+  await win.keyboard.press("Delete");
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return b && b.style.display !== "none" && b.textContent === "1";
+    },
+    { timeout: 5000 }
+  );
+  console.log("E2E 11/7 键盘导航（↓/Enter/Delete → 回收站）通过");
+
+  // 回收站：恢复 → 标签回树 + 角标清零；再删 → 彻底删除 → 条目消失
+  await win.click("#btnTrash");
+  await win.waitForSelector("#modalTrash:not([hidden])");
+  await win.click('[data-trash-act="restore"]');
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return (!b || b.style.display === "none") && !!document.querySelector(".leaf.selected");
+    },
+    { timeout: 5000 }
+  );
+  await win.keyboard.press("Delete"); // 再删一次（选中态仍在）
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return b && b.style.display !== "none" && b.textContent === "1";
+    },
+    undefined,
+    { timeout: 5000 }
+  );
+  // 删除操作只刷新树；弹窗仍开着、遮罩挡住按钮 → 程序化触发 btnTrash 重渲染条目
+  await win.evaluate(() => document.querySelector("#btnTrash").click());
+  await win.waitForSelector('[data-trash-act="purge"]', { timeout: 5000 });
+  await win.click('[data-trash-act="purge"]');
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return (!b || b.style.display === "none") && !document.querySelector(".leaf.selected");
+    },
+    { timeout: 5000 }
+  );
+  await win.evaluate(() => document.querySelector('[data-modal-close="modalTrash"]').click());
+  await win.waitForFunction(() => document.querySelector("#modalTrash").hidden, undefined, {
+    timeout: 5000,
+  });
+  console.log("E2E 12/7 回收站恢复 / 彻底删除（#31）通过");
+
+  // Enter 打开过 example.com 网页 → 侧边栏启动归类会据其创建“当前浏览器窗口”
+  // 关闭这些网页，保证侧边栏页看到的模型仍是样例的 2 窗口
+  await win.evaluate(
+    () =>
+      new Promise((r) =>
+        chrome.tabs.query({ url: "*://example.com/*" }, (ts) => {
+          if (ts.length) chrome.tabs.remove(ts.map((t) => t.id));
+          void r();
+        })
+      )
+  );
+  await win.waitForTimeout(300);
+
   // —— 侧边栏页：双模式共享同一存储数据源 ——
   const side = await context.newPage();
   await side.goto(`chrome-extension://${extId}/sidebar/sidebar.html`);
   await side.waitForFunction(
-    () => document.querySelectorAll('.leaf[data-kind="leaf"]').length >= 10,
+    () => document.querySelectorAll('.leaf[data-kind="leaf"]').length >= 9, // #31 彻底删除 1 条后余 9
     {
       timeout: 10000,
     }
