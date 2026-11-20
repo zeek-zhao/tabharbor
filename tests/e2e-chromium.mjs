@@ -354,6 +354,17 @@ try {
   assert.ok(statusFail.includes("版本不兼容"), `非法版本拒绝提示缺失: ${statusFail}`);
   console.log("E2E 13/7 M3 导入演练（合法替换 + 非法版本拒绝）通过");
 
+  // —— #33 未交付能力显式提示（不静默无响应）——
+  const pendingToast = await win.evaluate(
+    () =>
+      new Promise((r) => {
+        document.querySelector("#btnHistory").click();
+        setTimeout(() => r(document.querySelector("#toast").textContent), 150);
+      })
+  );
+  assert.ok(pendingToast.includes("历史跳转待实现"), `待实现提示缺失: ${pendingToast}`);
+  console.log("E2E 14/7 未交付能力显式「待实现」提示通过");
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

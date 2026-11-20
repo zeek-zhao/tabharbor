@@ -81,3 +81,10 @@
 场景: 页面装载壳模块即自动启动（TH2-E2E-001 真实页面渲染契约）
 那么 "src/ui/shell.js" 包含 "document.querySelector"
 那么 "src/ui/shell.js" 包含 "bootShell(document)"
+
+场景: 未交付能力显式提示待实现（不静默无响应）
+那么 "src/ui/shell.js" 包含 "历史跳转待实现"
+那么 "src/ui/shell.js" 包含 "全屏卡片视图待实现"
+那么 "src/ui/shell.js" 包含 "PiP 置顶待实现"
+那么 "src/ui/shell.js" 不包含 "chrome.history"
+那么 "src/ui/shell.js" 不包含 "chrome.bookmarks"

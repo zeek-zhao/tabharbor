@@ -677,6 +677,16 @@ export async function bootShell(root) {
     await saveSettingsPatch({ linkShow: !settings.linkShow });
   });
 
+  // ---- 未交付能力：显式提示待实现（M3/M4 后续，原型 v16 已定义交互）----
+  // 历史跳转 / 全屏卡片视图 / PiP 置顶尚未实现；不静默无响应，也不虚构功能。
+  for (const [btn, label] of [
+    ["#btnHistory", "历史跳转待实现"],
+    ["#btnFullscreen", "全屏卡片视图待实现"],
+    ["#btnPip", "PiP 置顶待实现"],
+  ]) {
+    root.querySelector(btn)?.addEventListener("click", () => toast(label));
+  }
+
   // 回收站列表（#31 接线：恢复 / 彻底删除）
   const renderTrashList = () => {
     const box = root.querySelector("#trashList");
