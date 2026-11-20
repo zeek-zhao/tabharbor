@@ -64,7 +64,8 @@ export function renderEmpty() {
   return `<div class="empty">还没有窗口节点。打开插件后会自动归入当前浏览器的窗口。</div>`;
 }
 
-export function renderStats(m) {
-  const opened = m.tabs.length; // open 为派生态，M0 壳以总数占位，M1 接 tabs.query
-  return `窗口 ${m.windows.length} · 分组 ${m.groups.length} · 标签 ${m.tabs.length} · 已开 ${opened}`;
+export function renderStats(m, openIds) {
+  // 已打开为派生态：openIds 由 align.computeOpenIds 产出（标签命中 + 祖链）
+  const opened = openIds ? m.tabs.filter((t) => openIds.has(t.id)).length : 0;
+  return `<span><b>${m.windows.length}</b> 窗口</span><span><b>${m.groups.length}</b> 分组</span><span><b>${m.tabs.length}</b> 标签</span><span><b>${opened}</b> 已打开</span>`;
 }

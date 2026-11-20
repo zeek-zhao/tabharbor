@@ -80,7 +80,103 @@ try {
   );
   const stats = await win.textContent("#stats");
   assert.ok(stats && stats.trim().length > 0, "底栏统计为空");
+  assert.ok(
+    stats.includes("窗口") &&
+      stats.includes("分组") &&
+      stats.includes("标签") &&
+      stats.includes("已打开"),
+    `统计四项缺失: ${stats}`
+  );
   console.log(`E2E 3/6 样例数据实时渲染通过（2 窗口 / 5 分组 / 10 标签），统计: ${stats.trim()}`);
+
+  // —— #29 壳对齐原型：快捷栏顺序 + 设置弹窗四分类 + 回收站角标 + 快捷键/指南/toast ——
+  const acts = await win.evaluate(() =>
+    [...document.querySelectorAll("#quickbar [data-act]")].map((b) => b.dataset.act).join(",")
+  );
+  assert.equal(
+    acts,
+    "add-group,locate,toggle-all,links,trash,history,fullscreen,theme,pip",
+    `快捷栏顺序异常: ${acts}`
+  );
+
+  await win.click("#btnSettings");
+  await win.waitForSelector("#modalSetting:not([hidden])");
+  const catCount = await win.evaluate(
+    () => document.querySelectorAll("#modalSetting .cat-tab").length
+  );
+  assert.equal(catCount, 4, `设置分类数异常: ${catCount}`);
+  const appearanceVisible = await win.evaluate(
+    () => !document.querySelector('#modalSetting .cat-panel[data-panel="appearance"]').hidden
+  );
+  assert.ok(appearanceVisible, "外观分类面板未默认显示");
+  await win.click('#modalSetting .cat-tab[data-cat="backup"]');
+  const backupVisible = await win.evaluate(
+    () => !document.querySelector('#modalSetting .cat-panel[data-panel="backup"]').hidden
+  );
+  assert.ok(backupVisible, "备份分类面板未切换显示");
+  assert.ok(await win.isVisible("#btnExportJson"), "导出 JSON 按钮未在备份面板中");
+  await win.click('[data-modal-close="modalSetting"]');
+  const closed = await win.evaluate(() => document.querySelector("#modalSetting").hidden);
+  assert.ok(closed, "设置弹窗未关闭");
+  console.log("E2E 4/7 设置弹窗四分类切换通过（外观/备份与恢复/复制/反馈）");
+
+  const kvCount = await win.evaluate(() => {
+    document.querySelector("#btnKeys").click();
+    return document.querySelectorAll("#keysList .kv").length;
+  });
+  assert.equal(kvCount, 14, `快捷键表条目数异常: ${kvCount}`);
+  await win.evaluate(() => {
+    document.querySelector('[data-modal-close="modalKeys"]').click();
+    document.querySelector("#btnGuide").click();
+  });
+  const guideCount = await win.evaluate(() => document.querySelectorAll("#guideBody ol li").length);
+  assert.ok(guideCount >= 8, `指南条目数异常: ${guideCount}`);
+  console.log("E2E 5/7 快捷键表（14 项）与上手指南弹窗通过");
+
+  // 回收站角标：追加一条 trash 记录 → onChanged 实时更新角标；弹窗渲染空态/条目
+  await win.evaluate(() =>
+    chrome.storage.local.set({
+      trash: [
+        {
+          kind: "tab",
+          payload: { id: "x1", kind: "tab", title: "示例已删标签", url: "https://example.com/x" },
+          parentId: "g_docs",
+          time: "2026-01-01 00:00",
+        },
+      ],
+    })
+  );
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#trashBadge");
+      return b && b.style.display !== "none" && b.textContent === "1";
+    },
+    { timeout: 5000 }
+  );
+  await win.click("#btnTrash");
+  await win.waitForSelector("#modalTrash:not([hidden])");
+  const trashItems = await win.evaluate(
+    () => document.querySelectorAll("#trashList .trash-item").length
+  );
+  assert.equal(trashItems, 1, `回收站条目数异常: ${trashItems}`);
+  console.log("E2E 6/7 回收站角标与条目渲染通过");
+
+  // 主题切换持久化：点击主题按钮 → data-theme 变化 + settings.theme 入库 + toast
+  const before = await win.evaluate(() => document.documentElement.dataset.theme);
+  await win.click("#btnTheme");
+  await win.waitForFunction((prev) => document.documentElement.dataset.theme !== prev, before, {
+    timeout: 5000,
+  });
+  const storedTheme = await win.evaluate(
+    () => new Promise((r) => chrome.storage.local.get("settings", (d) => r(d.settings.theme)))
+  );
+  assert.notEqual(storedTheme, before, "主题切换未持久化到 settings.theme");
+  const toastShown = await win.evaluate(() =>
+    document.querySelector("#toast").classList.contains("show")
+  );
+  assert.ok(toastShown, "主题切换未出现 toast");
+  await win.click("#btnTheme"); // 还原深色
+  console.log("E2E 7/7 主题切换持久化 + toast 通过");
 
   // —— 嵌套组与标签可见、单击选中 ——
   const nestedTitle = await win.textContent('.node[data-id="g_nested"] .tt');
@@ -89,7 +185,7 @@ try {
   await tabNode.click();
   const selected = await tabNode.evaluate((el) => el.classList.contains("node-selected"));
   assert.ok(selected, "单击标签未出现 node-selected");
-  console.log("E2E 4/6 嵌套组渲染 + 单击选中（FR-036）通过");
+  console.log("E2E 8/7 嵌套组渲染 + 单击选中（FR-036）通过");
 
   // —— 侧边栏页：双模式共享同一存储数据源 ——
   const side = await context.newPage();
@@ -104,9 +200,9 @@ try {
     () => document.querySelectorAll('.node[data-kind="window"]').length
   );
   assert.equal(sideWindows, 2, `侧边栏页窗口节点数异常: ${sideWindows}`);
-  console.log("E2E 5/6 侧边栏页同源渲染通过（双模式同一数据源）");
+  console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
-  console.log("E2E 6/6 PASS — TabHarbor 真实 Chromium 冒烟全部通过");
+  console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();
 }
