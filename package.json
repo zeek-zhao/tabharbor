@@ -9,7 +9,7 @@
     "constraints": "node tools/check-constraints.mjs",
     "compliance": "node tools/check-compliance.mjs",
     "committer": "node tools/check-committer.mjs",
-    "contrast": "node tools/contrast-check.mjs prototypes/tabharbor.html",
+    "contrast": "node tools/contrast-check.mjs src/assets/m2.css",
     "format": "prettier --no-error-on-unmatched-pattern --write \"src/**/*.js\" \"tools/*.mjs\" \"tests/*.mjs\"",
     "format:check": "prettier --no-error-on-unmatched-pattern --check \"src/**/*.js\" \"tools/*.mjs\" \"tests/*.mjs\""
   },

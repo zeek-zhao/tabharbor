@@ -31,6 +31,32 @@
       <button id="btnTheme" class="tbtn" data-label="主题切换" data-act="theme">◐</button>
       <button id="btnPip" class="tbtn" data-label="置顶（画中画）" data-act="pip">📌</button>
     </div>
+    <div id="dataPanel" class="data-panel" hidden>
+      <div class="data-panel-head"><strong>数据与备份</strong><button id="btnDataClose" class="tbtn" type="button">关闭</button></div>
+      <div class="data-panel-actions">
+        <button id="btnExportJson" type="button">导出 JSON</button>
+        <button id="btnExportHtml" type="button">导出 HTML</button>
+        <button id="btnImportFile" type="button">导入文件</button>
+        <button id="btnBackupNow" type="button">立即备份</button>
+      </div>
+      <label for="backupTarget">备份目标</label>
+      <select id="backupTarget"><option value="local">本地快照</option><option value="github">GitHub 仓库（标准 HTML）</option></select>
+      <div id="githubBackupFields" hidden>
+        <label for="ghRepo">GitHub 仓库 URL（公开或私有）</label><input id="ghRepo" type="url" placeholder="https://github.com/owner/repo" autocomplete="url" />
+        <label for="ghBranch">分支</label><input id="ghBranch" type="text" placeholder="main" />
+        <label for="ghPath">备份文件路径</label><input id="ghPath" type="text" placeholder="tabharbor-bookmarks.html" />
+        <label for="ghToken">Fine-grained Personal Access Token</label><input id="ghToken" type="password" autocomplete="new-password" placeholder="仅保存于本机扩展存储" />
+        <p>Token 仅存储在本机；只请求 api.github.com 权限，不会同步或写入日志。</p>
+        <button id="btnAuthorizeGithub" type="button">授权 GitHub 访问</button>
+      </div>
+      <label for="ghBackupFreq">GitHub 自动备份频率</label>
+      <select id="ghBackupFreq"><option value="off">关闭</option><option value="every10m">每 10 分钟</option><option value="every30m">每 30 分钟</option><option value="hourly">每小时</option><option value="daily">每天</option></select>
+      <label for="backupList">本地快照（最多保留 20 份）</label>
+      <select id="backupList"></select>
+      <button id="btnRestoreBackup" type="button">确认恢复所选快照</button>
+      <input id="importFile" type="file" accept=".json,.html,text/html,application/json" hidden />
+      <p id="dataStatus" role="status" aria-live="polite"></p>
+    </div>
     <div id="spBody" class="sp-body"></div>
     <div id="footer" class="footer">
       <span id="stats"></span>

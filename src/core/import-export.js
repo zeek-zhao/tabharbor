@@ -1,0 +1,405 @@
+/**
+ * M3-1 书签导入导出 + 备份恢复
+ * FR-031~038 / issue #27
+ */
+
+export const EXPORT_VERSION = 1;
+
+/**
+ * 导出完整模型为 JSON
+ */
+export async function exportJSON(model, settings) {
+  const payload = {
+    version: EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    windows: model.windows || [],
+    groups: model.groups || [],
+    tabs: model.tabs || [],
+    settings: settings || model.settings || {},
+    trash: model.trash || [],
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * 导出标准 HTML 书签格式（Netscape Bookmark File Format）
+ */
+export async function exportHTML(model) {
+  const lines = [
+    "<!DOCTYPE NETSCAPE-Bookmark-file-1>",
+    '<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">',
+    "<TITLE>Bookmarks</TITLE>",
+    "<H1>Bookmarks</H1>",
+    "<DL><p>",
+  ];
+
+  // 递归输出分组树
+  function writeGroup(group, indent = 1) {
+    const pad = "  ".repeat(indent);
+    lines.push(pad + "<DT><H3>" + escapeHtml(group.title) + "</H3>");
+    lines.push(pad + "<DL><p>");
+
+    // 子分组
+    const childGroups = model.groups.filter((g) => g.parentId === group.id);
+    for (const child of childGroups) {
+      writeGroup(child, indent + 1);
+    }
+
+    // 标签
+    const tabs = model.tabs.filter((t) => t.parentId === group.id);
+    for (const tab of tabs) {
+      lines.push(
+        pad + '  <DT><A HREF="' + escapeHtml(tab.url) + '">' + escapeHtml(tab.title) + "</A>"
+      );
+    }
+
+    lines.push(pad + "</DL><p>");
+  }
+
+  // 标准 HTML 只表示书签/文件夹层级。窗口容器不导出，所有窗口下顶层节点并列输出。
+  const windowIds = new Set((model.windows || []).map((win) => win.id));
+  const topGroups = (model.groups || []).filter(
+    (group) => group.parentId == null || windowIds.has(group.parentId)
+  );
+  const topTabs = (model.tabs || []).filter(
+    (tab) => tab.parentId == null || windowIds.has(tab.parentId)
+  );
+  for (const group of topGroups) writeGroup(group);
+  for (const tab of topTabs) {
+    lines.push('  <DT><A HREF="' + escapeHtml(tab.url) + '">' + escapeHtml(tab.title) + "</A>");
+  }
+
+  lines.push("</DL><p>");
+  return lines.join("\n");
+}
+
+/**
+ * 导入 JSON（全量覆盖）
+ */
+export async function importJSON(data, currentModel) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("导入数据无效：非对象");
+  }
+
+  if (data.version !== EXPORT_VERSION) {
+    throw new Error(
+      "版本不兼容：期望 v" + EXPORT_VERSION + "，实际 v" + (data.version ?? "unknown")
+    );
+  }
+
+  // 校验必需字段
+  const required = ["windows", "groups", "tabs", "settings", "trash"];
+  for (const key of required) {
+    const valid =
+      key === "settings"
+        ? data.settings && typeof data.settings === "object" && !Array.isArray(data.settings)
+        : Array.isArray(data[key]);
+    if (!valid) throw new Error("导入数据缺少字段：" + key);
+  }
+
+  // 全量替换
+  const newModel = {
+    windows: data.windows || [],
+    groups: data.groups || [],
+    tabs: data.tabs || [],
+    trash: data.trash || [],
+    settings: data.settings,
+  };
+  validateTree(newModel);
+  return newModel;
+}
+
+/**
+ * 导入 HTML 书签文件
+ */
+export async function importHTML(html, currentModel = {}) {
+  if (!html || typeof html !== "string") {
+    throw new Error("HTML 内容为空");
+  }
+
+  // 标准 HTML 导入是全量替换；窗口仅为产品树容器，书签文件本身不表达窗口节点。
+  const model = {
+    windows: [],
+    groups: [],
+    tabs: [],
+    trash: [],
+    settings: currentModel.settings || {},
+  };
+  const groups = [];
+  const tabs = [];
+  let groupIdCounter = 0;
+  let tabIdCounter = 0;
+
+  // 解析 HTML
+  const decoded = decodeHtmlEntities(html);
+  const entries = [...decoded.matchAll(/<DT>\s*<(H3|A)\b([^>]*)>([\s\S]*?)<\/\1>/gi)];
+  const stack = [];
+  const seen = new Set(model.tabs.map((t) => `${normalizeBookmarkUrl(t.url)}|${t.title}`));
+  let cursor = 0;
+  for (const match of entries) {
+    const before = decoded.slice(cursor, match.index);
+    const closes = (before.match(/<\/DL>/gi) || []).length;
+    for (let i = 0; i < closes; i++) stack.pop();
+    cursor = match.index + match[0].length;
+    const kind = match[1].toUpperCase();
+    const attrs = match[2];
+    const text = stripTags(match[3]).trim();
+    if (kind === "H3") {
+      groupIdCounter++;
+      const parentId = stack.length ? stack[stack.length - 1] : null;
+      const group = {
+        id: `g${groupIdCounter}`,
+        parentId,
+        title: text || "未命名分组",
+        collapsed: false,
+      };
+      groups.push(group);
+      stack.push(group.id);
+    } else {
+      const href = attrs.match(/\bHREF\s*=\s*(["'])(.*?)\1/i)?.[2];
+      if (!href) continue;
+      const key = `${normalizeBookmarkUrl(href)}|${text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      tabIdCounter++;
+      tabs.push({ id: `t${tabIdCounter}`, parentId: stack.at(-1) || null, title: text, url: href });
+    }
+  }
+  // validateTree 要求每个非根节点有父级；导入书签先归入虚拟窗口，再由启动同步映射真实窗口。
+  if (groups.length || tabs.length) {
+    model.windows.push({ id: "w_import", kind: "window", title: "导入的书签", collapsed: false });
+    for (const group of groups) if (group.parentId == null) group.parentId = "w_import";
+    for (const tab of tabs) if (tab.parentId == null) tab.parentId = "w_import";
+  }
+  model.groups = groups;
+  model.tabs = tabs;
+  validateTree(model);
+  return model;
+}
+
+/**
+ * 触发文件下载
+ */
+export async function triggerDownload(filename, content, downloadApi) {
+  const mime = filename.toLowerCase().endsWith(".html") ? "text/html" : "application/json";
+  await downloadApi.download({
+    url: `data:${mime};charset=utf-8;base64,` + btoa(unescape(encodeURIComponent(content))),
+    filename,
+    saveAs: true,
+  });
+}
+
+/**
+ * 手动备份
+ */
+export async function manualBackup(model, settings, downloadApi, chromeApi = globalThis.chrome) {
+  const json = await exportJSON(model, settings);
+  const filename = "tabharbor-backup-" + formatTimestamp() + ".json";
+  if (chromeApi?.storage?.local) await saveLocalBackup(chromeApi, model, settings);
+  if (downloadApi) await triggerDownload(filename, json, downloadApi);
+  return { filename, content: json };
+}
+
+/**
+ * 注册自动备份 alarm
+ */
+export async function registerAutoBackup(chrome, settings = {}) {
+  const freq = settings.backupTarget === "github" ? settings.ghBackupFreq || "off" : "off";
+  if (freq === "off") {
+    if (chrome.alarms.clear) await chrome.alarms.clear("auto-backup");
+    return;
+  }
+  const periods = { every10m: 10, every30m: 30, hourly: 60, daily: 1440 };
+  const periodInMinutes = periods[freq];
+  if (!periodInMinutes) throw new Error("不支持的 GitHub 自动备份频率：" + freq);
+  await chrome.alarms.create("auto-backup", { periodInMinutes });
+}
+
+/**
+ * 执行自动备份（alarm 触发时调用）
+ */
+export async function runAutoBackup(chrome, model, settings, fetchImpl = globalThis.fetch) {
+  if (!settings?.ghRepo || !settings?.ghBranch || !settings?.ghPath || !settings?.ghToken) {
+    throw new Error("GitHub 自动备份配置不完整");
+  }
+  const html = await exportHTML(model);
+  const result = await uploadGitHubFile(chrome, settings, html, fetchImpl);
+  return { ...result, format: "html", bytes: html.length };
+}
+
+/** GitHub Contents API: read existing sha (404 means create), then replace one configured file. */
+export async function uploadGitHubFile(chrome, settings, content, fetchImpl = globalThis.fetch) {
+  if (
+    !chrome?.permissions?.contains ||
+    !(await chrome.permissions.contains({ origins: ["https://api.github.com/*"] }))
+  ) {
+    throw new Error("尚未授予 api.github.com 可选权限");
+  }
+  const { owner, repo } = parseGitHubRepo(settings.ghRepo);
+  const branch = encodeURIComponent(settings.ghBranch.trim());
+  const path = settings.ghPath.split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  if (!path) throw new Error("GitHub 文件路径不能为空");
+  const apiUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path}`;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${settings.ghToken}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const existing = await fetchImpl(`${apiUrl}?ref=${branch}`, { method: "GET", headers });
+  let sha;
+  if (existing.status === 200) {
+    const body = await existing.json();
+    sha = body.sha;
+    if (!sha) throw new Error("GitHub 未返回已有文件 SHA");
+  } else if (existing.status !== 404) {
+    throw new Error(`读取 GitHub 备份失败（HTTP ${existing.status}）`);
+  }
+  const payload = {
+    message: `TabHarbor HTML backup ${new Date().toISOString()}`,
+    content: btoa(unescape(encodeURIComponent(content))),
+    branch: settings.ghBranch.trim(),
+    ...(sha ? { sha } : {}),
+  };
+  const response = await fetchImpl(apiUrl, {
+    method: "PUT",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`写入 GitHub 备份失败（HTTP ${response.status}）`);
+  const result = await response.json();
+  return { path: result.content?.path || settings.ghPath, sha: result.content?.sha || "" };
+}
+
+function parseGitHubRepo(value) {
+  const match = String(value || "")
+    .trim()
+    .match(/^(?:https:\/\/github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+  if (!match) throw new Error("仓库地址应为 https://github.com/owner/repo");
+  return { owner: match[1], repo: match[2].replace(/\.git$/i, "") };
+}
+
+/**
+ * 恢复备份
+ */
+const BACKUP_STORAGE_KEY = "localBackups";
+const MAX_LOCAL_BACKUPS = 20;
+
+/** 保存可恢复的本地备份数据（downloads 只负责用户可见导出，不能读取其文件内容）。 */
+export async function saveLocalBackup(chrome, model, settings = {}) {
+  const content = await exportJSON(model, settings);
+  const entry = {
+    id: `backup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    filename: `tabharbor-backup-${formatTimestamp()}.json`,
+    createdAt: new Date().toISOString(),
+    content,
+    count: model.tabs?.length || 0,
+  };
+  const got = await chrome.storage.local.get([BACKUP_STORAGE_KEY]);
+  const backups = [entry, ...(got[BACKUP_STORAGE_KEY] || [])].slice(0, MAX_LOCAL_BACKUPS);
+  await chrome.storage.local.set({ [BACKUP_STORAGE_KEY]: backups });
+  return entry;
+}
+
+/** 返回本地保存的备份元信息，按时间倒序。 */
+export async function getBackupList(chrome) {
+  const got = await chrome.storage.local.get([BACKUP_STORAGE_KEY]);
+  return (got[BACKUP_STORAGE_KEY] || []).map(({ id, filename, createdAt, count }) => ({
+    id,
+    filename,
+    ts: createdAt,
+    count,
+  }));
+}
+
+/** 从扩展管理的本地备份仓库恢复；不尝试读取 downloads 路径。 */
+export async function restoreBackup(backupId, _currentModel, chrome) {
+  if (!chrome?.storage?.local) throw new Error("恢复备份需要 chrome.storage.local");
+  const got = await chrome.storage.local.get([BACKUP_STORAGE_KEY]);
+  const backup = (got[BACKUP_STORAGE_KEY] || []).find(
+    (item) => item.id === backupId || item.filename === backupId
+  );
+  if (!backup) throw new Error("本地备份不存在或已被清理");
+  let data;
+  try {
+    data = JSON.parse(backup.content);
+  } catch {
+    throw new Error("本地备份内容损坏，无法恢复");
+  }
+  const model = await importJSON(data, _currentModel);
+  return { ...model, settings: data.settings || {} };
+}
+
+function validateTree(data) {
+  const ids = new Set();
+  const nodes = [...data.windows, ...data.groups, ...data.tabs];
+  for (const node of nodes) {
+    if (!node || typeof node.id !== "string" || !node.id || ids.has(node.id))
+      throw new Error("导入数据无效：节点 ID 缺失或重复");
+    ids.add(node.id);
+  }
+  const windows = new Set(data.windows.map((node) => node.id));
+  const groups = new Map(data.groups.map((node) => [node.id, node]));
+  for (const group of data.groups) {
+    if (group.parentId != null && !windows.has(group.parentId) && !groups.has(group.parentId))
+      throw new Error("导入数据无效：分组父节点不存在");
+  }
+  for (const tab of data.tabs) {
+    if (typeof tab.url !== "string" || !tab.url || typeof tab.title !== "string")
+      throw new Error("导入数据无效：标签字段错误");
+    if (tab.parentId != null && !windows.has(tab.parentId) && !groups.has(tab.parentId))
+      throw new Error("导入数据无效：标签父节点不存在");
+  }
+}
+
+function decodeHtmlEntities(value) {
+  return String(value)
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (whole, code) => {
+      const num =
+        code[0].toLowerCase() === "x"
+          ? Number.parseInt(code.slice(1), 16)
+          : Number.parseInt(code, 10);
+      return Number.isFinite(num) ? String.fromCodePoint(num) : whole;
+    })
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&nbsp;/gi, " ");
+}
+
+function stripTags(value) {
+  return String(value).replace(/<[^>]*>/g, "");
+}
+
+function normalizeBookmarkUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/$/, "");
+    return url.href;
+  } catch {
+    return String(value || "").trim();
+  }
+}
+
+export function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatTimestamp() {
+  const d = new Date();
+  return (
+    d.getFullYear().toString() +
+    (d.getMonth() + 1).toString().padStart(2, "0") +
+    d.getDate().toString().padStart(2, "0") +
+    "-" +
+    d.getHours().toString().padStart(2, "0") +
+    d.getMinutes().toString().padStart(2, "0") +
+    d.getSeconds().toString().padStart(2, "0")
+  );
+}

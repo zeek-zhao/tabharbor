@@ -3,7 +3,7 @@
 
 场景: 双模式复用同一渲染入口与数据源
 那么 "src/sidebar/sidebar.html" 与 "src/window/window.html" 引用同一渲染入口 "shell.js"
-那么 "src/ui/shell.js" 包含 "chrome.storage.local.get"
+那么 "src/core/store.js" 包含 "chromeApi.storage.local.get"
 那么 "src/ui/shell.js" 包含 "windows"
 那么 "src/ui/shell.js" 包含 "renderTree"
 

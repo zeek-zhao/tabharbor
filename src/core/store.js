@@ -2,7 +2,14 @@
 // open（已打开）为派生态，不入库，由 tabs.query 实时计算。
 
 export const MODEL_KEYS = ["windows", "groups", "tabs"];
-export const ALL_KEYS = [...MODEL_KEYS, "trash", "settings", "lastBounds"];
+export const ALL_KEYS = [
+  ...MODEL_KEYS,
+  "trash",
+  "settings",
+  "lastBounds",
+  "localBackups",
+  "backupLastResult",
+];
 
 export const DEFAULT_SETTINGS = {
   theme: "dark",
@@ -11,12 +18,17 @@ export const DEFAULT_SETTINGS = {
   copyContent: "both",
   copyFormat: "md",
   linkShow: false,
-  bkFreq: "off",
+  backupTarget: "local",
+  ghRepo: "",
+  ghBranch: "main",
+  ghPath: "tabharbor-bookmarks.html",
+  ghToken: "",
+  ghBackupFreq: "off",
   onboarded: false,
 };
 
-export async function loadAll() {
-  const got = await chrome.storage.local.get(ALL_KEYS);
+export async function loadAll(chromeApi = globalThis.chrome) {
+  const got = await chromeApi.storage.local.get(ALL_KEYS);
   return {
     windows: got.windows || [],
     groups: got.groups || [],
@@ -27,14 +39,20 @@ export async function loadAll() {
   };
 }
 
-export async function saveModel(m) {
-  await chrome.storage.local.set({ windows: m.windows, groups: m.groups, tabs: m.tabs });
+export async function saveModel(m, chromeApi = globalThis.chrome) {
+  await chromeApi.storage.local.set({
+    windows: m.windows || [],
+    groups: m.groups || [],
+    tabs: m.tabs || [],
+    trash: m.trash || [],
+    ...(m.settings ? { settings: m.settings } : {}),
+  });
 }
 
-export async function saveSettings(patch) {
-  const { settings } = await loadAll();
+export async function saveSettings(patch, chromeApi = globalThis.chrome) {
+  const { settings } = await loadAll(chromeApi);
   const next = { ...settings, ...patch };
-  await chrome.storage.local.set({ settings: next });
+  await chromeApi.storage.local.set({ settings: next });
   return next;
 }
 
