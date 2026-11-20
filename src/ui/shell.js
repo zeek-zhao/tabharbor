@@ -1,9 +1,15 @@
 // TH2 双模式壳启动（FR-001）：两页面共用本模块——同一渲染入口、同一存储键读取
-// M1-2：主题应用（FR-045/054）+ 单击选中（FR-036）；M3-1：文件导入导出与本地备份
+// M1-2：主题应用（FR-045/054）；M3-1：文件导入导出与本地备份
 // #29 壳对齐原型 v16：设置弹窗四分类、toast、回收站角标、快捷键/指南弹窗、统计四项
+// #30 树交互对齐原型 v16：leaf 选中/双击打开、行内复制/关闭、单击折叠、右键菜单、
+//     搜索过滤、定位、新建分组/备注/编辑弹窗、启动归类（bootAlign）
 import * as store from "../core/store.js";
 import * as io from "../core/import-export.js";
-import { computeOpenIds } from "../core/align.js";
+import * as tabsOp from "../core/tabs-op.js";
+import * as editOp from "../core/edit-op.js";
+import { bootAlign, computeOpenIds } from "../core/align.js";
+import { findNode } from "../core/model.js";
+import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
 export function themeOf(settings) {
@@ -48,7 +54,11 @@ async function currentOpenIds(m) {
   try {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return new Set();
     const tabs = await chrome.tabs.query({});
-    return computeOpenIds(m, tabs.map((t) => t.url).filter(Boolean));
+    // 仅 http(s) 网页参与打开态派生（扩展页/chrome:// 页不入树）
+    return computeOpenIds(
+      m,
+      tabs.map((t) => t.url).filter((u) => /^https?:/.test(u || ""))
+    );
   } catch {
     return new Set();
   }
@@ -82,11 +92,15 @@ export async function bootShell(root) {
     toast(text);
   };
 
-  // ---- 渲染 ----
+  // ---- 渲染（#30：折叠 / 选中 / 搜索过滤为派生视图态，不入库） ----
   let openIds = new Set();
+  let collapsed = new Set();
+  let selectedId = null;
+  let searchQ = "";
   const render = async () => {
-    body.innerHTML = m.windows.length
-      ? renderTree(m, { openIds, linkShow: !!settings.linkShow })
+    const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
+    body.innerHTML = view.windows.length
+      ? renderTree(view, { openIds, linkShow: !!settings.linkShow, selectedId, collapsed })
       : renderEmpty();
     const stats = root.querySelector("#stats");
     if (stats) stats.innerHTML = renderStats(m, openIds);
@@ -100,7 +114,28 @@ export async function bootShell(root) {
     badge.style.display = n ? "inline-block" : "none";
     badge.textContent = String(n);
   };
+  const refreshOpen = async () => {
+    openIds = await currentOpenIds(m);
+    await render();
+  };
   openIds = await currentOpenIds(m);
+
+  // M1-1 启动归类（FR-024/027）：把浏览器已打开标签对齐到「当前浏览器窗口」（多退少补）
+  try {
+    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+      const openTabs = (await chrome.tabs.query({}))
+        .filter((t) => /^https?:/.test(t.url || ""))
+        .map((t) => ({ title: t.title || t.url, url: t.url }));
+      const before = JSON.stringify(m.tabs);
+      bootAlign(m, openTabs);
+      if (JSON.stringify(m.tabs) !== before) {
+        await store.saveModel(m);
+        openIds = await currentOpenIds(m);
+      }
+    }
+  } catch {
+    // 无浏览器 API（测试环境）时跳过归类
+  }
   await render();
 
   // ---- 通用弹窗 ----
@@ -119,6 +154,244 @@ export async function bootShell(root) {
   });
   root.querySelectorAll("[data-modal-close]").forEach((btn) => {
     btn.addEventListener("click", () => closeModal(btn.dataset.modalClose));
+  });
+
+  // ---- #30 编辑 / 新建 / 备注弹窗（modalEdit / modalNew） ----
+  let editTargetId = null;
+  let newMode = null; // { kind: "group"|"note", windowId?, targetId? }
+  const openEditModal = (id) => {
+    const n = findNode(m, id);
+    if (!n) return;
+    editTargetId = id;
+    const input = root.querySelector("#editInput");
+    if (input) input.value = n.title || "";
+    openModal("modalEdit");
+    if (input) input.focus();
+  };
+  root.querySelector("#btnEditSave")?.addEventListener("click", async () => {
+    const input = root.querySelector("#editInput");
+    const title = (input?.value || "").trim();
+    if (!editTargetId || !title) return;
+    editOp.renameNode(m, editTargetId, title);
+    await store.saveModel(m);
+    closeModal("modalEdit");
+    await render();
+    say("已重命名");
+  });
+  root.querySelector("#editInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") root.querySelector("#btnEditSave")?.click();
+  });
+  const openNewModal = (mode) => {
+    newMode = mode;
+    const titleEl = root.querySelector("#newTitle");
+    const input = root.querySelector("#newInput");
+    if (titleEl) titleEl.textContent = mode.kind === "group" ? "新建分组" : "添加备注";
+    if (input) input.value = mode.kind === "note" ? findNode(m, mode.targetId)?.note || "" : "";
+    openModal("modalNew");
+    if (input) input.focus();
+  };
+  root.querySelector("#btnNewSave")?.addEventListener("click", async () => {
+    const input = root.querySelector("#newInput");
+    const text = (input?.value || "").trim();
+    if (!newMode) return;
+    if (newMode.kind === "group") {
+      if (!text) return;
+      editOp.createGroupAt(m, newMode.windowId, text);
+      await store.saveModel(m);
+      closeModal("modalNew");
+      await render();
+      say("已新建分组");
+    } else {
+      editOp.setNote(m, newMode.targetId, text);
+      await store.saveModel(m);
+      closeModal("modalNew");
+      await render();
+      say("备注已保存");
+    }
+    newMode = null;
+  });
+  root.querySelector("#newInput")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") root.querySelector("#btnNewSave")?.click();
+  });
+
+  // ---- #30 复制（范围按对象自动判定，默认参数直出） ----
+  const copyNode = async (id) => {
+    const n = findNode(m, id);
+    if (!n) return;
+    const text = tabsOp.formatCopy(m, id, settings);
+    await tabsOp.copyToClipboard(text, navigator.clipboard);
+    const count = tabsOp.collectLeaves(m, id).length;
+    const scope = n.kind === "tab" ? "单标签" : n.kind === "group" ? "整组" : "整窗";
+    const fmt = (settings && settings.copyFormat) === "txt" ? "TXT" : "Markdown";
+    toast(`已复制 ${count} 条（${scope}·${fmt}）`);
+  };
+
+  // ---- #30 树区事件委托：单击折叠 / 选中 / 复制 / 关闭，双击打开 ----
+  body.addEventListener("click", async (e) => {
+    const copyBtn = e.target.closest(".copy-x");
+    if (copyBtn) {
+      e.stopPropagation();
+      const host = copyBtn.closest(".leaf, .node");
+      if (host?.dataset.id) {
+        try {
+          await copyNode(host.dataset.id);
+        } catch (err) {
+          say("复制失败：" + err.message);
+        }
+      }
+      return;
+    }
+    const closeBtn = e.target.closest(".close-x");
+    if (closeBtn) {
+      e.stopPropagation();
+      const leaf = closeBtn.closest(".leaf");
+      if (leaf?.dataset.id) {
+        const n = await tabsOp.closeNode(chrome, m, leaf.dataset.id);
+        await refreshOpen();
+        toast(`已关闭 ${n} 个网页`);
+      }
+      return;
+    }
+    const row = e.target.closest(".node-row");
+    if (row) {
+      // FR-013：单击分组名 / 窗口名折叠子树（切换）
+      const id = row.dataset.target;
+      collapsed = editOp.collapsedToggle(collapsed, id);
+      await render();
+      return;
+    }
+    const leaf = e.target.closest(".leaf");
+    if (leaf) {
+      // FR-036：单击标签设为选中
+      selectedId = leaf.dataset.id;
+      await render();
+    }
+  });
+  body.addEventListener("dblclick", async (e) => {
+    const leaf = e.target.closest(".leaf");
+    if (!leaf?.dataset.id) return;
+    const node = findNode(m, leaf.dataset.id);
+    if (!node?.url) return;
+    try {
+      const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
+      const res = await tabsOp.openTab(chrome, node, urls);
+      await refreshOpen();
+      toast(res.focused ? "已聚焦已打开网页" : "已打开网页");
+    } catch (err) {
+      say("打开失败：" + err.message);
+    }
+  });
+
+  // ---- #30 右键菜单（menuHtml 模板 + data-act 分发） ----
+  const ctxMenu = root.querySelector("#ctxMenu");
+  let ctxTarget = null;
+  const hideCtx = () => {
+    if (ctxMenu) ctxMenu.classList.remove("show");
+  };
+  body.addEventListener("contextmenu", (e) => {
+    const el = e.target.closest(".node, .leaf");
+    if (!el || !ctxMenu) return;
+    e.preventDefault();
+    ctxTarget = { id: el.dataset.id, kind: el.dataset.kind };
+    ctxMenu.innerHTML = menuHtml(ctxTarget.kind === "leaf" ? "leaf" : ctxTarget.kind);
+    ctxMenu.style.left = `${e.clientX}px`;
+    ctxMenu.style.top = `${e.clientY}px`;
+    ctxMenu.classList.add("show");
+  });
+  root.addEventListener("click", (e) => {
+    if (!e.target.closest("#ctxMenu")) hideCtx();
+  });
+  root.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideCtx();
+  });
+  ctxMenu?.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".mi[data-act]");
+    if (!btn || !ctxTarget) return;
+    hideCtx();
+    const { id, kind } = ctxTarget;
+    const node = findNode(m, id);
+    if (!node) return;
+    const act = btn.dataset.act;
+    const openUrlsNow = async () => {
+      try {
+        if (typeof chrome === "undefined" || !chrome.tabs?.query) return new Set();
+        return new Set(
+          (await chrome.tabs.query({})).map((t) => t.url).filter((u) => /^https?:/.test(u || ""))
+        );
+      } catch {
+        return new Set();
+      }
+    };
+    try {
+      if (act === "edit" || act === "rename") {
+        openEditModal(id);
+      } else if (act === "note") {
+        openNewModal({ kind: "note", targetId: id });
+      } else if (act === "open-group" || act === "open-all") {
+        const n = await tabsOp.openAll(chrome, m, id, await openUrlsNow());
+        await refreshOpen();
+        toast(`已打开 ${n} 个网页`);
+      } else if (act === "close-group" || act === "close-all") {
+        const n = await tabsOp.closeNode(chrome, m, id);
+        await refreshOpen();
+        toast(`已关闭 ${n} 个网页`);
+      } else if (act === "add-group") {
+        openNewModal({ kind: "group", windowId: kind === "window" ? id : windowIdOf(node) });
+      } else if (act === "fold") {
+        collapsed = editOp.collapsedToggle(collapsed, id);
+        await render();
+      } else if (act === "del") {
+        // 删除到回收站（恢复 / 彻底删除在 #31 接线）
+        toast("回收站操作即将提供");
+      }
+    } catch (err) {
+      say("操作失败：" + err.message);
+    }
+  });
+  const windowIdOf = (n) => {
+    let cur = n;
+    while (cur && cur.parentId) cur = findNode(m, cur.parentId) || {};
+    return cur?.id || m.windows[0]?.id;
+  };
+
+  // ---- #30 工具栏：新建分组 / 定位 / 展收全部 / 搜索 ----
+  root.querySelector("#btnAddGroup")?.addEventListener("click", () => {
+    if (!m.windows.length) {
+      toast("还没有窗口节点");
+      return;
+    }
+    openNewModal({ kind: "group", windowId: m.windows[0].id });
+  });
+  root.querySelector("#btnLocate")?.addEventListener("click", async () => {
+    // 定位当前标签：找第一个已打开的标签，展开其祖先并滚动到可见
+    const firstOpen = m.tabs.find((t) => openIds.has(t.id));
+    if (!firstOpen) {
+      toast("没有已打开的标签");
+      return;
+    }
+    selectedId = firstOpen.id;
+    let cur = findNode(m, firstOpen.parentId);
+    while (cur) {
+      collapsed.delete(cur.id);
+      cur = cur.parentId ? findNode(m, cur.parentId) : null;
+    }
+    await render();
+    const el = body.querySelector(`.leaf[data-id="${firstOpen.id}"]`);
+    if (el) el.scrollIntoView({ block: "center" });
+    toast("已定位当前标签");
+  });
+  root.querySelector("#btnToggleAll")?.addEventListener("click", async () => {
+    // 展开收起全部（切换）：全展开 ↔ 全折叠
+    const all = [...m.windows.map((w) => w.id), ...m.groups.map((g) => g.id)];
+    if (collapsed.size >= all.length) collapsed = new Set();
+    else collapsed = new Set(all);
+    await render();
+    toast(collapsed.size ? "已全部收起" : "已全部展开");
+  });
+  const searchInput = root.querySelector("#q");
+  searchInput?.addEventListener("input", async () => {
+    searchQ = searchInput.value;
+    await render();
   });
 
   // ---- 设置弹窗：四分类 + 外观/复制默认参数 ----
@@ -218,7 +491,7 @@ export async function bootShell(root) {
     await saveSettingsPatch({ linkShow: !settings.linkShow });
   });
 
-  // 回收站列表（M2 接恢复/彻底删除；此处先渲染条目与空态）
+  // 回收站列表（恢复 / 彻底删除在 #31 接线；此处渲染条目与空态）
   const renderTrashList = () => {
     const box = root.querySelector("#trashList");
     if (!box) return;
@@ -419,10 +692,7 @@ export async function bootShell(root) {
             .map((key) => [key, changes[key].newValue || []])
         ),
       };
-      void currentOpenIds(m).then((ids) => {
-        openIds = ids;
-        return render();
-      });
+      void refreshOpen();
     }
     if (changes.settings) {
       settings = changes.settings.newValue || {};
@@ -431,14 +701,6 @@ export async function bootShell(root) {
       syncSettingRows();
       syncBackupFields();
     }
-  });
-
-  // ---- 树区交互：单击选中（M1-2；右键/双击/拖拽后续里程碑接线） ----
-  body.addEventListener("click", (e) => {
-    const el = e.target.closest(".node, .leaf");
-    if (!el) return;
-    body.querySelectorAll(".node-selected").forEach((x) => x.classList.remove("node-selected"));
-    el.classList.add("node-selected");
   });
   return m;
 }

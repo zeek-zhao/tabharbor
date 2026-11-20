@@ -732,13 +732,13 @@ step("当", "渲染树视图", () => {
     openIds: ctx.viewOpenIds || new Set(),
     linkShow: ctx.linkShow || false,
     selectedId: ctx.selectedId || null,
+    collapsed: ctx.collapsed || new Set(),
   });
 });
 
 function rowOf(title) {
   const id = (ctx.named[title] || findAnyByTitle(title)).id;
-  const rows = ctx.html.split('<div class="node');
-  const row = rows.find((r) => r.includes(`data-id="${id}"`));
+  const row = ctx.html.split('<div class="').find((r) => r.includes(`data-id="${id}"`));
   if (!row) throw new Error(`渲染输出中找不到节点 ${title} 的行`);
   return row;
 }
@@ -765,6 +765,18 @@ step("那么", "节点 {} 的行包含 {}", (title, needle) => {
 
 step("那么", "节点 {} 的行不包含 {}", (title, needle) => {
   if (rowOf(title).includes(needle)) throw new Error(`${title} 行不应包含 ${needle}`);
+});
+
+// #30 原型标记：标签 dot 圆点 / 容器 tri 折叠箭头
+step("那么", "树视图为每个标签渲染 dot 圆点", () => {
+  const dots = (ctx.html.match(/class="dot"/g) || []).length;
+  if (dots !== ctx.m.tabs.length) throw new Error(`dot=${dots} ≠ 标签数 ${ctx.m.tabs.length}`);
+});
+
+step("那么", "树视图为容器节点渲染 tri 折叠箭头", () => {
+  const tris = (ctx.html.match(/class="tri"/g) || []).length;
+  const want = ctx.m.windows.length + ctx.m.groups.length;
+  if (tris !== want) throw new Error(`tri=${tris} ≠ 容器数 ${want}`);
 });
 
 step("那么", "主题设置缺省解析为 {}", (want) => {
@@ -870,6 +882,13 @@ step("那么", "{}右键菜单模板包含 {}", (kind, needle) => {
 step("那么", "{}右键菜单模板不包含 {}", (kind, needle) => {
   const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
   if (html.includes(needle)) throw new Error(`${kind}菜单不应含 ${needle}`);
+});
+
+// #30 原型：删除项标 danger 危险色
+step("那么", "{}右键菜单模板的删除项含 danger 类", (kind) => {
+  const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
+  if (!html.includes('class="mi danger" data-act="del"'))
+    throw new Error(`${kind}菜单删除项缺 danger`);
 });
 
 step("那么", "编辑弹窗模板包含 {}", (needle) => {

@@ -69,13 +69,14 @@ try {
     }
   );
   const kindCount = await win.evaluate(() => {
-    const counts = { window: 0, group: 0, tab: 0 };
+    const counts = { window: 0, group: 0, leaf: 0 };
     for (const el of document.querySelectorAll(".node")) counts[el.dataset.kind] += 1;
+    for (const el of document.querySelectorAll(".leaf[data-kind='leaf']")) counts.leaf += 1;
     return counts;
   });
   assert.deepEqual(
     kindCount,
-    { window: 2, group: 5, tab: 10 },
+    { window: 2, group: 5, leaf: 10 },
     `节点计数异常: ${JSON.stringify(kindCount)}`
   );
   const stats = await win.textContent("#stats");
@@ -178,20 +179,35 @@ try {
   await win.click("#btnTheme"); // 还原深色
   console.log("E2E 7/7 主题切换持久化 + toast 通过");
 
-  // —— 嵌套组与标签可见、单击选中 ——
-  const nestedTitle = await win.textContent('.node[data-id="g_nested"] .tt');
+  // —— #30 原型标记：嵌套组标题、行内复制按钮、单击选中、单击折叠 ——
+  const nestedTitle = await win.textContent('.node[data-id="g_nested"] .group-name');
   assert.equal(nestedTitle, "浏览器 API", "嵌套组标题未渲染");
-  const tabNode = win.locator('.node[data-id="t_project_1"]');
+  const copyBtns = await win.evaluate(() => document.querySelectorAll("#spBody .copy-x").length);
+  // 每个容器行 + 每个标签都有行内复制（2 窗口 + 5 分组 + 10 标签 = 17）
+  assert.equal(copyBtns, 17, `行内复制按钮数异常: ${copyBtns}`);
+  const tabNode = win.locator('.leaf[data-id="t_project_1"]');
   await tabNode.click();
-  const selected = await tabNode.evaluate((el) => el.classList.contains("node-selected"));
-  assert.ok(selected, "单击标签未出现 node-selected");
-  console.log("E2E 8/7 嵌套组渲染 + 单击选中（FR-036）通过");
+  const selected = await tabNode.evaluate((el) => el.classList.contains("selected"));
+  assert.ok(selected, "单击标签未出现 leaf.selected");
+  const groupRow = win.locator('.node[data-id="g_project"] .node-row');
+  await groupRow.click();
+  const collapsedNow = await win.evaluate(() => {
+    const g = document.querySelector('.node[data-id="g_project"]');
+    return g.classList.contains("collapsed") && !g.querySelector('.leaf[data-id="t_project_1"]');
+  });
+  assert.ok(collapsedNow, "单击分组未折叠子树（FR-013）");
+  await groupRow.click();
+  const expandedAgain = await win.evaluate(
+    () => !!document.querySelector('.leaf[data-id="t_project_1"]')
+  );
+  assert.ok(expandedAgain, "再次单击未展开子树");
+  console.log("E2E 8/7 原型树标记 + 单击选中/折叠（FR-036/013）通过");
 
   // —— 侧边栏页：双模式共享同一存储数据源 ——
   const side = await context.newPage();
   await side.goto(`chrome-extension://${extId}/sidebar/sidebar.html`);
   await side.waitForFunction(
-    () => document.querySelectorAll('.node[data-kind="tab"]').length >= 10,
+    () => document.querySelectorAll('.leaf[data-kind="leaf"]').length >= 10,
     {
       timeout: 10000,
     }

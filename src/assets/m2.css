@@ -117,7 +117,62 @@ body {
   background: var(--line1);
   border-radius: 4px;
 }
+/* ===== #30 树标记对齐原型 v16：.node/.node-row/.tri/.node-children + .leaf ===== */
 .node {
+  border-radius: 7px;
+  white-space: nowrap;
+}
+.node-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  cursor: default;
+}
+.node-row:hover {
+  background: var(--bg3);
+}
+.tri {
+  flex: 0 0 auto;
+  color: var(--fg2);
+  display: inline-flex;
+  transition: transform 0.12s;
+}
+.node.collapsed > .node-row .tri {
+  transform: rotate(0deg);
+}
+.node:not(.collapsed) > .node-row .tri {
+  transform: rotate(90deg);
+}
+.node-children {
+  padding-left: 12px;
+}
+.win-name {
+  font-weight: 600;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.group-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row-ops {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  visibility: hidden;
+}
+.node-row:hover .row-ops,
+.leaf:hover .copy-x,
+.leaf:hover .close-x {
+  visibility: visible;
+}
+
+/* ===== #30 叶子标签（原型：dot + title + link + note + copy-x + close-x） ===== */
+.leaf {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -126,16 +181,82 @@ body {
   cursor: default;
   white-space: nowrap;
 }
-.node:hover {
+.leaf:hover {
   background: var(--bg3);
 }
-.nico {
+.leaf .dot {
   flex: 0 0 auto;
-  color: var(--fg2);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line2);
 }
-.tt {
+.leaf.open .dot {
+  background: var(--ok);
+}
+.leaf .title {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.leaf.open .title {
+  color: var(--fg1);
+  font-weight: 500;
+}
+.leaf.dimmed .title {
+  color: var(--fg2);
+}
+.node.dimmed > .node-row .win-name,
+.node.dimmed > .node-row .group-name {
+  color: var(--fg2);
+}
+.leaf .link {
+  color: var(--fg2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+}
+.sp-body:not(.show-link) .leaf .link {
+  display: none;
+}
+.leaf .note {
+  color: var(--fg2);
+  font-size: 11px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.copy-x,
+.close-x {
+  flex: 0 0 auto;
+  display: inline-flex;
+  background: transparent;
+  color: var(--fg2);
+  border: none;
+  border-radius: 4px;
+  padding: 2px;
+  cursor: pointer;
+  visibility: hidden;
+}
+.copy-x:hover {
+  background: var(--bg3);
+  color: var(--accent);
+}
+.close-x:hover {
+  background: var(--bg3);
+  color: var(--warn);
+}
+.leaf.selected {
+  outline: 1px solid var(--accent);
+  background: var(--accent-bg);
+}
+/* #31 拖拽视觉（dragover 高亮目标容器，拖动半透明） */
+.dragover {
+  outline: 2px dashed var(--accent);
+  background: var(--accent-bg);
+}
+.dragging {
+  opacity: 0.45;
 }
 .empty {
   color: var(--fg2);
@@ -213,44 +334,7 @@ body {
   min-height: 1.4em;
   color: var(--fg2);
 }
-.node-open .tt {
-  color: var(--fg1);
-}
-.node-open .nico {
-  color: var(--ok);
-}
-.node-closed .tt {
-  color: var(--fg2);
-}
-.node-closed .nico {
-  color: var(--line2);
-}
-.node-selected {
-  outline: 1px solid var(--accent);
-  background: var(--accent-bg);
-}
-.node-link {
-  color: var(--fg2);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 0 1 auto;
-}
-.close {
-  flex: 0 0 auto;
-  background: transparent;
-  color: var(--fg2);
-  border: none;
-  border-radius: 4px;
-  padding: 0 4px;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1.4;
-}
-.close:hover {
-  background: var(--bg3);
-  color: var(--warn);
-}
+/* M1-2 旧视觉类（.node-open/.nico/.tt/.node-link）已由 #30 原型标记（.leaf.open 等）取代 */
 
 /* ===== #29 壳对齐原型 v16：品牌 / 徽标 / 弹窗 / 右键菜单 / toast ===== */
 .brand {
