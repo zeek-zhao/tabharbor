@@ -73,3 +73,11 @@
     并且 "src/assets/m2.css" 包含 "/* R8（m10454）：行内图标放大加深"
     并且 "src/assets/m2.css" 包含 "R8：图标加深（原 --fg2 太浅）"
     并且 "src/assets/m2.css" 包含 ".leaf .dot"
+
+  场景: 标签前缀显示浏览器标签页自身图标 favicon（N3）
+    假如 标签 "GitHub" 的浏览器图标为 "fav-github"
+    当 渲染树视图
+    那么 标签 "GitHub" 的行显示浏览器图标 "fav-github"
+    并且 标签 "邮件" 的行回退为圆点图标
+    并且 "src/ui/shell.js" 包含 "favIconUrl"
+    并且 "src/assets/m2.css" 包含 ".leaf .fav"

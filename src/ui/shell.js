@@ -19,6 +19,7 @@ import {
   turnGroupIntoWindow,
   turnWindowIntoGroup,
 } from "../core/model.js";
+import { conversionRule } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
@@ -60,18 +61,30 @@ const GUIDE_HTML = `
   <li><b>设置分类：</b>设置内分外观、备份与恢复、复制、反馈四类；外观里可改主题（默认深色）、打开方式和「在上次位置打开」。</li>
 </ol>`;
 
-async function currentOpenIds(m) {
+// N3（m10950）：一次 tabs.query 同时派生「打开态集合」与「浏览器标签页自身图标表」。
+// 图标以 tabId（第一识别依据）与 url（兜底）双键索引，叶子渲染时按 tabId→url 顺序取。
+// 图标是派生态、不入库（与 openIds 一致）；Chrome 不提供图标时回退圆点 .dot。
+async function deriveOpenState(m) {
+  const empty = { openIds: new Set(), favicons: new Map() };
   try {
-    if (typeof chrome === "undefined" || !chrome.tabs?.query) return new Set();
+    if (typeof chrome === "undefined" || !chrome.tabs?.query) return empty;
     const tabs = await chrome.tabs.query({});
     // 仅 http(s) 网页参与打开态派生（扩展页/chrome:// 页不入树）。
     // R1（m10454）：携带浏览器 tabId，识别依据 tabId 优先、URL 兜底。
-    return computeOpenIds(
+    const webTabs = tabs.filter((t) => /^https?:/.test(t.url || ""));
+    const openIds = computeOpenIds(
       m,
-      tabs.filter((t) => /^https?:/.test(t.url || "")).map((t) => ({ id: t.id, url: t.url }))
+      webTabs.map((t) => ({ id: t.id, url: t.url }))
     );
+    const favicons = new Map();
+    for (const t of webTabs) {
+      if (!t.favIconUrl) continue;
+      if (t.id != null) favicons.set(`id:${t.id}`, t.favIconUrl);
+      favicons.set(`url:${t.url}`, t.favIconUrl);
+    }
+    return { openIds, favicons };
   } catch {
-    return new Set();
+    return empty;
   }
 }
 
@@ -114,15 +127,34 @@ export async function bootShell(root) {
 
   // ---- 渲染（#30：折叠 / 选中 / 搜索过滤为派生视图态，不入库） ----
   let openIds = new Set();
+  let favicons = new Map(); // N3：浏览器标签页自身图标表（tabId/url → favIconUrl）
   let collapsed = new Set();
   let selectedId = null;
   let searchQ = "";
-  // R7：置顶小窗派生视图态（与主页面同源打开态，见 refreshOpen）
-  const pipState = { openIds: new Set(), collapsed: new Set(), selectedId: null };
+  // R7：置顶小窗派生视图态（与主页面同源打开态/图标，见 refreshOpen）
+  const pipState = {
+    openIds: new Set(),
+    favicons: new Map(),
+    collapsed: new Set(),
+    selectedId: null,
+  };
+  const applyOpenState = async () => {
+    const st = await deriveOpenState(m);
+    openIds = st.openIds;
+    favicons = st.favicons;
+    pipState.openIds = new Set(openIds);
+    pipState.favicons = favicons;
+  };
   const render = async () => {
     const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
     body.innerHTML = view.windows.length
-      ? renderTree(view, { openIds, linkShow: !!settings.linkShow, selectedId, collapsed })
+      ? renderTree(view, {
+          openIds,
+          favicons,
+          linkShow: !!settings.linkShow,
+          selectedId,
+          collapsed,
+        })
       : renderEmpty();
     const stats = root.querySelector("#stats");
     if (stats) stats.innerHTML = renderStats(m, openIds);
@@ -137,8 +169,7 @@ export async function bootShell(root) {
     badge.textContent = String(n);
   };
   const refreshOpen = async () => {
-    openIds = await currentOpenIds(m);
-    pipState.openIds = new Set(openIds); // R7：置顶小窗同源打开态
+    await applyOpenState();
     await render();
   };
   // R5（m10454）：删除到回收站后的统一收尾——若模型被删空且浏览器仍有
@@ -157,7 +188,7 @@ export async function bootShell(root) {
     await refreshOpen();
     toast(msg);
   };
-  openIds = await currentOpenIds(m);
+  await applyOpenState();
 
   // M1-1 启动归类（FR-024/027）：把浏览器已打开标签对齐到「当前浏览器窗口」（多退少补）。
   // R1：入参携带浏览器 tabId，叶子落库固化 tabId 识别依据。
@@ -168,7 +199,7 @@ export async function bootShell(root) {
       bootAlign(m, openTabs);
       if (JSON.stringify(m.tabs) !== before) {
         await store.saveModel(m);
-        openIds = await currentOpenIds(m);
+        await applyOpenState();
       }
     }
   } catch {
@@ -378,8 +409,14 @@ export async function bootShell(root) {
       return false;
     }
     if (srcKind === "group") {
-      // R4（m10454）：分组拖到窗口位置 → 变成独立窗口（L1 识别依据：顶层为窗口）
+      // R4（m10454）/ N1：分组拖到窗口位置 → 变成独立窗口。
+      // 判定统一走 core/levels.js 的 L1 规则（kind + 数组归属，绝不按名称/链接）。
       if (targetKind === "window") {
+        const rule = conversionRule(m, srcId, "window", targetId);
+        if (rule.op !== "group→window") {
+          toast(rule.reason || "不能转为窗口");
+          return false;
+        }
         if (turnGroupIntoWindow(m, srcId)) {
           toast(`「${titleOf(srcId)}」已转为独立窗口`);
           return true;
@@ -404,10 +441,15 @@ export async function bootShell(root) {
         toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
         return true;
       }
-      // R4：窗口拖到分组上 → 变成该分组的子分组（来回转换）；
+      // R4 / N1：窗口拖到分组上 → 变成该分组的子分组（L1 → L2，支持来回转换）；
       // 窗口拖到标签上 → 转为该标签所在分组（若标签直挂窗口则不支持）。
       if (targetKind === "group" || (targetKind === "leaf" && target.parentId)) {
         const destGroup = targetKind === "group" ? targetId : target.parentId;
+        const rule = conversionRule(m, srcId, "group", destGroup);
+        if (rule.op !== "window→group") {
+          toast(rule.reason || "不能转入该分组");
+          return false;
+        }
         if (turnWindowIntoGroup(m, srcId, destGroup)) {
           toast(`「${titleOf(srcId)}」已转为分组并挂到「${titleOf(destGroup)}」下`);
           return true;
@@ -825,6 +867,7 @@ export async function bootShell(root) {
     pipBodyEl.innerHTML = view.windows.length
       ? renderTree(view, {
           openIds: pipState.openIds,
+          favicons: pipState.favicons,
           linkShow: !!settings.linkShow,
           selectedId: pipState.selectedId,
           collapsed: pipState.collapsed,
@@ -1115,7 +1158,7 @@ export async function bootShell(root) {
       await store.saveModel(restored);
       m = restored;
       if (restored.settings) settings = await store.saveSettings(restored.settings);
-      openIds = await currentOpenIds(m);
+      await applyOpenState();
       await render();
       say("快照已恢复");
     } catch (error) {

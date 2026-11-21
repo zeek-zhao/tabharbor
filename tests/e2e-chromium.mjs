@@ -577,6 +577,71 @@ try {
   );
   console.log("E2E 14/7 历史跳转 + 置顶 PiP 真实实现（D5/R7 同构树）通过");
 
+  // —— N1（m10950）：分组 ↔ 窗口拖拽互转（真实鼠标拖拽，L1 类型识别）——
+  const initialKind = await win.evaluate(async () => {
+    const d = await chrome.storage.local.get(["windows", "groups"]);
+    return {
+      isGroup: d.groups.some((x) => x.id === "g_design"),
+      isWindow: d.windows.some((x) => x.id === "g_design"),
+      hasWork: d.windows.some((x) => x.id === "w_work"),
+      hasProject: d.groups.some((x) => x.id === "g_project"),
+    };
+  });
+  assert.ok(initialKind.isGroup && !initialKind.isWindow, "g_design 初始应为分组");
+  assert.ok(initialKind.hasWork && initialKind.hasProject, "缺少互转所需落点节点");
+  // group → window（拖到窗口行）
+  await win
+    .locator('.node[data-id="g_design"] > .node-row')
+    .first()
+    .dragTo(win.locator('.node[data-id="w_work"] > .node-row').first());
+  await win.waitForFunction(
+    async () => {
+      const d = await chrome.storage.local.get(["windows", "groups"]);
+      return (
+        d.windows.some((x) => x.id === "g_design") && !d.groups.some((x) => x.id === "g_design")
+      );
+    },
+    undefined,
+    { timeout: 5000 }
+  );
+  assert.ok((await win.textContent("#toast")).includes("已转为独立窗口"), "分组转窗口未提示（N1）");
+  // window → group（拖回分组行，验证来回转换）
+  await win
+    .locator('.node[data-id="g_design"] > .node-row')
+    .first()
+    .dragTo(win.locator('.node[data-id="g_project"] > .node-row').first());
+  await win.waitForFunction(
+    async () => {
+      const d = await chrome.storage.local.get(["windows", "groups"]);
+      const g = d.groups.find((x) => x.id === "g_design");
+      return Boolean(
+        g && g.parentId === "g_project" && !d.windows.some((x) => x.id === "g_design")
+      );
+    },
+    undefined,
+    { timeout: 5000 }
+  );
+  assert.ok((await win.textContent("#toast")).includes("已转为分组"), "窗口转分组未提示（N1）");
+  console.log("E2E N1 分组↔窗口拖拽互转（L1 类型识别 + 来回转换）通过");
+
+  // —— N3（m10950）：标签前缀显示浏览器标签页自身图标（favicon）——
+  // 在真实 Chromium 页面里调用生产渲染函数，注入合成 favIconUrl 验证前缀 img.fav，
+  // 并验证无图标时回退 .dot（真实 tab 的 favIconUrl 由 Chrome 决定，可能为空）。
+  const favRenderOk = await win.evaluate(async () => {
+    const mod = await import(chrome.runtime.getURL("ui/render.js"));
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const m = { windows: d.windows, groups: d.groups, tabs: d.tabs };
+    const t = (d.tabs || []).find((x) => x.url);
+    if (!t) return false;
+    const map = new Map([[`url:${t.url}`, "fav-e2e-token"]]);
+    const html = mod.renderTree(m, { favicons: map, openIds: new Set([t.id]) });
+    return (
+      html.includes('<img class="fav" src="fav-e2e-token"') && html.includes('<span class="dot">')
+    );
+  });
+  assert.ok(favRenderOk, "favicon 前缀渲染/圆点回退失败（N3）");
+  console.log("E2E N3 标签前缀 favicon（浏览器图标 + 圆点回退）通过");
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

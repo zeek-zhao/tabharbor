@@ -9,6 +9,7 @@ import * as model from "../src/core/model.js";
 import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
 import { entryLabel } from "../src/core/trash-op.js";
+import { levelOf, kindByMembership, kindConsistent, conversionRule } from "../src/core/levels.js";
 
 /* ---------- 样例文件合同（真实导入器，不依赖 Chrome） ---------- */
 const SAMPLE_DIR = path.resolve(
@@ -467,6 +468,52 @@ step("那么", "{} 是分组节点", (title) => {
   const node = freshByTitle(title);
   if (node.kind !== "group" || !ctx.m.groups.includes(node)) {
     throw new Error(`${title} 应为分组节点`);
+  }
+});
+
+/* ---------- 场景组：N1 L1 层级 / 类型识别（m10950） ---------- */
+step("那么", "{} 的层级为 {}", (title, level) => {
+  const node = freshByTitle(title);
+  const got = levelOf(node);
+  if (String(got) !== String(level)) {
+    throw new Error(`${title} 层级=${got} ≠ ${level}`);
+  }
+});
+
+step("那么", "{} 的类型与所属数组一致", (title) => {
+  const node = freshByTitle(title);
+  if (!kindConsistent(ctx.m, node.id)) {
+    throw new Error(`${title} 的 kind 与数组归属不一致`);
+  }
+  if (kindByMembership(ctx.m, node.id) !== node.kind) {
+    throw new Error(`${title} 按数组归属反推的类型与 kind 不一致`);
+  }
+});
+
+step("那么", "分组 {} 已在 L1 顶层不可再转窗口", (title) => {
+  const node = freshByTitle(title);
+  const rule = conversionRule(ctx.m, node.id, "window", ctx.m.windows[0].id);
+  if (rule.op !== null) throw new Error(`${title} 已在 L1 顶层，规则应拒绝再转窗口`);
+});
+
+step("那么", "窗口 {} 拖入自身子分组 {} 被规则拒绝", (winTitle, groupTitle) => {
+  const w = freshByTitle(winTitle);
+  const g = freshByTitle(groupTitle);
+  const rule = conversionRule(ctx.m, w.id, "group", g.id);
+  if (rule.op !== null || rule.reason !== "不能转入自身子组") {
+    throw new Error(`自嵌套互转应被拒绝：${JSON.stringify(rule)}`);
+  }
+});
+
+step("那么", "标签 {} 与标签 {} 虽同名同链接但层级均为 {} 且 id 不同", (a, b, level) => {
+  const list = ctx.hashTabs || [];
+  const na = list[list.length - 2];
+  const nb = list[list.length - 1];
+  if (!na || !nb) throw new Error(`需要两个刚创建的标签`);
+  if (na.title !== a || nb.title !== b) throw new Error(`标签名不符`);
+  if (na.id === nb.id) throw new Error(`同名同链接标签 id 不应相同`);
+  if (String(levelOf(na)) !== String(level) || String(levelOf(nb)) !== String(level)) {
+    throw new Error(`两标签层级应均为 ${level}`);
   }
 });
 
@@ -996,10 +1043,36 @@ step("假如", "链接开关开启", () => {
 step("当", "渲染树视图", () => {
   ctx.html = render.renderTree(ctx.m, {
     openIds: ctx.viewOpenIds || new Set(),
+    favicons: ctx.favicons || new Map(),
     linkShow: ctx.linkShow || false,
     selectedId: ctx.selectedId || null,
     collapsed: ctx.collapsed || new Set(),
   });
+});
+
+// N3（m10950）：浏览器标签页自身图标（favicon）作为派生态渲染到标签前缀
+step("假如", "标签 {} 的浏览器图标为 {}", (title, favUrl) => {
+  const node = freshByTitle(title);
+  ctx.favicons = ctx.favicons || new Map();
+  ctx.favicons.set(`url:${node.url}`, favUrl);
+  if (node.tabId != null) ctx.favicons.set(`id:${node.tabId}`, favUrl);
+});
+
+step("那么", "标签 {} 的行显示浏览器图标 {}", (title, favUrl) => {
+  const row = rowOf(title);
+  if (!row.includes('<img class="fav"')) {
+    throw new Error(`${title} 行未渲染 favicon 图标`);
+  }
+  if (!row.includes(`src="${favUrl}"`)) {
+    throw new Error(`${title} 行 favicon src 不符：${row.slice(0, 300)}`);
+  }
+});
+
+step("那么", "标签 {} 的行回退为圆点图标", (title) => {
+  const row = rowOf(title);
+  if (!row.includes('<span class="dot"></span>')) {
+    throw new Error(`${title} 行未提供 favicon 时应回退 .dot`);
+  }
 });
 
 function rowOf(title) {

@@ -199,6 +199,17 @@ body {
 .leaf.open .dot {
   background: var(--ok);
 }
+/* N3（m10950）：标签前缀显示浏览器标签页自身图标（favicon），与 .dot 同一位置 */
+.leaf .fav {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+.leaf.dimmed .fav {
+  opacity: 0.45;
+}
 .leaf .title {
   overflow: hidden;
   text-overflow: ellipsis;

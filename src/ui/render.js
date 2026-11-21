@@ -4,6 +4,8 @@
 // 折叠（FR-013）：折叠的分组不渲染子树（与原型 display:none 等效，DOM 更小）。
 // opts：openIds（align 派生）、linkShow、selectedId、collapsed（Set，折叠派生视图态）
 // R8（m10454）：图标放大（12→14px）并加深（颜色由 CSS --fg1 控制）
+// N3（m10950）：标签前缀显示「浏览器标签页自身图标」（favicon）。派生数据由 shell
+// 从 chrome.tabs 的 favIconUrl 传入（按 tabId 优先、url 兜底索引）；无图标时回退 .dot。
 const TRI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CP =
@@ -59,12 +61,20 @@ function leafRow(t, opts) {
   const dim = open ? "" : " dimmed";
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
+  // N3：前缀图标 = 浏览器标签页自身图标；tabId 优先、url 兜底，缺失则保留 .dot。
+  const favicons = opts.favicons;
+  const favUrl =
+    favicons &&
+    ((t.tabId != null && favicons.get(`id:${t.tabId}`)) || favicons.get(`url:${t.url}`));
+  const prefix = favUrl
+    ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />`
+    : `<span class="dot"></span>`;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
   const openBtn = `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
   const closeBtn = open
     ? `<button class="close-x" data-act="close" title="关闭网页">${XI}</button>`
     : "";
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true"><span class="dot"></span><span class="title">${escapeHtml(t.title || t.url || "")}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(t.title || t.url || "")}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断

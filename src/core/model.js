@@ -1,6 +1,9 @@
 // TH2 存储层 v2 · 树数据模型（SRS §3.1：windows/groups/tabs 三数组 + parentId 引用）
 // M0 范围：纯函数模型（创建/查询/递归后代/防环校验/移动）。排序与拖拽落点（afterId）在 M2 扩展。
 // 约定：parentId 引用任意上层节点 id（tab→group、group→window 或父 group）；窗口 parentId 恒为 null。
+// L1 类型识别（N1）：顶层=窗口、L1 内=分组、标签=网页；身份/层级只依据 kind + 数组归属，
+// 绝不以 title / url 判定。统一规则见 core/levels.js。
+import { isTopLevel, kindConsistent } from "./levels.js";
 
 // R1（m10454）：标签唯一标识 = 独立算法生成的哈希 ID（FNV-1a 32 位 → 36 进制 7 位），
 // 不以标签名或链接作为 ID 来源——同一链接可开多个标签，按 URL 识别会同步错乱。
@@ -134,31 +137,44 @@ export function mergeWindows(m, srcId, targetId) {
   return true;
 }
 
-// R4（m10454）：分组 ↔ 窗口互转。识别依据 = L1 结构（顶层为窗口，L1 内为分组）。
-// 分组拖到窗口位置 → 变成独立窗口（子组/标签随行，id 不变）。
+// R4（m10454）/ N1（m10950）：分组 ↔ 窗口互转。
+// 识别依据 = L1 结构（顶层为窗口，L1 内为分组），见 core/levels.js；
+// 绝不以 name / url 判定类型。互转保持 id 与子树不变，只改 kind / parentId / 所属数组。
 export function turnGroupIntoWindow(m, groupId) {
-  const g = findNode(m, groupId);
-  if (!g || g.kind !== "group") return false;
+  const g = m.groups.find((n) => n.id === groupId);
+  // L1 一致性：分组必须真实位于 groups 数组且 kind=group；已在 L1 顶层的无需再转。
+  if (!g || g.kind !== "group" || !kindConsistent(m, groupId) || isTopLevel(m, groupId)) {
+    return false;
+  }
   g.kind = "window";
-  g.parentId = null;
+  g.parentId = null; // 升为 L1 顶层
   m.groups.splice(m.groups.indexOf(g), 1);
   m.windows.push(g);
   return true;
 }
 
-// R4：窗口拖入分组 → 变成该分组的子分组（子树随行，id 不变）。
-// 目标分组不得位于被拖窗口子树内（防自嵌套）。
+// R4 / N1：窗口拖入分组 → 变成该分组的子分组（L1 → L2，子树随行，id 不变）。
+// 目标分组不得位于被拖窗口子树内（防自嵌套，L1 语义校验）。
 export function turnWindowIntoGroup(m, windowId, targetGroupId) {
-  const w = findNode(m, windowId);
-  const t = findNode(m, targetGroupId);
-  if (!w || w.kind !== "window" || !t || t.kind !== "group") return false;
+  const w = m.windows.find((n) => n.id === windowId);
+  const t = m.groups.find((n) => n.id === targetGroupId);
+  if (
+    !w ||
+    w.kind !== "window" ||
+    !t ||
+    t.kind !== "group" ||
+    !kindConsistent(m, windowId) ||
+    !kindConsistent(m, targetGroupId)
+  ) {
+    return false;
+  }
   let cur = t;
   while (cur) {
     if (cur.id === w.id) return false;
     cur = cur.parentId ? findNode(m, cur.parentId) : null;
   }
   w.kind = "group";
-  w.parentId = targetGroupId;
+  w.parentId = targetGroupId; // 降为 L1 内分组
   m.windows.splice(m.windows.indexOf(w), 1);
   m.groups.push(w);
   return true;
