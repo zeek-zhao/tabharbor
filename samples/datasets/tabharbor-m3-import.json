@@ -36,7 +36,12 @@
   "trash": [
     {
       "kind": "group",
-      "payload": { "id": "g_m3_trash", "parentId": "w_m3", "title": "已删除的草稿组", "collapsed": false },
+      "payload": {
+        "id": "g_m3_trash",
+        "parentId": "w_m3",
+        "title": "已删除的草稿组",
+        "collapsed": false
+      },
       "parentId": "w_m3",
       "time": "2026-11-21T00:00:00.000Z",
       "desc": {

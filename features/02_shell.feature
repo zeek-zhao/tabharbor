@@ -87,13 +87,15 @@
 那么 "src/ui/shell.js" 不包含 "chrome.history"
 那么 "src/ui/shell.js" 不包含 "chrome.bookmarks"
 
-场景: D5 历史跳转与置顶真实实现（原型 v16 line 727/1226/1246；置顶按 Q-F 用 Document PiP）
+场景: D5 历史跳转与置顶真实实现（原型 v16 line 727/1226/1246；置顶按 Q-F 用 Document PiP；R7 小窗共用主树）
 那么 "src/ui/shell.js" 包含 "chrome://history/"
 那么 "src/ui/shell.js" 包含 "documentPictureInPicture"
 那么 "src/ui/shell.js" 包含 "requestWindow"
 那么 "src/ui/shell.js" 包含 "已取消置顶：浮动小窗已关闭"
 那么 "src/ui/shell.js" 包含 "e.key === \"p\""
-那么 "src/assets/m2.css" 包含 ".pip-item"
+那么 "src/ui/shell.js" 包含 "pipWire"
+那么 "src/ui/shell.js" 包含 "renderTree"
+那么 "src/assets/m2.css" 包含 ".pip-wrap .sp-body"
 那么 "src/ui/shell.js" 包含 "已打开浏览器历史"
 那么 "src/window/window.html" 包含 "btnPip"
 那么 "src/sidebar/sidebar.html" 不包含 "btnPip"
@@ -121,3 +123,14 @@
 那么 "src/ui/menu.js" 包含 "<svg"
 那么 "src/ui/menu.js" 包含 "data-act"
 那么 "src/assets/m2.css" 包含 ".ctx-menu .mi"
+
+场景: R2 导入合并为「导入书签」窗口（不做全量替换）
+那么 "src/ui/shell.js" 包含 "mergeAsImportedWindow"
+那么 "src/ui/shell.js" 包含 "导入完成："
+那么 "src/core/import-export.js" 包含 "mergeAsImportedWindow"
+
+场景: R5 删空后重读浏览器打开状态
+那么 "src/ui/shell.js" 包含 "realignIfEmpty"
+那么 "src/ui/shell.js" 包含 "removeToTrash"
+那么 "src/ui/shell.js" 包含 "queryOpenTabs"
+那么 "src/core/align.js" 包含 "realignIfEmpty"

@@ -6,24 +6,135 @@
     { "id": "w_study", "kind": "window", "title": "学习与研究", "collapsed": false }
   ],
   "groups": [
-    { "id": "g_project", "kind": "group", "title": "项目协作", "parentId": "w_work", "collapsed": false, "note": "工作项目相关页面" },
-    { "id": "g_reference", "kind": "group", "title": "技术资料", "parentId": "w_work", "collapsed": false, "note": "开发参考" },
-    { "id": "g_docs", "kind": "group", "title": "文档阅读", "parentId": "w_study", "collapsed": false, "note": "学习材料" },
-    { "id": "g_design", "kind": "group", "title": "设计灵感", "parentId": "w_study", "collapsed": false, "note": "界面与交互参考" },
-    { "id": "g_nested", "kind": "group", "title": "浏览器 API", "parentId": "g_reference", "collapsed": false, "note": "嵌套组示例" }
+    {
+      "id": "g_project",
+      "kind": "group",
+      "title": "项目协作",
+      "parentId": "w_work",
+      "collapsed": false,
+      "note": "工作项目相关页面"
+    },
+    {
+      "id": "g_reference",
+      "kind": "group",
+      "title": "技术资料",
+      "parentId": "w_work",
+      "collapsed": false,
+      "note": "开发参考"
+    },
+    {
+      "id": "g_docs",
+      "kind": "group",
+      "title": "文档阅读",
+      "parentId": "w_study",
+      "collapsed": false,
+      "note": "学习材料"
+    },
+    {
+      "id": "g_design",
+      "kind": "group",
+      "title": "设计灵感",
+      "parentId": "w_study",
+      "collapsed": false,
+      "note": "界面与交互参考"
+    },
+    {
+      "id": "g_nested",
+      "kind": "group",
+      "title": "浏览器 API",
+      "parentId": "g_reference",
+      "collapsed": false,
+      "note": "嵌套组示例"
+    }
   ],
   "tabs": [
-    { "id": "t_project_1", "kind": "tab", "title": "项目看板示例", "url": "https://example.com/project-board", "parentId": "g_project", "note": "样例网址，不连接真实看板" },
-    { "id": "t_project_2", "kind": "tab", "title": "发布清单示例", "url": "https://example.com/release-checklist", "parentId": "g_project", "note": "可用作检查清单演示" },
-    { "id": "t_ref_1", "kind": "tab", "title": "MDN Web Docs", "url": "https://example.com/mdn-web-docs", "parentId": "g_reference", "note": "开发文档示例链接" },
-    { "id": "t_ref_2", "kind": "tab", "title": "网页标准示例", "url": "https://example.com/web-standards", "parentId": "g_reference", "note": "样例数据" },
-    { "id": "t_api_1", "kind": "tab", "title": "Tabs API 示例", "url": "https://example.com/tabs-api", "parentId": "g_nested", "note": "不可连接浏览器书签 API" },
-    { "id": "t_api_2", "kind": "tab", "title": "Storage API 示例", "url": "https://example.com/storage-api", "parentId": "g_nested", "note": "测试嵌套树结构" },
-    { "id": "t_docs_1", "kind": "tab", "title": "阅读清单示例", "url": "https://example.com/reading-list", "parentId": "g_docs", "note": "样例数据" },
-    { "id": "t_docs_2", "kind": "tab", "title": "文章摘录示例", "url": "https://example.com/article-notes", "parentId": "g_docs", "note": "样例数据" },
-    { "id": "t_design_1", "kind": "tab", "title": "界面布局示例", "url": "https://example.com/interface-layout", "parentId": "g_design", "note": "样例数据" },
-    { "id": "t_design_2", "kind": "tab", "title": "交互模式示例", "url": "https://example.com/interaction-patterns", "parentId": "g_design", "note": "样例数据" }
+    {
+      "id": "t_project_1",
+      "kind": "tab",
+      "title": "项目看板示例",
+      "url": "https://example.com/project-board",
+      "parentId": "g_project",
+      "note": "样例网址，不连接真实看板"
+    },
+    {
+      "id": "t_project_2",
+      "kind": "tab",
+      "title": "发布清单示例",
+      "url": "https://example.com/release-checklist",
+      "parentId": "g_project",
+      "note": "可用作检查清单演示"
+    },
+    {
+      "id": "t_ref_1",
+      "kind": "tab",
+      "title": "MDN Web Docs",
+      "url": "https://example.com/mdn-web-docs",
+      "parentId": "g_reference",
+      "note": "开发文档示例链接"
+    },
+    {
+      "id": "t_ref_2",
+      "kind": "tab",
+      "title": "网页标准示例",
+      "url": "https://example.com/web-standards",
+      "parentId": "g_reference",
+      "note": "样例数据"
+    },
+    {
+      "id": "t_api_1",
+      "kind": "tab",
+      "title": "Tabs API 示例",
+      "url": "https://example.com/tabs-api",
+      "parentId": "g_nested",
+      "note": "不可连接浏览器书签 API"
+    },
+    {
+      "id": "t_api_2",
+      "kind": "tab",
+      "title": "Storage API 示例",
+      "url": "https://example.com/storage-api",
+      "parentId": "g_nested",
+      "note": "测试嵌套树结构"
+    },
+    {
+      "id": "t_docs_1",
+      "kind": "tab",
+      "title": "阅读清单示例",
+      "url": "https://example.com/reading-list",
+      "parentId": "g_docs",
+      "note": "样例数据"
+    },
+    {
+      "id": "t_docs_2",
+      "kind": "tab",
+      "title": "文章摘录示例",
+      "url": "https://example.com/article-notes",
+      "parentId": "g_docs",
+      "note": "样例数据"
+    },
+    {
+      "id": "t_design_1",
+      "kind": "tab",
+      "title": "界面布局示例",
+      "url": "https://example.com/interface-layout",
+      "parentId": "g_design",
+      "note": "样例数据"
+    },
+    {
+      "id": "t_design_2",
+      "kind": "tab",
+      "title": "交互模式示例",
+      "url": "https://example.com/interaction-patterns",
+      "parentId": "g_design",
+      "note": "样例数据"
+    }
   ],
-  "settings": { "theme": "dark", "openMode": "sidebar", "backupTarget": "local", "ghBackupFreq": "off", "linkShow": false },
+  "settings": {
+    "theme": "dark",
+    "openMode": "sidebar",
+    "backupTarget": "local",
+    "ghBackupFreq": "off",
+    "linkShow": false
+  },
   "trash": []
 }

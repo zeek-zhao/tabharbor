@@ -135,7 +135,7 @@ body {
 }
 .tri {
   flex: 0 0 auto;
-  color: var(--fg2);
+  color: var(--fg1); /* R8：图标加深（原 --fg2 太浅） */
   display: inline-flex;
   transition: transform 0.12s;
 }
@@ -159,14 +159,13 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* R6（m10454）：窗口/分组行内操作与原型一致——常显，不再 hover 才出现 */
 .row-ops {
   display: inline-flex;
   gap: 2px;
   margin-left: auto;
-  visibility: hidden;
+  visibility: visible;
 }
-.node-row:hover .row-ops,
-.leaf:hover .copy-x,
 .leaf:hover .open-x,
 .leaf:hover .close-x {
   visibility: visible;
@@ -192,10 +191,10 @@ body {
 }
 .leaf .dot {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
+  width: 8px; /* R8：放大 7→8px */
+  height: 8px;
   border-radius: 50%;
-  background: var(--line2);
+  background: var(--fg2);
 }
 .leaf.open .dot {
   background: var(--ok);
@@ -232,18 +231,23 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* R8（m10454）：行内图标放大加深——SVG 14px、常显复制按钮用主前景色 */
 .copy-x,
 .open-x,
 .close-x {
   flex: 0 0 auto;
   display: inline-flex;
   background: transparent;
-  color: var(--fg2);
+  color: var(--fg1);
   border: none;
   border-radius: 4px;
   padding: 2px;
   cursor: pointer;
   visibility: hidden;
+}
+/* R6：复制按钮与原型一致常显（叶子/分组/窗口行都可见） */
+.copy-x {
+  visibility: visible;
 }
 .copy-x:hover {
   background: var(--bg3);
@@ -692,15 +696,31 @@ body {
 }
 
 /* ---- D5 置顶 PiP 浮窗（TH2-001 Q-F：Document Picture-in-Picture 真置顶） ---- */
-.pip-wrap { display: flex; flex-direction: column; height: 100vh; font-size: 13px; }
-.pip-head { padding: 10px 14px; font-weight: 600; color: var(--fg1); border-bottom: 1px solid var(--line1); }
-.pip-window { padding: 10px 14px 2px; color: var(--fg2); font-size: 11px; }
-.pip-group { padding: 8px 14px 2px; color: var(--fg2); font-size: 11px; }
-.pip-item { display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer; }
-.pip-item:hover { background: var(--accent-bg); }
-.pip-item .pip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line2); flex-shrink: 0; }
-.pip-item.on .pip-dot { background: var(--accent); }
-.pip-item .pip-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg2); }
-.pip-item.on .pip-title { color: var(--fg1); }
-.pip-foot { margin-top: auto; padding: 8px 14px; font-size: 11px; color: var(--fg2); border-top: 1px solid var(--line1); }
-.pip-empty { padding: 20px 14px; color: var(--fg2); text-align: center; }
+/* R7（m10454）：置顶小窗与独立标签工具页同构——sp-body 树容器 + 底部统计 */
+.pip-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-size: 13px;
+}
+.pip-head {
+  padding: 10px 14px;
+  font-weight: 600;
+  color: var(--fg1);
+  border-bottom: 1px solid var(--line1);
+}
+.pip-wrap .sp-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px;
+}
+.pip-foot {
+  margin-top: auto;
+  padding: 8px 14px;
+  font-size: 11px;
+  color: var(--fg2);
+  border-top: 1px solid var(--line1);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

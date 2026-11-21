@@ -53,14 +53,17 @@ try {
   console.log("E2E 2/6 独立窗口页空态渲染通过（真实 chrome.storage.local）");
 
   // —— 播种样例数据：真实 chrome.storage.local.set → onChanged 触发实时重渲染 ——
+  // 先 clear 清掉持久化 profile 可能残留的旧状态（tabId/回收站等跨运行残留）
   await win.evaluate((data) => {
-    return chrome.storage.local.set({
-      windows: data.windows,
-      groups: data.groups,
-      tabs: data.tabs,
-      settings: data.settings,
-      trash: data.trash,
-    });
+    return chrome.storage.local.clear().then(() =>
+      chrome.storage.local.set({
+        windows: data.windows,
+        groups: data.groups,
+        tabs: data.tabs,
+        settings: data.settings,
+        trash: data.trash,
+      })
+    );
   }, SAMPLE);
   await win.waitForFunction(
     () => document.querySelectorAll('.node[data-kind="window"]').length >= 2,
@@ -458,20 +461,28 @@ try {
   assert.equal(sideWindows, 2, `侧边栏页窗口节点数异常: ${sideWindows}`);
   console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
-  // —— #32 M3 演练：真实文件导入（JSON 全量替换 + 非法版本拒绝）——
-  win.on("dialog", (dialog) => void dialog.accept()); // 导入确认弹窗
+  // —— #32/R2 M3 演练：真实文件导入（R2 合并为「导入书签」窗口，不再全量替换）——
+  win.on("dialog", (dialog) => void dialog.accept()); // 恢复备份等场景的确认弹窗兜底
   const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-import.json");
   const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-invalid.json");
+  const windowsBefore = await win.evaluate(
+    () => document.querySelectorAll('.node[data-kind="window"]').length
+  );
   await win.setInputFiles("#importFile", m3ImportPath);
   await win.waitForFunction(
-    () => document.querySelectorAll('.node[data-kind="window"]').length === 1,
-    undefined,
+    (n) => document.querySelectorAll('.node[data-kind="window"]').length === n + 1,
+    windowsBefore,
     { timeout: 5000 }
   );
-  const importedTitle = await win.textContent(".group-name");
-  assert.equal(importedTitle, "演练-研究", "M3 JSON 导入后树未替换为演练数据");
+  const winNames = await win.evaluate(() =>
+    [...document.querySelectorAll(".win-name")].map((x) => x.textContent.trim())
+  );
+  assert.ok(winNames.includes("导入书签"), `导入书签窗口未新增: ${winNames.join(",")}`);
   const statusOk = await win.textContent("#dataStatus");
-  assert.ok(statusOk.includes("导入完成"), `导入完成提示缺失: ${statusOk}`);
+  assert.ok(
+    statusOk.includes("导入完成") && statusOk.includes("导入书签"),
+    `R2 合并导入提示缺失: ${statusOk}`
+  );
 
   await win.setInputFiles("#importFile", m3InvalidPath);
   await win.waitForFunction(
@@ -481,7 +492,13 @@ try {
   );
   const statusFail = await win.textContent("#dataStatus");
   assert.ok(statusFail.includes("版本不兼容"), `非法版本拒绝提示缺失: ${statusFail}`);
-  console.log("E2E 13/7 M3 导入演练（合法替换 + 非法版本拒绝）通过");
+  // R8：行内图标放大（SVG width=14）
+  const triW = await win.evaluate(() => {
+    const svg = document.querySelector(".tri svg") || document.querySelector(".leaf svg");
+    return svg ? svg.getAttribute("width") : null;
+  });
+  assert.equal(triW, "14", `R8 图标宽度异常: ${triW}`);
+  console.log("E2E 13/7 M3 导入演练（R2 合并导入 + 非法版本拒绝 + R8 图标）通过");
 
   // —— D5：历史跳转 + 置顶真实实现（修复前：仅 toast 待实现）——
   await win.click("#btnHistory");
@@ -512,38 +529,45 @@ try {
   await win.click("#btnPip");
   const pipPage = await waitPipPage();
   assert.ok(pipPage, "置顶 PiP 浮窗未打开（D5）");
-  const pipItems = await pipPage.locator(".pip-item").count();
-  assert.ok(pipItems > 0, "置顶 PiP 浮窗未渲染标签列表（D5）");
-  // 为当前模型第一个叶子开一个真实标签页 → PiP 列表出现 data-tab-id 条目
-  const leafUrl = await win.evaluate(async () => {
+  // R7：PiP 与主页面同构——渲染同一棵树（.leaf），交互一致
+  const pipLeaves = await pipPage.locator(".leaf").count();
+  assert.ok(pipLeaves > 0, "置顶 PiP 浮窗未渲染树节点（R7）");
+  // 选一个当前未打开的叶子（同 URL 多开时打开态派生按 URL 兜底，会点亮已有标签——
+  // 关闭断言需要「开 1 关 1 归零」，必须选未被占用的 URL）
+  const leafInfo = await win.evaluate(async () => {
     const d = await chrome.storage.local.get(["tabs"]);
-    const t = (d.tabs || []).find((x) => /^https?:/.test(x.url || ""));
-    return t ? t.url : null;
+    const openUrls = new Set(
+      (await chrome.tabs.query({})).filter((t) => /^https?:/.test(t.url || "")).map((t) => t.url)
+    );
+    const t = (d.tabs || []).find((x) => /^https?:/.test(x.url || "") && !openUrls.has(x.url));
+    return t ? { id: t.id, url: t.url } : null;
   });
-  assert.ok(leafUrl, "当前模型无可用标签地址（D5）");
-  await win.evaluate((u) => chrome.tabs.create({ url: u }), leafUrl);
+  assert.ok(leafInfo, "当前模型无未被打开的可用标签地址（R7）");
+  await win.evaluate((u) => chrome.tabs.create({ url: u }), leafInfo.url);
   await win.waitForFunction(
     (u) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts.length > 0))),
-    leafUrl,
+    leafInfo.url,
     { timeout: 5000 }
   );
-  // 点击已打开标签条目 → 该标签页被激活跳转（等待去抖刷新后出现 data-tab-id 条目）
-  const itemSel = ".pip-item[data-tab-id]";
-  await pipPage.waitForFunction(
-    () => Boolean(document.querySelector(".pip-item[data-tab-id]")),
-    undefined,
-    { timeout: 5000 }
+  await pipPage.waitForFunction(() => Boolean(document.querySelector(".leaf.open")), undefined, {
+    timeout: 5000,
+  });
+  // 点击叶子 → 选中（pipSelect 与主页面一致）
+  await pipPage.locator(".leaf.open").first().click();
+  assert.ok(
+    await pipPage.locator(".leaf.open.selected").first().isVisible(),
+    "PiP 叶子点击未选中（R7）"
   );
-  assert.ok(await pipPage.locator(itemSel).first().isVisible(), "PiP 无已打开标签条目（D5）");
-  const targetTabId = await pipPage.evaluate(() =>
-    Number(document.querySelector(".pip-item[data-tab-id]").dataset.tabId)
+  // 行内关闭 → 该网页标签页被关闭且 PiP 同步去亮（close-x hover 门控，evaluate 点击）
+  await pipPage.evaluate(() => document.querySelector(".leaf.open .close-x").click());
+  await pipPage.waitForFunction(() => !document.querySelector(".leaf.open"), undefined, {
+    timeout: 5000,
+  });
+  const closedGone = await win.evaluate(
+    (u) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts.length))),
+    leafInfo.url
   );
-  await pipPage.locator(itemSel).first().click();
-  await win.waitForFunction(
-    (tid) => new Promise((r) => chrome.tabs.get(tid, (t) => r(t && t.active === true))),
-    targetTabId,
-    { timeout: 5000 }
-  );
+  assert.equal(closedGone, 0, "PiP 行内关闭未关闭浏览器标签页（R7）");
   // 取消置顶：再次点击 → 浮窗关闭、按钮高亮清除
   await win.click("#btnPip");
   await win.waitForFunction(
@@ -551,7 +575,7 @@ try {
     undefined,
     { timeout: 5000 }
   );
-  console.log("E2E 14/7 历史跳转 + 置顶 PiP 真实实现（D5）通过");
+  console.log("E2E 14/7 历史跳转 + 置顶 PiP 真实实现（D5/R7 同构树）通过");
 
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {

@@ -188,7 +188,9 @@ export function makeChromeMock() {
       remove: async (ids) => {
         calls.tabsRemove.push(...(Array.isArray(ids) ? ids : [ids]));
       },
-      query: async () => ctx.openTabs.map((t, i) => ({ id: i + 1, url: t.url, windowId: 1 })),
+      // R1：openTabs 条目可带显式 id（模拟浏览器稳定 tabId）；缺省按序分配
+      query: async () =>
+        ctx.openTabs.map((t, i) => ({ id: t.id ?? i + 1, url: t.url, windowId: 1 })),
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
       onUpdated: { addListener: () => {} },
@@ -436,6 +438,75 @@ step("当", "把窗口 {} 合并到窗口 {}", (srcTitle, targetTitle) => {
   ctx.dropOk = model.mergeWindows(ctx.m, freshByTitle(srcTitle).id, freshByTitle(targetTitle).id);
 });
 
+/* ---------- 场景组：R4 分组与窗口互转（m10454） ---------- */
+step("当", "把分组 {} 拖到窗口 {} 上（转为窗口）", (groupTitle, winTitle) => {
+  const g = freshByTitle(groupTitle);
+  if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
+  const w = freshByTitle(winTitle);
+  if (w.kind !== "window") throw new Error(`${winTitle} 不是窗口`);
+  model.turnGroupIntoWindow(ctx.m, g.id);
+  ctx.dropOk = true;
+});
+
+step("当", "把窗口 {} 拖到分组 {} 上（转为分组）", (winTitle, groupTitle) => {
+  const w = freshByTitle(winTitle);
+  if (w.kind !== "window") throw new Error(`${winTitle} 不是窗口`);
+  const g = freshByTitle(groupTitle);
+  if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
+  ctx.dropOk = model.turnWindowIntoGroup(ctx.m, w.id, g.id);
+});
+
+step("那么", "{} 是窗口节点", (title) => {
+  const node = freshByTitle(title);
+  if (node.kind !== "window" || !ctx.m.windows.includes(node)) {
+    throw new Error(`${title} 应为窗口节点`);
+  }
+});
+
+step("那么", "{} 是分组节点", (title) => {
+  const node = freshByTitle(title);
+  if (node.kind !== "group" || !ctx.m.groups.includes(node)) {
+    throw new Error(`${title} 应为分组节点`);
+  }
+});
+
+/* ---------- 场景组：R1 哈希唯一标识（m10454） ---------- */
+step("假如", "创建一个标签节点名为 {} 指向 {}", (title, url) => {
+  const parent = ctx.m.groups[0] || ctx.m.windows[0];
+  if (!parent) throw new Error("需要至少一个分组或窗口");
+  const node = model.addTab(ctx.m, title, url, parent.id);
+  ctx.hashTabs = ctx.hashTabs || [];
+  ctx.hashTabs.push(node);
+});
+
+step("假如", "再创建一个标签节点名为 {} 指向 {}", (title, url) => {
+  const parent = ctx.m.groups[0] || ctx.m.windows[0];
+  const node = model.addTab(ctx.m, title, url, parent.id);
+  ctx.hashTabs.push(node);
+});
+
+step("那么", "两个标签节点的 id 不同且均为哈希格式", () => {
+  const [a, b] = ctx.hashTabs || [];
+  if (!a || !b) throw new Error("需要先创建两个标签节点");
+  if (a.id === b.id) throw new Error(`两个标签 id 相同：${a.id}`);
+  const re = /^(w|g|t)_[0-9a-z]{7}$/;
+  if (!re.test(a.id) || !re.test(b.id)) {
+    throw new Error(`id 非哈希格式：${a.id} / ${b.id}`);
+  }
+  if (a.title === b.title && a.url === b.url) {
+    // 同名同链接的两个节点仍必须拥有独立 id（识别依据 ≠ 名称/链接）
+  }
+});
+
+step("那么", "两个标签节点均不在回收站中", () => {
+  const trash = ctx.m.trash || [];
+  for (const t of ctx.hashTabs || []) {
+    if (trash.some((e) => e.payload && e.payload.id === t.id)) {
+      throw new Error(`标签 ${t.id} 不应出现在回收站`);
+    }
+  }
+});
+
 step("那么", "{} 排在 {} 之后（同父相邻）", (aTitle, bTitle) => {
   const a = freshByTitle(aTitle);
   const b = freshByTitle(bTitle);
@@ -498,6 +569,38 @@ step("那么", "回收站条目 {} 的标题是 {}", (i, title) => {
   if (entryLabel(entry) !== title) {
     throw new Error(`条目标题不符：${entryLabel(entry)} ≠ ${title}`);
   }
+});
+
+/* R3（m10454）：恢复到删除时的原位置（兄弟序） */
+step("那么", "{} 的同父序位是 {}", (title, n) => {
+  const node = freshByTitle(title);
+  const arr =
+    node.kind === "tab"
+      ? ctx.m.tabs.filter((t) => t.parentId === node.parentId)
+      : node.kind === "group"
+        ? ctx.m.groups.filter((g) => g.parentId === node.parentId)
+        : ctx.m.windows;
+  const idx = arr.indexOf(node);
+  if (idx !== Number(n)) throw new Error(`同父序位不符：${idx} ≠ ${n}`);
+});
+
+step("那么", "窗口 {} 的列表序位是 {}", (title, n) => {
+  const win = ctx.m.windows.find((w) => w.title === title);
+  if (!win) throw new Error(`窗口不存在：${title}`);
+  const idx = ctx.m.windows.indexOf(win);
+  if (idx !== Number(n)) throw new Error(`窗口列表序位不符：${idx} ≠ ${n}`);
+});
+
+/* R3：回收站随模型持久化到 chrome.storage */
+step("当", "保存模型到存储", async () => {
+  const store = await import("../src/core/store.js");
+  await store.saveModel(ctx.m, ctx.mock.chrome);
+});
+
+step("那么", "存储中的回收站含 {} 个条目", async (n) => {
+  const got = await ctx.mock.chrome.storage.local.get(["trash"]);
+  const trash = got.trash || [];
+  if (trash.length !== Number(n)) throw new Error(`存储回收站条目数不符：${trash.length} ≠ ${n}`);
 });
 
 /* ---------- 场景组：递归后代（FR-020 复制/关闭整组的数据基础） ---------- */
@@ -739,10 +842,11 @@ step("那么", "存储命令键为 {}", async (name) => {
 import * as align from "../src/core/align.js";
 
 const tabUrl = (t) => `https://example.com/${encodeURIComponent(t)}`;
+// R1：样例浏览器标签页带稳定 id（mock/align 均以 tabId 优先识别）
 const SAMPLE_3 = [
-  { title: "MDN IndexedDB", url: "https://developer.mozilla.org/docs/Web/API/IndexedDB" },
-  { title: "GitHub", url: "https://github.com/zeek-zhao/tabharbor" },
-  { title: "邮件", url: "https://mail.example.com/" },
+  { id: 1, title: "MDN IndexedDB", url: "https://developer.mozilla.org/docs/Web/API/IndexedDB" },
+  { id: 2, title: "GitHub", url: "https://github.com/zeek-zhao/tabharbor" },
+  { id: 3, title: "邮件", url: "https://mail.example.com/" },
 ];
 
 step("假如", "浏览器打开了 {} 个标签页", (n) => {
@@ -751,12 +855,52 @@ step("假如", "浏览器打开了 {} 个标签页", (n) => {
 });
 
 step("假如", "浏览器打开了标签 {}", (title) => {
-  ctx.openTabs = [{ title, url: tabUrl(title) }];
+  ctx.openTabs = [{ id: 1, title, url: tabUrl(title) }];
 });
 
 step("假如", "浏览器标签页变为 {} 个", (n) => {
   const k = Number(n);
   ctx.openTabs = k === 0 ? [] : SAMPLE_3.slice(0, k);
+});
+
+/* R1：同 URL 多开按 tabId 识别（m10454） */
+step("假如", "浏览器关闭标签页号 {}", (n) => {
+  ctx.openTabs = (ctx.openTabs || []).filter((t) => t.id !== Number(n));
+});
+
+step("假如", "浏览器新开标签页号 {} 打开 {}", (n, title) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.openTabs.push({ id: Number(n), title, url: tabUrl(title) });
+});
+
+step("那么", "当前浏览器窗口叶子标签页号为 {}", (csv) => {
+  const win = ctx.m.windows.find((w) => w.title === align.CURRENT_WINDOW_TITLE);
+  if (!win) throw new Error("当前浏览器窗口不存在");
+  const ids = model
+    .childrenOf(ctx.m, win.id)
+    .filter((x) => x.kind === "tab")
+    .map((t) => t.tabId)
+    .filter((v) => v != null)
+    .sort((a, b) => a - b);
+  if (ids.join(",") !== String(csv)) {
+    throw new Error(`叶子标签页号不符：[${ids.join(",")}] ≠ ${csv}`);
+  }
+});
+
+/* R5：删空后重读浏览器打开状态（m10454） */
+step("当", "把模型删空", () => {
+  ctx.m.windows = [];
+  ctx.m.groups = [];
+  ctx.m.tabs = [];
+});
+
+step("当", "删空后重新读取浏览器状态", () => {
+  ctx.realigned = align.realignIfEmpty(ctx.m, ctx.openTabs || []);
+});
+
+step("那么", "重新读取标记为 {}", (want) => {
+  const got = ctx.realigned ? "真" : "假";
+  if (got !== want) throw new Error(`重新读取标记不符：${got} ≠ ${want}`);
 });
 
 step("假如", "树模型有手工窗口含开发分组和标签 {}", (tabTitle) => {
@@ -777,10 +921,8 @@ step("当", "再次执行启动归类", () => {
 });
 
 step("当", "计算打开态", () => {
-  ctx.openIds = align.computeOpenIds(
-    ctx.m,
-    (ctx.openTabs || []).map((t) => t.url)
-  );
+  // R1：打开态识别入参携带浏览器 tabId（tabId 优先、URL 兜底）
+  ctx.openIds = align.computeOpenIds(ctx.m, ctx.openTabs || []);
 });
 
 function openStateOf(title) {
@@ -956,7 +1098,21 @@ step("当", "关闭 {} 的全部网页", async (title) => {
 // D8：行内关闭 = 只关当前操作这一个标签页（同 URL 多开时绝不按 URL 全关）
 step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, n) => {
   ctx.openTabs = [];
-  for (let i = 0; i < Number(n); i += 1) ctx.openTabs.push({ title, url: tabUrl(title) });
+  // R1：同 URL 多开的浏览器标签页各有稳定 tabId（1..n）
+  for (let i = 0; i < Number(n); i += 1)
+    ctx.openTabs.push({ id: i + 1, title, url: tabUrl(title) });
+});
+
+/* R1：叶子固化的 tabId 优先于 URL 识别（m10454） */
+step("假如", "标签 {} 已绑定浏览器标签页号 {}", (title, n) => {
+  ctx.named[title].tabId = Number(n);
+});
+
+step("那么", "被关闭的浏览器标签页号为 {}", (csv) => {
+  const ids = [...ctx.mock.calls.tabsRemove].sort((a, b) => a - b);
+  if (ids.join(",") !== String(csv)) {
+    throw new Error(`被关闭标签页号 [${ids.join(",")}] ≠ ${csv}`);
+  }
 });
 
 step("当", "行内关闭标签 {}", async (title) => {
@@ -1186,19 +1342,38 @@ step("当", "触发导入 JSON 文件 {}", async (filename) => {
   ctx.importRejected = false;
   ctx.importError = "";
   try {
-    ctx.m = await io.importJSON(ctx.importData, ctx.m);
+    // R2（m10454）：导入不再全量替换——解析校验后合并为「导入书签」窗口
+    const snapshot = await io.importJSON(ctx.importData, ctx.m);
+    ctx.importSnapshot = snapshot;
+    ctx.importedWindow = io.mergeAsImportedWindow(ctx.m, snapshot);
   } catch (e) {
     ctx.importRejected = true;
     ctx.importError = e.message;
   }
 });
 
-step("那么", "树模型被全量替换为导入内容", () => {
-  if (ctx.m.windows.length !== 1 || ctx.m.windows[0].title !== "导入窗口")
-    throw new Error("窗口未替换");
-  if (ctx.m.groups.length !== 1 || ctx.m.groups[0].title !== "导入分组")
-    throw new Error("分组未替换");
-  if (ctx.m.tabs.length !== 1 || ctx.m.tabs[0].title !== "导入标签") throw new Error("标签未替换");
+step("那么", "树模型保留且新增导入书签窗口", () => {
+  const win = ctx.m.windows.find((w) => w.title === "导入书签");
+  if (!win) throw new Error("未新增「导入书签」窗口");
+  ctx.importedWindow = win;
+});
+
+step("那么", "现有手工窗口数据未被导入替换", () => {
+  if (!ctx.m.windows.some((w) => w.title === "手工窗口")) throw new Error("现有窗口被替换");
+  if (!ctx.m.groups.some((g) => g.title === "开发")) throw new Error("现有分组被替换");
+  if (!ctx.m.tabs.some((t) => t.title === "MDN IndexedDB")) throw new Error("现有标签被替换");
+});
+
+step("那么", "导入节点已重新生成哈希 id", () => {
+  const imported = ctx.importSnapshot || { tabs: [], groups: [] };
+  for (const t of imported.tabs) {
+    if (ctx.m.tabs.some((x) => x.id === t.id)) throw new Error(`导入标签 id 未重新生成：${t.id}`);
+  }
+  for (const g of imported.groups) {
+    if (ctx.m.groups.some((x) => x.id === g.id)) throw new Error(`导入分组 id 未重新生成：${g.id}`);
+  }
+  const kids = model.childrenOf(ctx.m, ctx.importedWindow.id);
+  if (!kids.length) throw new Error("导入内容未挂到「导入书签」窗口下");
 });
 
 step("那么", "广播了 onModelChanged 事件", async () => {
@@ -1214,8 +1389,8 @@ step("那么", "广播了 onModelChanged 事件", async () => {
   if (!received) throw new Error("onModelChanged 未广播");
 });
 step("那么", "UI 已刷新", () => {
-  // 由广播触发 render，这里仅确认模型已更新
-  if (!ctx.m.windows.find((w) => w.title === "导入窗口")) throw new Error("UI 未刷新");
+  // 由广播触发 render，这里仅确认模型已更新（R2：合并后存在「导入书签」窗口）
+  if (!ctx.m.windows.find((w) => w.title === "导入书签")) throw new Error("UI 未刷新");
 });
 
 step("假如", "已有旧版导入数据 version 0", () => {
@@ -1276,7 +1451,9 @@ step("假如", "已有导入文件 {} 含文件夹层级和书签", (filename) =
 
 step("当", "尝试导入该 JSON", async () => {
   try {
-    ctx.m = await io.importJSON(ctx.importData, ctx.m);
+    const snapshot = await io.importJSON(ctx.importData, ctx.m);
+    ctx.importSnapshot = snapshot;
+    ctx.importedWindow = io.mergeAsImportedWindow(ctx.m, snapshot);
     ctx.importRejected = false;
     ctx.importError = "";
   } catch (error) {
@@ -1298,7 +1475,9 @@ step("那么", "现有窗口仍保留", () => {
 });
 
 step("当", "触发导入 HTML 文件 {}", async (filename) => {
-  ctx.m = await io.importHTML(ctx.importHtml, ctx.m);
+  // R2：解析为独立快照后合并为「导入书签」窗口（当前数据保留）
+  const snapshot = await io.importHTML(ctx.importHtml, ctx.m);
+  ctx.importedWindow = io.mergeAsImportedWindow(ctx.m, snapshot);
   ctx.importHtmlResult = ctx.m;
 });
 

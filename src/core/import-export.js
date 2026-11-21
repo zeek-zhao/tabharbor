@@ -2,6 +2,7 @@
  * M3-1 书签导入导出 + 备份恢复
  * FR-031~038 / issue #27
  */
+import { newId } from "./model.js";
 
 export const EXPORT_VERSION = 1;
 
@@ -74,7 +75,10 @@ export async function exportHTML(model) {
 }
 
 /**
- * 导入 JSON（全量覆盖）
+ * 导入 JSON（解析 + 校验，返回独立模型快照）
+ * R2（m10454）：导入不再做全量替换——本函数只负责解析校验，
+ * 是否落库、如何落库由调用方决定（合并走 mergeAsImportedWindow，
+ * 快照恢复走 restoreBackup 保持全量覆盖语义）。
  */
 export async function importJSON(data, currentModel) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
@@ -97,7 +101,7 @@ export async function importJSON(data, currentModel) {
     if (!valid) throw new Error("导入数据缺少字段：" + key);
   }
 
-  // 全量替换
+  // 返回解析后的独立模型（不替换当前模型）
   const newModel = {
     windows: data.windows || [],
     groups: data.groups || [],
@@ -110,14 +114,54 @@ export async function importJSON(data, currentModel) {
 }
 
 /**
- * 导入 HTML 书签文件
+ * R2（m10454）：导入内容合并为单个「导入书签」窗口。
+ * 不做全量替换：当前模型的窗口/分组/标签/回收站/设置全部保留，
+ * 导入快照的全部顶层内容归入一个新建窗口（导入内容内部的层级保持不变）。
+ * 所有导入节点重新生成哈希 id（避免与现有模型撞 id），返回新窗口节点。
+ */
+export function mergeAsImportedWindow(model, imported) {
+  if (!imported || typeof imported !== "object") {
+    throw new Error("导入数据无效：非对象");
+  }
+  const win = {
+    id: newId("w"),
+    kind: "window",
+    title: "导入书签",
+    collapsed: false,
+  };
+  // id 映射：导入快照内互相引用的 parentId 保持闭合
+  const idMap = new Map();
+  for (const w of imported.windows || []) idMap.set(w.id, win.id); // 导入的窗口容器统一并入新窗口
+  for (const g of imported.groups || []) idMap.set(g.id, newId("g"));
+  for (const t of imported.tabs || []) idMap.set(t.id, newId("t"));
+  const resolveParent = (pid) => {
+    if (pid == null) return win.id; // 顶层 → 新「导入书签」窗口
+    return idMap.get(pid) ?? win.id; // 引用导入窗口的 → 并入新窗口
+  };
+  for (const g of imported.groups || []) {
+    const node = { ...g, id: idMap.get(g.id), parentId: resolveParent(g.parentId) };
+    delete node.tabId;
+    model.groups.push(node);
+  }
+  for (const t of imported.tabs || []) {
+    const node = { ...t, id: idMap.get(t.id), parentId: resolveParent(t.parentId) };
+    delete node.tabId;
+    model.tabs.push(node);
+  }
+  model.windows.push(win);
+  return win;
+}
+
+/**
+ * 导入 HTML 书签文件（解析为独立模型，R2：由 mergeAsImportedWindow 合并落库）
  */
 export async function importHTML(html, currentModel = {}) {
   if (!html || typeof html !== "string") {
     throw new Error("HTML 内容为空");
   }
 
-  // 标准 HTML 导入是全量替换；窗口仅为产品树容器，书签文件本身不表达窗口节点。
+  // R2：解析结果为独立模型快照，不替换当前模型；书签文件不表达窗口节点，
+  // 顶层内容归入虚拟窗口 w_import，合并时并入「导入书签」窗口。
   const model = {
     windows: [],
     groups: [],

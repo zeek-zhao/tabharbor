@@ -2,10 +2,21 @@
 // M0 范围：纯函数模型（创建/查询/递归后代/防环校验/移动）。排序与拖拽落点（afterId）在 M2 扩展。
 // 约定：parentId 引用任意上层节点 id（tab→group、group→window 或父 group）；窗口 parentId 恒为 null。
 
+// R1（m10454）：标签唯一标识 = 独立算法生成的哈希 ID（FNV-1a 32 位 → 36 进制 7 位），
+// 不以标签名或链接作为 ID 来源——同一链接可开多个标签，按 URL 识别会同步错乱。
 let seq = 0;
+function fnv1a(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36).padStart(7, "0");
+}
 export function newId(prefix) {
   seq += 1;
-  return `${prefix}_${seq.toString(36)}`;
+  // 熵源：时间戳 + 递增序号 + 随机数 → 哈希；seq 保证同毫秒并发不撞
+  return `${prefix}_${fnv1a(`${Date.now()}-${seq}-${Math.random()}`)}`;
 }
 
 export function buildModel() {
@@ -62,11 +73,12 @@ export function descendantsOf(m, id) {
 }
 
 // 防环与落点校验（FR-026/FR-032）：禁止拖入自身/自身后代；窗口只能落在另一窗口上（合并，FR-031）
+// R4：窗口也可落在分组上（转成子分组，applyDrop 分发 turnWindowIntoGroup）
 export function canDrop(m, dragId, targetId) {
   const drag = findNode(m, dragId);
   const target = findNode(m, targetId);
   if (!drag || !target || dragId === targetId) return false;
-  if (drag.kind === "window") return target.kind === "window" && targetId !== dragId;
+  if (drag.kind === "window") return target.kind === "window" || target.kind === "group";
   if (descendantsOf(m, dragId).some((d) => d.id === targetId)) return false;
   return target.kind !== "tab"; // 分组/标签可作为容器：落到标签后（M2 处理邻位），M0 拒绝
 }
@@ -119,6 +131,36 @@ export function mergeWindows(m, srcId, targetId) {
   for (const g of m.groups) if (g.parentId === srcId) g.parentId = targetId;
   for (const t of m.tabs) if (t.parentId === srcId) t.parentId = targetId;
   m.windows.splice(m.windows.indexOf(src), 1);
+  return true;
+}
+
+// R4（m10454）：分组 ↔ 窗口互转。识别依据 = L1 结构（顶层为窗口，L1 内为分组）。
+// 分组拖到窗口位置 → 变成独立窗口（子组/标签随行，id 不变）。
+export function turnGroupIntoWindow(m, groupId) {
+  const g = findNode(m, groupId);
+  if (!g || g.kind !== "group") return false;
+  g.kind = "window";
+  g.parentId = null;
+  m.groups.splice(m.groups.indexOf(g), 1);
+  m.windows.push(g);
+  return true;
+}
+
+// R4：窗口拖入分组 → 变成该分组的子分组（子树随行，id 不变）。
+// 目标分组不得位于被拖窗口子树内（防自嵌套）。
+export function turnWindowIntoGroup(m, windowId, targetGroupId) {
+  const w = findNode(m, windowId);
+  const t = findNode(m, targetGroupId);
+  if (!w || w.kind !== "window" || !t || t.kind !== "group") return false;
+  let cur = t;
+  while (cur) {
+    if (cur.id === w.id) return false;
+    cur = cur.parentId ? findNode(m, cur.parentId) : null;
+  }
+  w.kind = "group";
+  w.parentId = targetGroupId;
+  m.windows.splice(m.windows.indexOf(w), 1);
+  m.groups.push(w);
   return true;
 }
 

@@ -1,5 +1,6 @@
 // TH2-M2 · 回收站操作（FR-018/037）：删除入站 / 恢复 / 彻底删除
-// 约定：回收站条目 { kind, payload: 节点本体, parentId: 原父 id, time, desc: {groups, tabs} }
+// 约定：回收站条目 { kind, payload: 节点本体, parentId: 原父 id, index: 同父兄弟序, time,
+//        desc: {groups, tabs} }（R3：index 使恢复落回原位，而非随意追加）
 // payload 与样例数据（tabharbor-sample.json trash）保持同形；desc 仅 group/window 条目携带后代。
 
 import { findNode, descendantsOf } from "./model.js";
@@ -11,6 +12,16 @@ export function entryLabel(entry) {
   return p.title ?? p.url ?? "(无标题)";
 }
 
+// R3：同父兄弟中第几个（分组在前、标签在后，与 childrenOf 渲染序一致）；窗口取窗口列表下标
+function siblingIndexOf(m, node) {
+  if (node.kind === "window") return m.windows.indexOf(node);
+  const siblings =
+    node.kind === "tab"
+      ? m.tabs.filter((t) => t.parentId === node.parentId)
+      : m.groups.filter((g) => g.parentId === node.parentId);
+  return siblings.indexOf(node);
+}
+
 // 删除入站：节点+后代移出模型，插入回收站顶部，返回条目
 export function trashNode(m, id, time) {
   const node = findNode(m, id);
@@ -20,6 +31,7 @@ export function trashNode(m, id, time) {
     kind: node.kind,
     payload: clone(node),
     parentId: node.parentId ?? null,
+    index: siblingIndexOf(m, node),
     time: time || "",
     desc: {
       groups: desc.filter((d) => d.kind === "group").map(clone),
@@ -67,7 +79,22 @@ function resolveRestoreParent(m, entry) {
   return entry.kind === "tab" || entry.kind === "group" ? g.id : null;
 }
 
-// 恢复：条目移出回收站，节点+后代按原 parentId 重新入模（后代引用互相闭合，仅顶节点可能换父）
+// R3：按记录的兄弟序插回原位。兄弟不足时落在同父末尾（追加语义兜底）。
+function insertAtSiblingIndex(m, node, parentId, index) {
+  const arr = node.kind === "tab" ? m.tabs : m.groups;
+  const siblings = arr.filter((x) => x.parentId === parentId);
+  const idx = Number.isInteger(index) && index >= 0 ? index : siblings.length;
+  if (idx < siblings.length) {
+    arr.splice(arr.indexOf(siblings[idx]), 0, node);
+  } else if (siblings.length) {
+    arr.splice(arr.indexOf(siblings[siblings.length - 1]) + 1, 0, node);
+  } else {
+    arr.push(node);
+  }
+}
+
+// 恢复：条目移出回收站，节点+后代按原 parentId 重新入模（后代引用互相闭合，仅顶节点可能换父）。
+// R3：顶节点按 entry.index 落回原兄弟位；窗口按 m.windows 原下标恢复。
 export function restoreEntry(m, index) {
   const trash = m.trash || [];
   const entry = trash[index];
@@ -81,11 +108,14 @@ export function restoreEntry(m, index) {
       }
     : { groups: [], tabs: [] };
   if (entry.kind === "window") {
-    m.windows.push(node);
+    const idx =
+      Number.isInteger(entry.index) && entry.index >= 0 && entry.index < m.windows.length
+        ? entry.index
+        : m.windows.length;
+    m.windows.splice(idx, 0, node);
   } else {
     node.parentId = resolveRestoreParent(m, entry);
-    if (entry.kind === "group") m.groups.push(node);
-    else m.tabs.push(node);
+    insertAtSiblingIndex(m, node, node.parentId, entry.index);
   }
   for (const g of desc.groups) m.groups.push(g);
   for (const t of desc.tabs) m.tabs.push(t);

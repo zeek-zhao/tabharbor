@@ -9,8 +9,16 @@ import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as editOp from "../core/edit-op.js";
 import * as trashOp from "../core/trash-op.js";
-import { bootAlign, computeOpenIds } from "../core/align.js";
-import { findNode, moveLeafAfter, moveLeafInto, moveNode, mergeWindows } from "../core/model.js";
+import { bootAlign, computeOpenIds, realignIfEmpty } from "../core/align.js";
+import {
+  findNode,
+  moveLeafAfter,
+  moveLeafInto,
+  moveNode,
+  mergeWindows,
+  turnGroupIntoWindow,
+  turnWindowIntoGroup,
+} from "../core/model.js";
 import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
@@ -56,14 +64,24 @@ async function currentOpenIds(m) {
   try {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return new Set();
     const tabs = await chrome.tabs.query({});
-    // 仅 http(s) 网页参与打开态派生（扩展页/chrome:// 页不入树）
+    // 仅 http(s) 网页参与打开态派生（扩展页/chrome:// 页不入树）。
+    // R1（m10454）：携带浏览器 tabId，识别依据 tabId 优先、URL 兜底。
     return computeOpenIds(
       m,
-      tabs.map((t) => t.url).filter((u) => /^https?:/.test(u || ""))
+      tabs.filter((t) => /^https?:/.test(t.url || "")).map((t) => ({ id: t.id, url: t.url }))
     );
   } catch {
     return new Set();
   }
+}
+
+// 浏览器当前打开的 http(s) 标签页 → bootAlign/realignIfEmpty 入参 [{id,title,url}]
+async function queryOpenTabs() {
+  if (typeof chrome === "undefined" || !chrome.tabs?.query) return [];
+  const tabs = await chrome.tabs.query({});
+  return tabs
+    .filter((t) => /^https?:/.test(t.url || ""))
+    .map((t) => ({ id: t.id, title: t.title || t.url, url: t.url }));
 }
 
 export async function bootShell(root) {
@@ -99,6 +117,8 @@ export async function bootShell(root) {
   let collapsed = new Set();
   let selectedId = null;
   let searchQ = "";
+  // R7：置顶小窗派生视图态（与主页面同源打开态，见 refreshOpen）
+  const pipState = { openIds: new Set(), collapsed: new Set(), selectedId: null };
   const render = async () => {
     const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
     body.innerHTML = view.windows.length
@@ -118,16 +138,32 @@ export async function bootShell(root) {
   };
   const refreshOpen = async () => {
     openIds = await currentOpenIds(m);
+    pipState.openIds = new Set(openIds); // R7：置顶小窗同源打开态
     await render();
+  };
+  // R5（m10454）：删除到回收站后的统一收尾——若模型被删空且浏览器仍有
+  // 未关闭网页，重新读取当天浏览器状态重建「当前浏览器窗口」展示。
+  const removeToTrash = async (id, msg) => {
+    const entry = trashOp.trashNode(m, id, new Date().toLocaleString("zh-CN"));
+    if (!entry) return;
+    try {
+      if (realignIfEmpty(m, await queryOpenTabs())) {
+        msg = `${msg}；已重新读取浏览器打开状态`;
+      }
+    } catch {
+      // 无浏览器 API（测试环境）时跳过重读
+    }
+    await store.saveModel(m);
+    await refreshOpen();
+    toast(msg);
   };
   openIds = await currentOpenIds(m);
 
-  // M1-1 启动归类（FR-024/027）：把浏览器已打开标签对齐到「当前浏览器窗口」（多退少补）
+  // M1-1 启动归类（FR-024/027）：把浏览器已打开标签对齐到「当前浏览器窗口」（多退少补）。
+  // R1：入参携带浏览器 tabId，叶子落库固化 tabId 识别依据。
   try {
-    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
-      const openTabs = (await chrome.tabs.query({}))
-        .filter((t) => /^https?:/.test(t.url || ""))
-        .map((t) => ({ title: t.title || t.url, url: t.url }));
+    const openTabs = await queryOpenTabs();
+    if (openTabs.length) {
       const before = JSON.stringify(m.tabs);
       bootAlign(m, openTabs);
       if (JSON.stringify(m.tabs) !== before) {
@@ -285,13 +321,18 @@ export async function bootShell(root) {
     await openLeafById(leaf.dataset.id);
   });
 
-  // 双击/Enter 共用：打开选中标签（聚焦或新建）
+  // 双击/Enter 共用：打开选中标签（聚焦或新建）。
+  // R1：新建成功后回填浏览器 tabId，此后该叶子以 tabId 精确识别。
   const openLeafById = async (id) => {
     const node = findNode(m, id);
     if (!node?.url) return;
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
       const res = await tabsOp.openTab(chrome, node, urls);
+      if (res.created && res.tabId != null && node.tabId !== res.tabId) {
+        node.tabId = res.tabId;
+        await store.saveModel(m);
+      }
       await refreshOpen();
       toast(res.focused ? "已聚焦已打开网页" : "已打开网页");
     } catch (err) {
@@ -337,6 +378,14 @@ export async function bootShell(root) {
       return false;
     }
     if (srcKind === "group") {
+      // R4（m10454）：分组拖到窗口位置 → 变成独立窗口（L1 识别依据：顶层为窗口）
+      if (targetKind === "window") {
+        if (turnGroupIntoWindow(m, srcId)) {
+          toast(`「${titleOf(srcId)}」已转为独立窗口`);
+          return true;
+        }
+        return false;
+      }
       let dest = targetId;
       if (targetKind === "leaf") dest = target.parentId; // 挂到标签所在分组/窗口
       if (moveNode(m, srcId, dest)) {
@@ -354,6 +403,17 @@ export async function bootShell(root) {
       if (targetKind === "window" && mergeWindows(m, srcId, targetId)) {
         toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
         return true;
+      }
+      // R4：窗口拖到分组上 → 变成该分组的子分组（来回转换）；
+      // 窗口拖到标签上 → 转为该标签所在分组（若标签直挂窗口则不支持）。
+      if (targetKind === "group" || (targetKind === "leaf" && target.parentId)) {
+        const destGroup = targetKind === "group" ? targetId : target.parentId;
+        if (turnWindowIntoGroup(m, srcId, destGroup)) {
+          toast(`「${titleOf(srcId)}」已转为分组并挂到「${titleOf(destGroup)}」下`);
+          return true;
+        }
+        toast("不能转入自身子组");
+        return false;
       }
       toast("不支持该放置位置");
       return false;
@@ -464,10 +524,7 @@ export async function bootShell(root) {
       e.preventDefault();
       const node = findNode(m, selectedId);
       if (!node) return;
-      trashOp.trashNode(m, selectedId, new Date().toLocaleString("zh-CN"));
-      await store.saveModel(m);
-      await refreshOpen();
-      toast("已移入回收站（可从工具栏回收站恢复）");
+      await removeToTrash(selectedId, "已移入回收站（可从工具栏回收站恢复）");
     } else if (e.key === "c" && (e.ctrlKey || e.metaKey) && !e.shiftKey && selectedId) {
       e.preventDefault();
       try {
@@ -572,10 +629,7 @@ export async function bootShell(root) {
         await render();
       } else if (act === "del") {
         // FR-018：删除到回收站（节点+后代入站，浏览器标签不动）
-        trashOp.trashNode(m, id, new Date().toLocaleString("zh-CN"));
-        await store.saveModel(m);
-        await refreshOpen();
-        toast("已移入回收站（可从工具栏回收站恢复）");
+        await removeToTrash(id, "已移入回收站（可从工具栏回收站恢复）");
       }
     } catch (err) {
       say("操作失败：" + err.message);
@@ -756,56 +810,87 @@ export async function bootShell(root) {
   });
   // 置顶（仅独立窗口）：TH2-001 Q-F 裁决 = Document Picture-in-Picture 真置顶。
   // Chrome windows API 的 create/update 均无 alwaysOnTop 参数（该属性仅 Window 对象只读），
-  // 故用 PiP 浮窗承载迷你树：浮窗由浏览器保证悬浮在最前，取消置顶 = 关闭浮窗；
+  // 故用 PiP 浮窗承载树视图；浮窗由浏览器保证悬浮在最前，取消置顶 = 关闭浮窗；
   // Chrome < 116 无 documentPictureInPicture 时显式降级提示（TH2-001 §Q-F）。
+  // R7（m10454）：置顶页面与独立标签工具页面保持一致——复用 renderTree 渲染
+  // 同一棵树（打开态/选中/折叠/复制/打开/关闭交互一致），不再是迷你列表。
   let pipWin = null;
   const pipBtn = root.querySelector("#btnPip");
-  const escHtml = (s) =>
-    String(s).replace(
-      /[&<>"]/g,
-      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
-    );
-  const pipLeafHtml = (t, opens) => {
-    const open = opens.get(t.url);
-    const attrs = open
-      ? `data-tab-id="${open.tabId}" data-window-id="${open.windowId}"`
-      : `data-url="${escHtml(t.url)}"`;
-    return `<div class="pip-item${open ? " on" : ""}" ${attrs}><span class="pip-dot"></span><span class="pip-title">${escHtml(t.title || t.url)}</span></div>`;
-  };
+  const pipBody = () =>
+    pipWin && !pipWin.closed ? pipWin.document.querySelector("#spBody") : null;
   const renderPip = async () => {
-    if (!pipWin || pipWin.closed) return;
-    const opens = new Map();
-    try {
-      for (const t of await chrome.tabs.query({})) {
-        if (/^https?:/.test(t.url || "") && !opens.has(t.url)) {
-          opens.set(t.url, { tabId: t.id, windowId: t.windowId });
-        }
+    const pipBodyEl = pipBody();
+    if (!pipBodyEl) return;
+    const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
+    pipBodyEl.innerHTML = view.windows.length
+      ? renderTree(view, {
+          openIds: pipState.openIds,
+          linkShow: !!settings.linkShow,
+          selectedId: pipState.selectedId,
+          collapsed: pipState.collapsed,
+        })
+      : renderEmpty();
+    const stats = pipWin.document.querySelector("#pipStats");
+    if (stats) stats.innerHTML = renderStats(m, pipState.openIds);
+    pipBodyEl.classList.toggle("show-link", !!settings.linkShow);
+  };
+  // PiP 与主页面一致的行内/双击交互（打开/复制/关闭/折叠/选中）
+  const pipLeafById = (id) => findNode(m, id);
+  const pipSelect = (id) => {
+    pipState.selectedId = id;
+    const el = pipBody()?.querySelector(`.leaf[data-id="${id}"]`);
+    pipBody()
+      ?.querySelectorAll(".leaf.selected")
+      .forEach((x) => x.classList.remove("selected"));
+    if (el) el.classList.add("selected");
+  };
+  const pipToggle = (id) => {
+    pipState.collapsed = editOp.collapsedToggle(pipState.collapsed, id);
+    void renderPip();
+  };
+  const pipWire = () => {
+    const doc = pipWin.document;
+    doc.body.addEventListener("click", (e) => {
+      const tri = e.target.closest(".node-row .tri");
+      if (tri) {
+        const node = tri.closest(".node");
+        if (node) pipToggle(node.dataset.id);
+        return;
       }
-    } catch {
-      /* 无 tabs 环境忽略 */
-    }
-    const rows = m.windows
-      .map((w) => {
-        const gHtml = m.groups
-          .filter((g) => g.parentId === w.id)
-          .map(
-            (g) =>
-              `<div class="pip-group">${escHtml(g.title)}</div>` +
-              m.tabs
-                .filter((t) => t.parentId === g.id)
-                .map((t) => pipLeafHtml(t, opens))
-                .join("")
-          )
-          .join("");
-        const wLeaves = m.tabs
-          .filter((t) => t.parentId === w.id)
-          .map((t) => pipLeafHtml(t, opens))
-          .join("");
-        return `<div class="pip-window">${escHtml(w.title)}</div>${gHtml}${wLeaves}`;
-      })
-      .join("");
-    pipWin.document.querySelector("#pipList").innerHTML =
-      rows || `<div class="pip-empty">暂无标签</div>`;
+      const openX = e.target.closest(".leaf .open-x");
+      if (openX) {
+        const leaf = openX.closest(".leaf");
+        if (leaf?.dataset.id) void openLeafById(leaf.dataset.id);
+        return;
+      }
+      const copyX = e.target.closest(".copy-x");
+      if (copyX) {
+        const holder = copyX.closest(".leaf, .node-row");
+        if (holder?.dataset.id) {
+          void copyNode(holder.dataset.id).catch((err) => toast("复制失败：" + err.message));
+        }
+        return;
+      }
+      const closeX = e.target.closest(".leaf .close-x");
+      if (closeX) {
+        const leaf = closeX.closest(".leaf");
+        if (leaf?.dataset.id) {
+          void (async () => {
+            const n = await tabsOp.closeLeaf(chrome, m, leaf.dataset.id);
+            await refreshOpen();
+            void renderPip();
+            toast(n ? "已关闭网页" : "网页未在浏览器打开");
+          })();
+        }
+        return;
+      }
+      const leaf = e.target.closest(".leaf");
+      if (leaf?.dataset.id) pipSelect(leaf.dataset.id);
+    });
+    doc.body.addEventListener("dblclick", (e) => {
+      const leaf = e.target.closest(".leaf");
+      if (leaf?.dataset.id) void openLeafById(leaf.dataset.id);
+    });
   };
   pipBtn?.addEventListener("click", async () => {
     if (pipWin && !pipWin.closed) {
@@ -825,25 +910,18 @@ export async function bootShell(root) {
         pipWin.document.head.appendChild(el.cloneNode(true));
       }
       applyTheme(pipWin.document, themeOf(settings));
+      // R7：与独立标签工具页同构（sp-body 树容器 + 底部统计），交互一致
       pipWin.document.body.innerHTML = `
         <div class="pip-wrap">
           <div class="pip-head">TabHarbor 置顶小窗</div>
-          <div id="pipList"></div>
-          <div class="pip-foot">点击条目跳转对应标签页 · 关闭小窗即取消置顶</div>
+          <div id="spBody" class="sp-body"></div>
+          <div class="pip-foot"><span id="pipStats" class="stats"></span>关闭小窗即取消置顶</div>
         </div>`;
-      pipWin.document.body.addEventListener("click", async (e) => {
-        const item = e.target.closest(".pip-item");
-        if (!item) return;
-        if (item.dataset.tabId) {
-          await chrome.tabs.update(Number(item.dataset.tabId), { active: true });
-          await chrome.windows.update(Number(item.dataset.windowId), { focused: true });
-        } else if (item.dataset.url) {
-          await chrome.tabs.create({ url: item.dataset.url });
-        }
-      });
+      pipWire();
       await renderPip();
       pipWin.addEventListener("pagehide", () => {
         pipWin = null;
+        pipState.selectedId = null;
         pipBtn?.classList.remove("active");
         toast("已取消置顶：浮动小窗已关闭");
       });
@@ -936,27 +1014,23 @@ export async function bootShell(root) {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      // R2（m10454）：导入不做全量替换——解析后的内容合并为单个「导入书签」
+      // 新窗口（含内部层级），当前树数据/设置/回收站全部保留；导入的窗口
+      // 可整体拖出内容/拖入分组/删除，与普通窗口一致。
       let imported;
       const text = await file.text();
       if (file.name.toLowerCase().endsWith(".json")) {
-        const parsed = JSON.parse(text);
-        imported = await io.importJSON(parsed, m);
-        if (parsed.settings) imported.settings = parsed.settings;
-        else imported.settings = settings;
+        imported = await io.importJSON({ ...JSON.parse(text), settings: settings || {} }, m);
       } else if (file.name.toLowerCase().endsWith(".html")) {
         imported = await io.importHTML(text, m);
-        imported.trash = [];
-        imported.settings = settings;
       } else {
         throw new Error("仅支持 .json 或 .html 文件");
       }
-      if (!window.confirm("导入会全量替换当前树数据，是否继续？")) return;
-      await store.saveModel(imported);
-      m = imported;
-      if (imported.settings) settings = await store.saveSettings(imported.settings);
-      openIds = await currentOpenIds(m);
-      await render();
-      say("导入完成，树数据已替换");
+      const win = io.mergeAsImportedWindow(m, imported);
+      await store.saveModel(m);
+      await refreshOpen();
+      const n = imported.tabs.length + imported.groups.length;
+      say(`导入完成：「${win.title}」窗口已新增（${n} 个节点）`);
     } catch (error) {
       say("导入失败：" + error.message);
     } finally {
@@ -1057,8 +1131,11 @@ export async function bootShell(root) {
     clearTimeout(tabsTimer);
     // 批量事件去抖；置顶 PiP 浮窗打开时同步刷新迷你列表（D5）
     tabsTimer = setTimeout(() => {
-      void refreshOpen();
-      void renderPip();
+      // 先同步主页面打开态（refreshOpen 内同步 pipState.openIds），再渲染置顶小窗（R7 同源）
+      void (async () => {
+        await refreshOpen();
+        await renderPip();
+      })();
     }, 150);
   };
   if (typeof chrome !== "undefined" && chrome.tabs?.onCreated) {

@@ -61,3 +61,15 @@
     并且 "src/assets/m2.css" 包含 ".node-children"
     并且 "src/assets/m2.css" 包含 ".copy-x"
     并且 "src/assets/m2.css" 包含 ".close-x"
+
+  场景: 窗口与分组行内复制按钮常显（R6，原型 row-ops 不做 hover 门控）
+    那么 "src/assets/m2.css" 不包含 ".node-row:hover .row-ops"
+    并且 "src/assets/m2.css" 包含 "/* R6：复制按钮与原型一致常显（叶子/分组/窗口行都可见） */"
+    并且 "src/ui/render.js" 包含 "row-ops"
+    并且 "src/ui/render.js" 包含 "copy-x"
+
+  场景: 图标放大且加深（R8）
+    那么 "src/ui/render.js" 包含 "width=\"14\""
+    并且 "src/assets/m2.css" 包含 "/* R8（m10454）：行内图标放大加深"
+    并且 "src/assets/m2.css" 包含 "R8：图标加深（原 --fg2 太浅）"
+    并且 "src/assets/m2.css" 包含 ".leaf .dot"

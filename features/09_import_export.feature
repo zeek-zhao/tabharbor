@@ -36,10 +36,13 @@
   并且 文件内容包含 "<H3>WebAPI</H3>"
   并且 文件内容包含 "Fetch API"
 
-场景: 导入 JSON - 合法文件全量覆盖
-  假如 已有导入文件 "import-valid.json" 内含 version 1 和完整三层模型
+场景: 导入 JSON - 合法文件合并为导入书签窗口
+  假如 树模型有手工窗口含开发分组和标签 "MDN IndexedDB"
+  并且 已有导入文件 "import-valid.json" 内含 version 1 和完整三层模型
   当 触发导入 JSON 文件 "import-valid.json"
-  那么 树模型被全量替换为导入内容
+  那么 树模型保留且新增导入书签窗口
+  并且 现有手工窗口数据未被导入替换
+  并且 导入节点已重新生成哈希 id
   并且 广播了 onModelChanged 事件
   并且 UI 已刷新
 
@@ -50,11 +53,13 @@
   并且 现有树模型未被污染
 
 场景: 导入 HTML - 标准书签文件
-  假如 已有导入文件 "bookmarks.html" 含文件夹层级和书签
+  假如 树模型有手工窗口含开发分组和标签 "MDN IndexedDB"
+  并且 已有导入文件 "bookmarks.html" 含文件夹层级和书签
   当 触发导入 HTML 文件 "bookmarks.html"
   那么 文件夹转为分组
   并且 书签转为标签
   并且 去重合并（URL+title 相同视为同一条）
+  并且 现有手工窗口数据未被导入替换
 
 场景: 导入 HTML - 正确保留嵌套层级并解码实体
   假如 HTML 文件含嵌套分组与转义标题

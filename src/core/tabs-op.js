@@ -30,19 +30,25 @@ export async function copyToClipboard(text, clipboardApi) {
   await clipboardApi.writeText(text);
 }
 
-// FR-009：双击标签——已开 → 聚焦现有标签页不重复开；否则新建
+// FR-009：双击标签——已开 → 聚焦现有标签页不重复开；否则新建。
+// R1（m10454）：识别依据 = tabId（浏览器稳定 ID）优先，URL 兜底——同一链接
+// 可开多个标签页，按 URL 识别会聚焦/关闭错对象。
 export async function openTab(chromeApi, node, openUrls) {
-  if (openUrls.has(node.url)) {
-    const tabs = await chromeApi.tabs.query({});
-    const hit = tabs.find((t) => t.url === node.url);
-    if (hit) {
-      await chromeApi.tabs.update(hit.id, { active: true });
-      await chromeApi.windows.update(hit.windowId, { focused: true });
-      return { focused: true };
-    }
+  const tabs = await chromeApi.tabs.query({});
+  let hit;
+  if (node.tabId != null) {
+    hit = tabs.find((t) => t.id === node.tabId);
   }
-  await chromeApi.tabs.create({ url: node.url });
-  return { created: true };
+  if (!hit && openUrls.has(node.url)) {
+    hit = tabs.find((t) => t.url === node.url);
+  }
+  if (hit) {
+    await chromeApi.tabs.update(hit.id, { active: true });
+    await chromeApi.windows.update(hit.windowId, { focused: true });
+    return { focused: true };
+  }
+  const created = await chromeApi.tabs.create({ url: node.url });
+  return { created: true, tabId: created && created.id != null ? created.id : undefined };
 }
 
 // FR-021（Q-B）：打开全部——无确认直开，只开未开的
@@ -57,26 +63,37 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
 }
 
 // FR-020（D8）：关闭单个标签网页——同 URL 在浏览器开了多个时，只关当前
-// 操作对应的「一个」标签页（取第一个匹配且未被本批消费的），绝不按 URL 全关
+// 操作对应的「一个」标签页。R1：叶子已记录 tabId → 精确关那一个；
+// 无 tabId 的旧数据/导入叶子按 URL 取第一个匹配兜底。
 export async function closeLeaf(chromeApi, m, leafId) {
   const leaf = findNode(m, leafId);
   if (!leaf || leaf.kind !== "tab" || !leaf.url) return 0;
   const open = await chromeApi.tabs.query({});
-  const hit = open.find((t) => t.url === leaf.url);
+  let hit;
+  if (leaf.tabId != null) hit = open.find((t) => t.id === leaf.tabId);
+  if (!hit) hit = open.find((t) => t.url === leaf.url);
   if (!hit) return 0;
   await chromeApi.tabs.remove([hit.id]);
   return 1;
 }
 
 // FR-020：关闭节点网页——按叶子逐个关闭「一个」匹配标签页（同 URL 多开时
-// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留
+// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留。
+// R1：有 tabId 的叶子直接按 tabId 精确消费，不参与 URL 池争用。
 export async function closeNode(chromeApi, m, nodeId) {
   const open = await chromeApi.tabs.query({});
   const used = new Set();
+  const byId = new Map(open.map((t) => [t.id, t]));
+  const targets = [];
   for (const leaf of collectLeaves(m, nodeId)) {
+    if (leaf.tabId != null && byId.has(leaf.tabId) && !used.has(leaf.tabId)) {
+      used.add(leaf.tabId);
+      continue;
+    }
     const hit = open.find((t) => t.url === leaf.url && !used.has(t.id));
     if (hit) used.add(hit.id);
   }
-  if (used.size) await chromeApi.tabs.remove([...used]);
+  for (const id of used) targets.push(id);
+  if (targets.length) await chromeApi.tabs.remove(targets);
   return used.size;
 }

@@ -17,28 +17,28 @@ Chrome MV3 标签管理扩展：把「真实浏览器窗口 → 分组（可嵌�
 
 ## 3. 命令表
 
-| 命令 | 作用 |
-|---|---|
-| `npm test` | BDD 全量场景（features/*.feature） |
-| `npm run constraints` | 红线扫描（0 命中） |
-| `npm run compliance` | 开源合规（敏感信息 + LICENSE） |
-| `npm run committer` | 单一提交人 |
-| `npm run contrast` | 对比度门禁（原型 24 组色对） |
-| `npm run format / format:check` | prettier |
-| `node tools/verify-v2-impl.mjs` | 静态实现验证（M0 起按需编写） |
+| 命令                            | 作用                               |
+| ------------------------------- | ---------------------------------- |
+| `npm test`                      | BDD 全量场景（features/*.feature） |
+| `npm run constraints`           | 红线扫描（0 命中）                 |
+| `npm run compliance`            | 开源合规（敏感信息 + LICENSE）     |
+| `npm run committer`             | 单一提交人                         |
+| `npm run contrast`              | 对比度门禁（原型 24 组色对）       |
+| `npm run format / format:check` | prettier                           |
+| `node tools/verify-v2-impl.mjs` | 静态实现验证（M0 起按需编写）      |
 
 ## 4. 文档索引
 
-| 文档 | 内容 |
-|---|---|
-| docs/TH2-001_立项确认清单_v1.0.md | 需求基线（继承/舍弃/60 条台账/Q 裁决/里程碑） |
-| docs/TH2-LEARNINGS.md | 解决过的问题（现象→根因→修复→教训） |
+| 文档                              | 内容                                                                  |
+| --------------------------------- | --------------------------------------------------------------------- |
+| docs/TH2-001_立项确认清单_v1.0.md | 需求基线（继承/舍弃/60 条台账/Q 裁决/里程碑）                         |
+| docs/TH2-LEARNINGS.md             | 解决过的问题（现象→根因→修复→教训）                                   |
 | docs/M3-导入导出与备份演练指南.md | M3 导入导出/备份真实支持范围、fixtures、演练步骤、手工验收清单（#32） |
-| docs/M4-完整演练与发布验收指南.md | 需求→操作→测试映射、完整用户指南、发布验收与待实现清单（#33） |
-| docs/TH2-SRS-*.md | 软件需求规格（M0 建立） |
-| docs/SAMPLES-使用与验证指南.md | 样例数据、安全导入、阶段能力边界与验证记录 |
-| samples/datasets/ | JSON 与 Netscape HTML 演示数据 |
-| .github/project-config.json | gh-project-flow 面板配置 |
+| docs/M4-完整演练与发布验收指南.md | 需求→操作→测试映射、完整用户指南、发布验收与待实现清单（#33）         |
+| docs/TH2-SRS-*.md                 | 软件需求规格（M0 建立）                                               |
+| docs/SAMPLES-使用与验证指南.md    | 样例数据、安全导入、阶段能力边界与验证记录                            |
+| samples/datasets/                 | JSON 与 Netscape HTML 演示数据                                        |
+| .github/project-config.json       | gh-project-flow 面板配置                                              |
 
 ## 5. 目录
 

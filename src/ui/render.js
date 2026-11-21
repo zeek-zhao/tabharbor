@@ -3,15 +3,16 @@
 // 标签为 .leaf(.dot + .title + .link + .note + copy-x + close-x 仅已开)。
 // 折叠（FR-013）：折叠的分组不渲染子树（与原型 display:none 等效，DOM 更小）。
 // opts：openIds（align 派生）、linkShow、selectedId、collapsed（Set，折叠派生视图态）
+// R8（m10454）：图标放大（12→14px）并加深（颜色由 CSS --fg1 控制）
 const TRI =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CP =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="1.8"/></svg>';
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="2"/></svg>';
 const XI =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
 // D2：标签行内「打开」按钮（原型菜单 open 图标同款播放三角）
 const OI =
-  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
 
 export function renderTree(m, opts = {}) {
   const out = [];
