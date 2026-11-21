@@ -167,8 +167,14 @@ body {
 }
 .node-row:hover .row-ops,
 .leaf:hover .copy-x,
+.leaf:hover .open-x,
 .leaf:hover .close-x {
   visibility: visible;
+}
+/* D5：置顶激活态（原型 btnPinW .active 高亮） */
+.tbtn.active {
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 
 /* ===== #30 叶子标签（原型：dot + title + link + note + copy-x + close-x） ===== */
@@ -227,6 +233,7 @@ body {
   text-overflow: ellipsis;
 }
 .copy-x,
+.open-x,
 .close-x {
   flex: 0 0 auto;
   display: inline-flex;
@@ -239,6 +246,10 @@ body {
   visibility: hidden;
 }
 .copy-x:hover {
+  background: var(--bg3);
+  color: var(--accent);
+}
+.open-x:hover {
   background: var(--bg3);
   color: var(--accent);
 }
@@ -679,3 +690,17 @@ body {
 .toast.show {
   opacity: 1;
 }
+
+/* ---- D5 置顶 PiP 浮窗（TH2-001 Q-F：Document Picture-in-Picture 真置顶） ---- */
+.pip-wrap { display: flex; flex-direction: column; height: 100vh; font-size: 13px; }
+.pip-head { padding: 10px 14px; font-weight: 600; color: var(--fg1); border-bottom: 1px solid var(--line1); }
+.pip-window { padding: 10px 14px 2px; color: var(--fg2); font-size: 11px; }
+.pip-group { padding: 8px 14px 2px; color: var(--fg2); font-size: 11px; }
+.pip-item { display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer; }
+.pip-item:hover { background: var(--accent-bg); }
+.pip-item .pip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--line2); flex-shrink: 0; }
+.pip-item.on .pip-dot { background: var(--accent); }
+.pip-item .pip-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg2); }
+.pip-item.on .pip-title { color: var(--fg1); }
+.pip-foot { margin-top: auto; padding: 8px 14px; font-size: 11px; color: var(--fg2); border-top: 1px solid var(--line1); }
+.pip-empty { padding: 20px 14px; color: var(--fg2); text-align: center; }

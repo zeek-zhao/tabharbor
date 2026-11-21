@@ -9,6 +9,9 @@ const CP =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="1.8"/></svg>';
 const XI =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+// D2：标签行内「打开」按钮（原型菜单 open 图标同款播放三角）
+const OI =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
 
 export function renderTree(m, opts = {}) {
   const out = [];
@@ -56,10 +59,11 @@ function leafRow(t, opts) {
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
+  const openBtn = `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
   const closeBtn = open
     ? `<button class="close-x" data-act="close" title="关闭网页">${XI}</button>`
     : "";
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true"><span class="dot"></span><span class="title">${escapeHtml(t.title || t.url || "")}</span>${link}${note}${copyBtn}${closeBtn}</div>`;
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true"><span class="dot"></span><span class="title">${escapeHtml(t.title || t.url || "")}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断

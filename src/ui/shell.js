@@ -243,14 +243,22 @@ export async function bootShell(root) {
       }
       return;
     }
+    const openBtn = e.target.closest(".open-x");
+    if (openBtn) {
+      e.stopPropagation();
+      const leaf = openBtn.closest(".leaf");
+      if (leaf?.dataset.id) await openLeafById(leaf.dataset.id);
+      return;
+    }
     const closeBtn = e.target.closest(".close-x");
     if (closeBtn) {
       e.stopPropagation();
       const leaf = closeBtn.closest(".leaf");
       if (leaf?.dataset.id) {
-        const n = await tabsOp.closeNode(chrome, m, leaf.dataset.id);
+        // D8：行内关闭只关这一个标签页（同 URL 多开时不再全关）
+        const n = await tabsOp.closeLeaf(chrome, m, leaf.dataset.id);
         await refreshOpen();
-        toast(`已关闭 ${n} 个网页`);
+        toast(n ? "已关闭网页" : "网页未在浏览器打开");
       }
       return;
     }
@@ -264,9 +272,11 @@ export async function bootShell(root) {
     }
     const leaf = e.target.closest(".leaf");
     if (leaf) {
-      // FR-036：单击标签设为选中
+      // FR-036（D3 修复）：单击只就地切换选中类，不重渲染——
+      // 之前整树 innerHTML 重建会吃掉第二次 click，双击永远不触发
       selectedId = leaf.dataset.id;
-      await render();
+      body.querySelectorAll(".leaf.selected").forEach((x) => x.classList.remove("selected"));
+      leaf.classList.add("selected");
     }
   });
   body.addEventListener("dblclick", async (e) => {
@@ -395,6 +405,27 @@ export async function bootShell(root) {
 
   // ---- #31 键盘导航（原型 14 键中的已实现子集）----
   const visibleLeaves = () => [...body.querySelectorAll(".leaf")];
+  // D9：按模型序遍历全部标签（与渲染顺序一致：窗口→分组 DFS→直挂标签）。
+  // 之前只遍历 DOM 可见叶子——折叠分组里的标签永远无法到达（按上/下无效）。
+  const orderedLeafIds = () => {
+    const out = [];
+    const walk = (pid) => {
+      for (const g of m.groups.filter((x) => x.parentId === pid)) walk(g.id);
+      for (const t of m.tabs.filter((x) => x.parentId === pid)) out.push(t.id);
+    };
+    for (const w of m.windows) walk(w.id);
+    return out;
+  };
+  // D9：展开标签的全部祖先分组（移动到未展开的分组时自动展开）
+  const expandAncestors = (id) => {
+    let parent = findNode(m, id)?.parentId;
+    let expanded = false;
+    while (parent) {
+      if (collapsed.delete(parent)) expanded = true;
+      parent = findNode(m, parent)?.parentId;
+    }
+    return expanded;
+  };
   const selectLeaf = async (id) => {
     selectedId = id;
     await render();
@@ -404,16 +435,29 @@ export async function bootShell(root) {
   document.addEventListener("keydown", async (e) => {
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-    const leaves = visibleLeaves();
-    const cur = leaves.findIndex((el) => el.dataset.id === selectedId);
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      if (!leaves.length) return;
-      const next =
-        e.key === "ArrowDown" ? Math.min(cur + 1, leaves.length - 1) : Math.max(cur - 1, 0);
-      const pick = leaves[cur < 0 ? 0 : next];
-      if (pick) await selectLeaf(pick.dataset.id);
-    } else if (e.key === "Enter" && selectedId) {
+      const ids = orderedLeafIds();
+      if (!ids.length) return;
+      const down = e.key === "ArrowDown";
+      const cur = ids.indexOf(selectedId);
+      const nextIdx =
+        cur < 0
+          ? down
+            ? 0
+            : ids.length - 1
+          : down
+            ? Math.min(cur + 1, ids.length - 1)
+            : Math.max(cur - 1, 0);
+      const pickId = ids[nextIdx];
+      if (pickId === selectedId) return;
+      if (expandAncestors(pickId)) await render(); // 先展开折叠祖先，再选中
+      await selectLeaf(pickId);
+      return;
+    }
+    const leaves = visibleLeaves();
+    const cur = leaves.findIndex((el) => el.dataset.id === selectedId);
+    if (e.key === "Enter" && selectedId) {
       e.preventDefault();
       await openLeafById(selectedId);
     } else if (e.key === "Delete" && selectedId) {
@@ -458,6 +502,9 @@ export async function bootShell(root) {
     } else if (e.key === "d" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       root.querySelector("#btnTheme")?.click();
+    } else if (e.key === "p" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault(); // 原型 Ctrl+P：置顶 / 取消置顶（仅独立窗口有该按钮）
+      root.querySelector("#btnPip")?.click();
     } else if (e.key === "Backspace" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       renderTrashList();
@@ -580,11 +627,18 @@ export async function bootShell(root) {
     await render();
   });
 
-  // ---- 设置弹窗：四分类 + 外观/复制默认参数 ----
+  // ---- 设置弹窗：四分类 + 外观/备份方式/复制默认参数 ----
+  // D6：备份面板改为原型 opt-row 结构，data-setting 名称 → settings 键映射
+  const SETTING_KEY = {
+    theme: "theme",
+    startup: "openMode",
+    backup: "backupTarget",
+    localFormat: "localFormat",
+  };
   const syncSettingRows = () => {
     root.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
       const name = row.dataset.setting;
-      const current = name === "theme" ? themeOf(settings) : settings[name];
+      const current = name === "theme" ? themeOf(settings) : settings[SETTING_KEY[name] || name];
       row.classList.toggle("selected", row.dataset.value === current);
     });
     root.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
@@ -632,6 +686,16 @@ export async function bootShell(root) {
           { openMode: value },
           "打开方式已设为：" + (value === "window" ? "独立窗口" : "侧边栏")
         );
+      // D6：备份方式 / 本地格式（原型 pickBackup 联动子面板显隐）
+      else if (name === "backup") {
+        void saveSettingsPatch({ backupTarget: value });
+        syncBackupFields();
+      } else if (name === "localFormat") {
+        void saveSettingsPatch(
+          { localFormat: value },
+          "本地备份格式已设为：" + value.toUpperCase()
+        );
+      }
     });
   });
   root.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
@@ -674,18 +738,125 @@ export async function bootShell(root) {
     openModal("modalTrash");
   });
   root.querySelector("#btnLinks")?.addEventListener("click", async () => {
+    // D4 修复：切换后立即重渲染 + toast 反馈（之前只存设置不渲染，视觉无反应）
     await saveSettingsPatch({ linkShow: !settings.linkShow });
+    await render();
+    toast(settings.linkShow ? "已显示链接" : "已隐藏链接");
   });
 
-  // ---- 未交付能力：显式提示待实现（M3/M4 后续，原型 v16 已定义交互）----
-  // 历史跳转 / 全屏卡片视图 / PiP 置顶尚未实现；不静默无响应，也不虚构功能。
-  for (const [btn, label] of [
-    ["#btnHistory", "历史跳转待实现"],
-    ["#btnFullscreen", "全屏卡片视图待实现"],
-    ["#btnPip", "PiP 置顶待实现"],
-  ]) {
-    root.querySelector(btn)?.addEventListener("click", () => toast(label));
-  }
+  // ---- D5：历史跳转 + 置顶（原型真实交互）----
+  // 历史：打开浏览器历史页（chrome://history，tabs.create 无需额外权限）
+  root.querySelector("#btnHistory")?.addEventListener("click", async () => {
+    try {
+      await chrome.tabs.create({ url: "chrome://history/" });
+      toast("已打开浏览器历史");
+    } catch (err) {
+      say("打开历史失败：" + err.message);
+    }
+  });
+  // 置顶（仅独立窗口）：TH2-001 Q-F 裁决 = Document Picture-in-Picture 真置顶。
+  // Chrome windows API 的 create/update 均无 alwaysOnTop 参数（该属性仅 Window 对象只读），
+  // 故用 PiP 浮窗承载迷你树：浮窗由浏览器保证悬浮在最前，取消置顶 = 关闭浮窗；
+  // Chrome < 116 无 documentPictureInPicture 时显式降级提示（TH2-001 §Q-F）。
+  let pipWin = null;
+  const pipBtn = root.querySelector("#btnPip");
+  const escHtml = (s) =>
+    String(s).replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    );
+  const pipLeafHtml = (t, opens) => {
+    const open = opens.get(t.url);
+    const attrs = open
+      ? `data-tab-id="${open.tabId}" data-window-id="${open.windowId}"`
+      : `data-url="${escHtml(t.url)}"`;
+    return `<div class="pip-item${open ? " on" : ""}" ${attrs}><span class="pip-dot"></span><span class="pip-title">${escHtml(t.title || t.url)}</span></div>`;
+  };
+  const renderPip = async () => {
+    if (!pipWin || pipWin.closed) return;
+    const opens = new Map();
+    try {
+      for (const t of await chrome.tabs.query({})) {
+        if (/^https?:/.test(t.url || "") && !opens.has(t.url)) {
+          opens.set(t.url, { tabId: t.id, windowId: t.windowId });
+        }
+      }
+    } catch {
+      /* 无 tabs 环境忽略 */
+    }
+    const rows = m.windows
+      .map((w) => {
+        const gHtml = m.groups
+          .filter((g) => g.parentId === w.id)
+          .map(
+            (g) =>
+              `<div class="pip-group">${escHtml(g.title)}</div>` +
+              m.tabs
+                .filter((t) => t.parentId === g.id)
+                .map((t) => pipLeafHtml(t, opens))
+                .join("")
+          )
+          .join("");
+        const wLeaves = m.tabs
+          .filter((t) => t.parentId === w.id)
+          .map((t) => pipLeafHtml(t, opens))
+          .join("");
+        return `<div class="pip-window">${escHtml(w.title)}</div>${gHtml}${wLeaves}`;
+      })
+      .join("");
+    pipWin.document.querySelector("#pipList").innerHTML =
+      rows || `<div class="pip-empty">暂无标签</div>`;
+  };
+  pipBtn?.addEventListener("click", async () => {
+    if (pipWin && !pipWin.closed) {
+      pipWin.close(); // 取消置顶：pagehide 统一清理状态与高亮
+      return;
+    }
+    if (!("documentPictureInPicture" in window)) {
+      say("当前浏览器不支持置顶画中画（需 Chrome 116 及以上）");
+      return;
+    }
+    try {
+      pipWin = await window.documentPictureInPicture.requestWindow({
+        width: 380,
+        height: 520,
+      });
+      for (const el of document.querySelectorAll('link[rel="stylesheet"], style')) {
+        pipWin.document.head.appendChild(el.cloneNode(true));
+      }
+      applyTheme(pipWin.document, themeOf(settings));
+      pipWin.document.body.innerHTML = `
+        <div class="pip-wrap">
+          <div class="pip-head">TabHarbor 置顶小窗</div>
+          <div id="pipList"></div>
+          <div class="pip-foot">点击条目跳转对应标签页 · 关闭小窗即取消置顶</div>
+        </div>`;
+      pipWin.document.body.addEventListener("click", async (e) => {
+        const item = e.target.closest(".pip-item");
+        if (!item) return;
+        if (item.dataset.tabId) {
+          await chrome.tabs.update(Number(item.dataset.tabId), { active: true });
+          await chrome.windows.update(Number(item.dataset.windowId), { focused: true });
+        } else if (item.dataset.url) {
+          await chrome.tabs.create({ url: item.dataset.url });
+        }
+      });
+      await renderPip();
+      pipWin.addEventListener("pagehide", () => {
+        pipWin = null;
+        pipBtn?.classList.remove("active");
+        toast("已取消置顶：浮动小窗已关闭");
+      });
+      pipBtn?.classList.add("active");
+      toast("已置顶：浮动小窗悬浮在其他窗口之上（窗口原位保持不动）");
+    } catch (err) {
+      say("置顶失败：" + err.message);
+    }
+  });
+  // 全屏卡片视图仍属 M3/M4 待交付，显式提示不静默
+  root
+    .querySelector("#btnFullscreen")
+    ?.addEventListener("click", () => toast("全屏卡片视图待实现"));
 
   // 回收站列表（#31 接线：恢复 / 彻底删除）
   const renderTrashList = () => {
@@ -727,12 +898,11 @@ export async function bootShell(root) {
     }
   });
 
-  // ---- 备份与导入导出（原 dataPanel 迁入设置-备份与恢复） ----
+  // ---- 备份与导入导出（D6：原型 opt-row 面板） ----
   const syncBackupFields = () => {
-    const target = root.querySelector("#backupTarget");
-    const ghFields = root.querySelector("#githubBackupFields");
-    if (target) target.value = settings.backupTarget || "local";
-    if (ghFields) ghFields.hidden = (settings.backupTarget || "local") !== "github";
+    syncSettingRows(); // 备份方式 / 本地格式 opt-row 选中态
+    const ghSub = root.querySelector("#ghBackupSub");
+    if (ghSub) ghSub.hidden = (settings.backupTarget || "local") !== "github";
     for (const [id, key, fallback] of [
       ["ghRepo", "ghRepo", ""],
       ["ghBranch", "ghBranch", "main"],
@@ -758,23 +928,10 @@ export async function bootShell(root) {
       })
     );
   };
-  root.querySelector("#btnExportJson")?.addEventListener("click", async () => {
-    const content = await io.exportJSON(m, settings);
-    await io.triggerDownload("tabharbor-export-" + Date.now() + ".json", content, chrome.downloads);
-    say("JSON 已导出");
+  // D6：三种导入入口（JSON/HTML/原生结构）都通过隐藏文件输入
+  root.querySelectorAll("[data-import]").forEach((btn) => {
+    btn.addEventListener("click", () => root.querySelector("#importFile")?.click());
   });
-  root.querySelector("#btnExportHtml")?.addEventListener("click", async () => {
-    const content = await io.exportHTML(m);
-    await io.triggerDownload(
-      "tabharbor-bookmarks-" + Date.now() + ".html",
-      content,
-      chrome.downloads
-    );
-    say("HTML 书签已导出");
-  });
-  root
-    .querySelector("#btnImportFile")
-    ?.addEventListener("click", () => root.querySelector("#importFile")?.click());
   root.querySelector("#importFile")?.addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -811,10 +968,22 @@ export async function bootShell(root) {
       if ((settings.backupTarget || "local") === "github") {
         const result = await io.runAutoBackup(chrome, m, settings);
         say(`GitHub HTML 备份完成：${result.path}`);
-      } else {
+        return;
+      }
+      // D6：按所选本地格式导出（json=JSON 快照+可恢复；html/native=标准 HTML 书签）
+      const fmt = settings.localFormat || "json";
+      if (fmt === "json") {
         await io.manualBackup(m, settings, chrome.downloads, chrome);
         await refreshBackups();
         say("已创建可恢复快照并下载 JSON 备份");
+      } else {
+        const content = await io.exportHTML(m);
+        await io.triggerDownload(
+          "tabharbor-bookmarks-" + Date.now() + ".html",
+          content,
+          chrome.downloads
+        );
+        say("HTML 书签已导出");
       }
     } catch (error) {
       say("备份失败：" + error.message);
@@ -830,23 +999,6 @@ export async function bootShell(root) {
       say("设置保存失败：" + error.message);
     }
   };
-  root.querySelector("#backupTarget")?.addEventListener("change", (event) => {
-    const target = event.target.value === "github" ? "github" : "local";
-    if (target === "github") {
-      for (const [id, key] of [
-        ["ghRepo", "ghRepo"],
-        ["ghBranch", "ghBranch"],
-        ["ghPath", "ghPath"],
-        ["ghToken", "ghToken"],
-      ]) {
-        const field = root.querySelector(`#${id}`);
-        if (field) field.value = settings[key] || "";
-      }
-    }
-    void saveGitHubSettings({ backupTarget: target });
-    const fields = root.querySelector("#githubBackupFields");
-    if (fields) fields.hidden = target !== "github";
-  });
   root
     .querySelector("#ghBackupFreq")
     ?.addEventListener(
@@ -896,6 +1048,27 @@ export async function bootShell(root) {
       say("恢复失败：" + error.message);
     }
   });
+
+  // ---- 浏览器标签事件 → 实时刷新打开态（D8 联带修复）----
+  // 刚 create 的标签 url 为 ""、真实地址在 pendingUrl，导航提交后才落 url；
+  // 依赖单次 query 拿不到打开态，必须监听 onCreated/onRemoved/onUpdated。
+  let tabsTimer = 0;
+  const tabsChanged = () => {
+    clearTimeout(tabsTimer);
+    // 批量事件去抖；置顶 PiP 浮窗打开时同步刷新迷你列表（D5）
+    tabsTimer = setTimeout(() => {
+      void refreshOpen();
+      void renderPip();
+    }, 150);
+  };
+  if (typeof chrome !== "undefined" && chrome.tabs?.onCreated) {
+    chrome.tabs.onCreated.addListener(tabsChanged);
+    if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(tabsChanged);
+    if (chrome.tabs.onUpdated)
+      chrome.tabs.onUpdated.addListener((tabId, info) => {
+        if (info.url || info.status === "complete") tabsChanged();
+      });
+  }
 
   // ---- 存储联动 ----
   chrome.storage.onChanged.addListener((changes, area) => {

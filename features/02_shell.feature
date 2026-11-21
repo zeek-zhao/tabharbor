@@ -82,9 +82,42 @@
 那么 "src/ui/shell.js" 包含 "document.querySelector"
 那么 "src/ui/shell.js" 包含 "bootShell(document)"
 
-场景: 未交付能力显式提示待实现（不静默无响应）
-那么 "src/ui/shell.js" 包含 "历史跳转待实现"
+场景: 未交付能力显式提示待实现（不静默无响应；D5 后历史与置顶已真实实现）
 那么 "src/ui/shell.js" 包含 "全屏卡片视图待实现"
-那么 "src/ui/shell.js" 包含 "PiP 置顶待实现"
 那么 "src/ui/shell.js" 不包含 "chrome.history"
 那么 "src/ui/shell.js" 不包含 "chrome.bookmarks"
+
+场景: D5 历史跳转与置顶真实实现（原型 v16 line 727/1226/1246；置顶按 Q-F 用 Document PiP）
+那么 "src/ui/shell.js" 包含 "chrome://history/"
+那么 "src/ui/shell.js" 包含 "documentPictureInPicture"
+那么 "src/ui/shell.js" 包含 "requestWindow"
+那么 "src/ui/shell.js" 包含 "已取消置顶：浮动小窗已关闭"
+那么 "src/ui/shell.js" 包含 "e.key === \"p\""
+那么 "src/assets/m2.css" 包含 ".pip-item"
+那么 "src/ui/shell.js" 包含 "已打开浏览器历史"
+那么 "src/window/window.html" 包含 "btnPip"
+那么 "src/sidebar/sidebar.html" 不包含 "btnPip"
+
+场景: D2 标签行内打开/关闭按钮齐备
+那么 "src/ui/render.js" 包含 "open-x"
+那么 "src/ui/render.js" 包含 "close-x"
+那么 "src/assets/m2.css" 包含 ".open-x"
+那么 "src/ui/shell.js" 包含 "closeLeaf"
+
+场景: D6 备份面板按原型 opt-row 结构（备份方式/本地格式/子面板切换/三种导入入口）
+那么 "src/window/window.html" 包含 "data-setting=\"backup\""
+那么 "src/window/window.html" 包含 "localBackupSub"
+那么 "src/window/window.html" 包含 "ghBackupSub"
+那么 "src/window/window.html" 包含 "data-import"
+那么 "src/sidebar/sidebar.html" 包含 "data-setting=\"backup\""
+那么 "src/sidebar/sidebar.html" 包含 "localBackupSub"
+那么 "src/window/window.html" 不包含 "btnExportJson"
+那么 "src/window/window.html" 不包含 "githubBackupFields"
+那么 "src/ui/shell.js" 包含 "SETTING_KEY"
+那么 "src/ui/shell.js" 包含 "localFormat"
+
+场景: D7 右键菜单项带图标（原型 menuIcon 结构）
+那么 "src/ui/menu.js" 包含 "ICON_FOR"
+那么 "src/ui/menu.js" 包含 "<svg"
+那么 "src/ui/menu.js" 包含 "data-act"
+那么 "src/assets/m2.css" 包含 ".ctx-menu .mi"

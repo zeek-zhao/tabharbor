@@ -22,7 +22,7 @@
     当 渲染树视图
     那么 节点 "GitHub" 的行有类 "open"
     并且 节点 "邮件" 的行有类 "dimmed"
-    并且 节点 "邮件" 的行不包含 "open"
+    并且 节点 "邮件" 的行不包含 "leaf open"
 
   场景: 标签为叶子标记 leaf（原型 data-kind=leaf）
     当 渲染树视图

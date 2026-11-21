@@ -144,6 +144,7 @@ export function makeChromeMock() {
   const calls = {
     storageSet: [],
     windowsCreate: [],
+    windowsRemove: [],
     sidePanelOpen: [],
     ctxMenuCreate: [],
     tabsCreate: [],
@@ -196,13 +197,27 @@ export function makeChromeMock() {
       onDetached: { addListener: () => {} },
     },
     windows: {
+      getCurrent: async () => ({
+        id: 1,
+        alwaysOnTop: Boolean(ctx.winPinned),
+        state: "normal",
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        tabs: ctx.openTabs.map((t, i) => ({ id: i + 1, url: t.url, windowId: 1 })),
+      }),
       create: async (o) => {
         calls.windowsCreate.push(o);
+        ctx.winPinned = Boolean(o && o.alwaysOnTop);
         return { id: 100 + calls.windowsCreate.length };
       },
       update: async (id, o) => {
         if (o && o.focused) calls.winFocus.push(id);
         return { id };
+      },
+      remove: async (id) => {
+        calls.windowsRemove.push(id);
       },
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
@@ -936,6 +951,16 @@ step("当", "把复制内容写入剪贴板", async () => {
 
 step("当", "关闭 {} 的全部网页", async (title) => {
   ctx.closeCount = await ops.closeNode(ctx.mock.chrome, ctx.m, ctx.named[title].id);
+});
+
+// D8：行内关闭 = 只关当前操作这一个标签页（同 URL 多开时绝不按 URL 全关）
+step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, n) => {
+  ctx.openTabs = [];
+  for (let i = 0; i < Number(n); i += 1) ctx.openTabs.push({ title, url: tabUrl(title) });
+});
+
+step("当", "行内关闭标签 {}", async (title) => {
+  ctx.closeCount = await ops.closeLeaf(ctx.mock.chrome, ctx.m, ctx.named[title].id);
 });
 
 step("当", "对 {} 执行打开全部", async (title) => {
