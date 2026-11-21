@@ -80,6 +80,48 @@ export function moveNode(m, dragId, newParentId) {
   return true;
 }
 
+// M2（FR-027 邻位排序）：标签拖到另一标签之后——同父排序 / 跨父移动并插入目标之后
+export function moveLeafAfter(m, dragId, targetId) {
+  const drag = findNode(m, dragId);
+  const target = findNode(m, targetId);
+  if (!drag || drag.kind !== "tab" || !target || target.kind !== "tab" || dragId === targetId) {
+    return false;
+  }
+  const from = m.tabs.indexOf(drag);
+  if (from < 0) return false;
+  m.tabs.splice(from, 1);
+  drag.parentId = target.parentId;
+  const at = m.tabs.indexOf(target);
+  m.tabs.splice(at + 1, 0, drag);
+  return true;
+}
+
+// M2（FR-025/028）：标签移入分组 / 窗口（追加到末尾）。落点合法性由 canDrop 校验。
+export function moveLeafInto(m, dragId, newParentId) {
+  const drag = findNode(m, dragId);
+  if (!drag || drag.kind !== "tab") return false;
+  if (!canDrop(m, dragId, newParentId)) return false;
+  const from = m.tabs.indexOf(drag);
+  if (from < 0) return false;
+  m.tabs.splice(from, 1);
+  drag.parentId = newParentId;
+  m.tabs.push(drag);
+  return true;
+}
+
+// M2（FR-031）：窗口合并——源窗口分组与直属标签并入目标窗口，源窗口移除
+export function mergeWindows(m, srcId, targetId) {
+  const src = findNode(m, srcId);
+  const target = findNode(m, targetId);
+  if (!src || src.kind !== "window" || !target || target.kind !== "window" || srcId === targetId) {
+    return false;
+  }
+  for (const g of m.groups) if (g.parentId === srcId) g.parentId = targetId;
+  for (const t of m.tabs) if (t.parentId === srcId) t.parentId = targetId;
+  m.windows.splice(m.windows.indexOf(src), 1);
+  return true;
+}
+
 export function countByKind(m) {
   return {
     window: m.windows.length,

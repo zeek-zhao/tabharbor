@@ -1,5 +1,6 @@
 # TH2-CI-001 · 持续集成门禁：语法 / 红线 / 合规 / 格式化 / 提交人 / BDD / 打包
 # M0 精简集：静态实现验证与对比度随里程碑加入（见 docs/TH2-CI-001）
+# e2e：Playwright 真实 Chromium 加载 MV3 扩展冒烟（TH2-E2E-001）
 name: CI
 
 on:
@@ -60,3 +61,21 @@ jobs:
           name: tabharbor-src
           path: tabharbor-src.zip
         if: hashFiles('src/**') != ''
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 安装 Chromium（新无头模式，支持 MV3 扩展）
+        run: npx playwright install chromium --with-deps
+
+      - name: 真实浏览器冒烟（加载扩展 + chrome.storage 实时渲染）
+        run: npm run test:e2e

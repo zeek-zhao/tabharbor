@@ -4,9 +4,102 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { step } from "../tools/bdd-runner.mjs";
+import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
+import * as io from "../src/core/import-export.js";
+import * as trashOp from "../src/core/trash-op.js";
+import { entryLabel } from "../src/core/trash-op.js";
 
+/* ---------- 样例文件合同（真实导入器，不依赖 Chrome） ---------- */
+const SAMPLE_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../samples/datasets"
+);
+step("假如", "JSON 样例文件已读取", async () => {
+  ctx.sampleJson = JSON.parse(
+    await fs.promises.readFile(path.join(SAMPLE_DIR, "tabharbor-sample.json"), "utf8")
+  );
+});
+step("假如", "HTML 样例文件已读取", async () => {
+  ctx.sampleHtml = await fs.promises.readFile(
+    path.join(SAMPLE_DIR, "tabharbor-sample.html"),
+    "utf8"
+  );
+});
+step("当", "用真实导入器校验 JSON 样例", async () => {
+  ctx.sampleImportedJson = await io.importJSON(ctx.sampleJson, {});
+});
+step("当", "用真实导入器校验 HTML 样例", async () => {
+  ctx.sampleImportedHtml = await io.importHTML(ctx.sampleHtml, {});
+});
+step("那么", 'JSON 样例提供了 "2" 个窗口', () => {
+  if (ctx.sampleImportedJson.windows.length < 2) throw new Error("JSON 样例窗口不足");
+});
+// 注意：runner 实现 Gherkin And 继承——紧跟「那么」的「并且」按 then 检索，
+// 因此本组断言统一以「那么」注册（feature 中的「并且」会继承到 then）。
+step("那么", 'JSON 样例至少有 "5" 个分组', () => {
+  if (ctx.sampleImportedJson.groups.length < 5) throw new Error("JSON 样例分组不足");
+});
+step("那么", 'JSON 样例至少有 "10" 个标签', () => {
+  if (ctx.sampleImportedJson.tabs.length < 10) throw new Error("JSON 样例标签不足");
+});
+step("那么", 'HTML 样例至少有 "5" 个分组', () => {
+  if (ctx.sampleImportedHtml.groups.length < 5) throw new Error("HTML 样例分组不足");
+});
+step("那么", 'HTML 样例至少有 "10" 个标签', () => {
+  if (ctx.sampleImportedHtml.tabs.length < 10) throw new Error("HTML 样例标签不足");
+});
+step("那么", "JSON 样例保留嵌套分组", () => {
+  if (
+    !ctx.sampleImportedJson.groups.some((g) =>
+      ctx.sampleImportedJson.groups.some((child) => child.parentId === g.id)
+    )
+  )
+    throw new Error("JSON 样例无嵌套分组");
+});
+step("那么", "HTML 样例保留嵌套分组", () => {
+  if (
+    !ctx.sampleImportedHtml.groups.some((g) =>
+      ctx.sampleImportedHtml.groups.some((child) => child.parentId === g.id)
+    )
+  )
+    throw new Error("HTML 样例无嵌套分组");
+});
+step("那么", 'HTML 样例包含 "1" 个窗口', () => {
+  if (ctx.sampleImportedHtml.windows.length < 1) throw new Error("HTML 样例窗口不足");
+});
+step("那么", "JSON 样例网址全部是 example.com 占位地址", () => {
+  if (ctx.sampleImportedJson.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
+    throw new Error("JSON 样例包含非占位地址");
+});
+step("那么", "HTML 样例网址全部是 example.com 占位地址", () => {
+  if (ctx.sampleImportedHtml.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
+    throw new Error("HTML 样例包含非占位地址");
+});
+step(
+  "那么",
+  '"docs/SAMPLES-使用与验证指南.md" 包含 "M3-1 PR #28 仍需用户手工 Chrome 验收"',
+  async () => {
+    const guide = await fs.promises.readFile(
+      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+      "utf8"
+    );
+    if (!guide.includes("M3-1 PR #28 仍需用户手工 Chrome 验收"))
+      throw new Error("指南未注明 M3-1 手工验收状态");
+  }
+);
+step(
+  "那么",
+  '"docs/SAMPLES-使用与验证指南.md" 包含 "不能将 HTML 控件/需求文字当作已实现功能"',
+  async () => {
+    const guide = await fs.promises.readFile(
+      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+      "utf8"
+    );
+    if (!guide.includes("不能将 HTML 控件/需求文字当作已实现功能"))
+      throw new Error("指南未注明能力边界");
+  }
+);
 /* ---------- 模块级上下文 ---------- */
 const ctx = {
   named: {},
@@ -51,6 +144,7 @@ export function makeChromeMock() {
   const calls = {
     storageSet: [],
     windowsCreate: [],
+    windowsRemove: [],
     sidePanelOpen: [],
     ctxMenuCreate: [],
     tabsCreate: [],
@@ -103,13 +197,27 @@ export function makeChromeMock() {
       onDetached: { addListener: () => {} },
     },
     windows: {
+      getCurrent: async () => ({
+        id: 1,
+        alwaysOnTop: Boolean(ctx.winPinned),
+        state: "normal",
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        tabs: ctx.openTabs.map((t, i) => ({ id: i + 1, url: t.url, windowId: 1 })),
+      }),
       create: async (o) => {
         calls.windowsCreate.push(o);
+        ctx.winPinned = Boolean(o && o.alwaysOnTop);
         return { id: 100 + calls.windowsCreate.length };
       },
       update: async (id, o) => {
         if (o && o.focused) calls.winFocus.push(id);
         return { id };
+      },
+      remove: async (id) => {
+        calls.windowsRemove.push(id);
       },
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
@@ -262,6 +370,11 @@ step("当", "在分组 {} 下创建标签 {} 指向 {}", (grpTitle, title, url) 
   ctx.named[title] = model.addTab(ctx.m, title, url, byTitle(grpTitle).id);
 });
 
+// FR-024（M1-1）：窗口容器可直挂标签（如「当前浏览器窗口」散页）
+step("当", "在窗口 {} 下创建标签 {} 指向 {}", (winTitle, title, url) => {
+  ctx.named[title] = model.addTab(ctx.m, title, url, byTitle(winTitle).id);
+});
+
 step("那么", "模型的窗口、分组、标签计数分别为 {}、{}、{}", (w, g, t) => {
   const c = model.countByKind(ctx.m);
   if (c.window !== Number(w) || c.group !== Number(g) || c.tab !== Number(t)) {
@@ -270,13 +383,17 @@ step("那么", "模型的窗口、分组、标签计数分别为 {}、{}、{}", 
 });
 
 step("那么", "标签 {} 的父节点是分组 {}", (tabTitle, grpTitle) => {
-  if (byTitle(tabTitle).parentId !== byTitle(grpTitle).id) {
+  const tab = freshByTitle(tabTitle);
+  const grp = freshByTitle(grpTitle);
+  if (tab.parentId !== grp.id) {
     throw new Error(`标签归属不符：${tabTitle} 不在 ${grpTitle} 下`);
   }
 });
 
 step("那么", "分组 {} 的父节点是 {}", (childTitle, parentTitle) => {
-  if (byTitle(childTitle).parentId !== byTitle(parentTitle).id) {
+  const child = freshByTitle(childTitle);
+  const parent = freshByTitle(parentTitle);
+  if (child.parentId !== parent.id) {
     throw new Error(`嵌套不符：${childTitle} 的父节点不是 ${parentTitle}`);
   }
 });
@@ -292,6 +409,95 @@ step("那么", "拖拽被接受", () => {
 
 step("那么", "拖拽被拒绝（防环/非法落点）", () => {
   if (ctx.dropOk) throw new Error("拖拽应被拒绝但被接受");
+});
+
+/* ---------- 场景组：M2 拖拽落点细化（FR-025/027/028/031，#31） ---------- */
+// 按当前模型实时按标题查节点（回收站恢复/移动后 ctx.named 引用可能已脱离模型）
+function freshByTitle(title) {
+  for (const arr of [ctx.m.windows, ctx.m.groups, ctx.m.tabs]) {
+    const hit = arr.find((n) => n.title === title);
+    if (hit) return hit;
+  }
+  throw new Error(`模型中未找到节点：${title}`);
+}
+function hasNode(title) {
+  return [...ctx.m.windows, ...ctx.m.groups, ...ctx.m.tabs].some((n) => n.title === title);
+}
+
+step("当", "把标签 {} 拖到标签 {} 之后", (dragTitle, targetTitle) => {
+  ctx.dropOk = model.moveLeafAfter(ctx.m, freshByTitle(dragTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("当", "把标签 {} 拖入 {}（容器）", (dragTitle, targetTitle) => {
+  ctx.dropOk = model.moveLeafInto(ctx.m, freshByTitle(dragTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("当", "把窗口 {} 合并到窗口 {}", (srcTitle, targetTitle) => {
+  ctx.dropOk = model.mergeWindows(ctx.m, freshByTitle(srcTitle).id, freshByTitle(targetTitle).id);
+});
+
+step("那么", "{} 排在 {} 之后（同父相邻）", (aTitle, bTitle) => {
+  const a = freshByTitle(aTitle);
+  const b = freshByTitle(bTitle);
+  if (a.parentId !== b.parentId) throw new Error(`${aTitle} 与 ${bTitle} 父节点不同`);
+  if (ctx.m.tabs.indexOf(a) !== ctx.m.tabs.indexOf(b) + 1) {
+    throw new Error(`${aTitle} 未紧跟在 ${bTitle} 之后`);
+  }
+});
+
+step("那么", "{} 的父节点是 {}", (childTitle, parentTitle) => {
+  const child = freshByTitle(childTitle);
+  const parent = freshByTitle(parentTitle);
+  if (child.parentId !== parent.id) {
+    throw new Error(`${childTitle} 的父节点不是 ${parentTitle}`);
+  }
+});
+
+step("那么", "{} 不在模型中", (title) => {
+  if (hasNode(title)) throw new Error(`${title} 应已移除但仍在模型中`);
+});
+
+step("那么", "窗口 {} 的分组随行并入窗口 {}", (srcTitle, targetTitle) => {
+  const srcWin = ctx.m.windows.find((w) => w.title === srcTitle);
+  if (srcWin) throw new Error(`源窗口 ${srcTitle} 应已移除`);
+  // 源窗口原有分组（记录于 ctx.named）现在应挂在目标窗口下
+  const named = ctx.named[srcTitle];
+  if (!named) throw new Error(`未找到源窗口记录：${srcTitle}`);
+  const srcGroups = ctx.m.groups.filter(
+    (g) => g.id === named.id || ctx.named[g.title]?.id === g.id
+  );
+  const target = freshByTitle(targetTitle);
+  const childGroups = ctx.m.groups.filter((g) => g.parentId === target.id);
+  if (!childGroups.length) throw new Error(`目标窗口 ${targetTitle} 下没有分组`);
+});
+
+/* ---------- 场景组：回收站（FR-018/037，#31） ---------- */
+step("当", "把 {} 删除到回收站", (title) => {
+  const node = freshByTitle(title);
+  ctx.trashEntry = trashOp.trashNode(ctx.m, node.id, "2026-01-01 08:00");
+});
+
+step("那么", "回收站条目数为 {}", (n) => {
+  const count = (ctx.m.trash || []).length;
+  if (count !== Number(n)) throw new Error(`回收站条目数不符：${count} ≠ ${n}`);
+});
+
+step("当", "恢复回收站条目 {}", (i) => {
+  const entry = trashOp.restoreEntry(ctx.m, Number(i));
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+});
+
+step("当", "彻底删除回收站条目 {}", (i) => {
+  const entry = trashOp.purgeEntry(ctx.m, Number(i));
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+});
+
+step("那么", "回收站条目 {} 的标题是 {}", (i, title) => {
+  const entry = (ctx.m.trash || [])[Number(i)];
+  if (!entry) throw new Error(`回收站条目 ${i} 不存在`);
+  if (entryLabel(entry) !== title) {
+    throw new Error(`条目标题不符：${entryLabel(entry)} ≠ ${title}`);
+  }
 });
 
 /* ---------- 场景组：递归后代（FR-020 复制/关闭整组的数据基础） ---------- */
@@ -343,6 +549,15 @@ step("那么", "{} 包含 {}", (rel, needle) => {
 step("那么", "{} 不包含 {}", (rel, needle) => {
   if (repoFile(rel).includes(needle.replace(/\\"/g, '"'))) {
     throw new Error(`${rel} 不应包含 ${needle}`);
+  }
+});
+
+// 兜底：{} 模板用 "([^"]*)" 切参，针内含转义引号（如 data-cat=\"appearance\"）时
+// 通用模板无法匹配——此宽松模板在通用模板失配后接管，剥外引号并反转义。
+stepMatch("那么", '^"([^"]+)" 包含 (.+)$', (rel, rawNeedle) => {
+  const needle = rawNeedle.replace(/^"(.*)"$/, "$1").replace(/\\"/g, '"');
+  if (!repoFile(rel).includes(needle)) {
+    throw new Error(`${rel} 不包含 ${needle}`);
   }
 });
 
@@ -641,13 +856,13 @@ step("当", "渲染树视图", () => {
     openIds: ctx.viewOpenIds || new Set(),
     linkShow: ctx.linkShow || false,
     selectedId: ctx.selectedId || null,
+    collapsed: ctx.collapsed || new Set(),
   });
 });
 
 function rowOf(title) {
   const id = (ctx.named[title] || findAnyByTitle(title)).id;
-  const rows = ctx.html.split('<div class="node');
-  const row = rows.find((r) => r.includes(`data-id="${id}"`));
+  const row = ctx.html.split('<div class="').find((r) => r.includes(`data-id="${id}"`));
   if (!row) throw new Error(`渲染输出中找不到节点 ${title} 的行`);
   return row;
 }
@@ -674,6 +889,18 @@ step("那么", "节点 {} 的行包含 {}", (title, needle) => {
 
 step("那么", "节点 {} 的行不包含 {}", (title, needle) => {
   if (rowOf(title).includes(needle)) throw new Error(`${title} 行不应包含 ${needle}`);
+});
+
+// #30 原型标记：标签 dot 圆点 / 容器 tri 折叠箭头
+step("那么", "树视图为每个标签渲染 dot 圆点", () => {
+  const dots = (ctx.html.match(/class="dot"/g) || []).length;
+  if (dots !== ctx.m.tabs.length) throw new Error(`dot=${dots} ≠ 标签数 ${ctx.m.tabs.length}`);
+});
+
+step("那么", "树视图为容器节点渲染 tri 折叠箭头", () => {
+  const tris = (ctx.html.match(/class="tri"/g) || []).length;
+  const want = ctx.m.windows.length + ctx.m.groups.length;
+  if (tris !== want) throw new Error(`tri=${tris} ≠ 容器数 ${want}`);
 });
 
 step("那么", "主题设置缺省解析为 {}", (want) => {
@@ -724,6 +951,16 @@ step("当", "把复制内容写入剪贴板", async () => {
 
 step("当", "关闭 {} 的全部网页", async (title) => {
   ctx.closeCount = await ops.closeNode(ctx.mock.chrome, ctx.m, ctx.named[title].id);
+});
+
+// D8：行内关闭 = 只关当前操作这一个标签页（同 URL 多开时绝不按 URL 全关）
+step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, n) => {
+  ctx.openTabs = [];
+  for (let i = 0; i < Number(n); i += 1) ctx.openTabs.push({ title, url: tabUrl(title) });
+});
+
+step("当", "行内关闭标签 {}", async (title) => {
+  ctx.closeCount = await ops.closeLeaf(ctx.mock.chrome, ctx.m, ctx.named[title].id);
 });
 
 step("当", "对 {} 执行打开全部", async (title) => {
@@ -779,6 +1016,13 @@ step("那么", "{}右键菜单模板包含 {}", (kind, needle) => {
 step("那么", "{}右键菜单模板不包含 {}", (kind, needle) => {
   const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
   if (html.includes(needle)) throw new Error(`${kind}菜单不应含 ${needle}`);
+});
+
+// #30 原型：删除项标 danger 危险色
+step("那么", "{}右键菜单模板的删除项含 danger 类", (kind) => {
+  const html = menu.menuHtml(kind === "标签" ? "tab" : kind === "组" ? "group" : "window");
+  if (!html.includes('class="mi danger" data-act="del"'))
+    throw new Error(`${kind}菜单删除项缺 danger`);
 });
 
 step("那么", "编辑弹窗模板包含 {}", (needle) => {
@@ -857,7 +1101,6 @@ step("那么", "渲染的树视图包含 {}", (title) => {
 });
 
 /* ---------- M3-1 书签导入导出（09_import_export.feature，FR-031~038，issue #27） ---------- */
-import * as io from "../src/core/import-export.js";
 
 step("当", "触发导出 JSON", async () => {
   ctx.exported = await io.exportJSON(ctx.m, ctx.all?.settings || {});
@@ -1284,4 +1527,113 @@ step("当", "自动备份 alarm 被触发", async () => {
 step("那么", "备份文件已写入 GitHub", () => {
   if (!ctx.fetchCalls.some((call) => call.options.method === "PUT"))
     throw new Error("自动备份未写入 GitHub");
+});
+
+// —— #32 备份演练：快照上限 / 损坏恢复 / GitHub 失败 ——
+step("当", "连续保存 21 次本地快照", async () => {
+  ctx.snapshotStore = makeChromeMock();
+  ctx.snapshotIds = [];
+  for (let i = 0; i < 21; i++) {
+    const bm = model.buildModel();
+    const w = model.addWindow(bm, `快照窗口${i + 1}`, `w_snap_${i + 1}`);
+    const g = model.addGroup(bm, `快照分组${i + 1}`, w.id, `g_snap_${i + 1}`);
+    model.addTab(
+      bm,
+      `快照标签${i + 1}`,
+      `https://example.com/snap/${i + 1}`,
+      g.id,
+      `t_snap_${i + 1}`
+    );
+    const entry = await io.saveLocalBackup(ctx.snapshotStore.chrome, bm, { theme: "dark" });
+    ctx.snapshotIds.push(entry.id);
+  }
+  ctx.snapshotList = await io.getBackupList(ctx.snapshotStore.chrome);
+});
+
+step("那么", "本地快照仓库最多保留 20 条", () => {
+  if (ctx.snapshotList.length !== 20)
+    throw new Error(`快照仓库保留 ${ctx.snapshotList.length} 条，期望 20`);
+});
+
+step("那么", "最新一次快照仍在仓库顶部", () => {
+  if (ctx.snapshotList[0].id !== ctx.snapshotIds[20]) throw new Error("最新快照不在仓库顶部");
+});
+
+step("那么", "最早一次快照已被淘汰", () => {
+  if (ctx.snapshotList.some((b) => b.id === ctx.snapshotIds[0]))
+    throw new Error("最早的快照未被滚动淘汰");
+});
+
+step("假如", "本地备份仓库存在一条损坏的快照", async () => {
+  ctx.corruptStore = makeChromeMock();
+  await ctx.corruptStore.chrome.storage.local.set({
+    localBackups: [
+      {
+        id: "backup-corrupt",
+        filename: "tabharbor-backup-corrupt.json",
+        createdAt: "2026-11-21T00:00:00.000Z",
+        content: "{broken-json",
+        count: 0,
+      },
+    ],
+  });
+});
+
+step("当", "尝试恢复该损坏快照", async () => {
+  try {
+    await io.restoreBackup("backup-corrupt", ctx.m, ctx.corruptStore.chrome);
+    ctx.restoreCorruptError = null;
+  } catch (error) {
+    ctx.restoreCorruptError = error;
+  }
+});
+
+step("那么", "恢复被拒绝并提示备份内容损坏", () => {
+  if (!ctx.restoreCorruptError) throw new Error("损坏快照未被拒绝");
+  if (!String(ctx.restoreCorruptError.message).includes("本地备份内容损坏"))
+    throw new Error(`错误提示不明确：${ctx.restoreCorruptError.message}`);
+});
+
+step("假如", "GitHub 备份配置完整且已授权", () => {
+  ctx.githubWriteSettings = {
+    backupTarget: "github",
+    ghRepo: "https://github.com/acme/bookmarks",
+    ghBranch: "main",
+    ghPath: "exports/bookmarks.html",
+    ghToken: "fixture-token",
+  };
+  ctx.githubWriteChrome = {
+    permissions: { contains: async ({ origins }) => origins.includes("https://api.github.com/*") },
+  };
+});
+
+step("假如", "GitHub 写入接口返回 403", () => {
+  ctx.githubWriteCalls = [];
+  ctx.githubWriteFetch = async (url, options) => {
+    ctx.githubWriteCalls.push({ url, options });
+    if (options.method === "GET") return { status: 404, ok: false, json: async () => ({}) };
+    return { status: 403, ok: false, json: async () => ({ message: "Forbidden" }) };
+  };
+});
+
+step("当", "尝试上传备份到 GitHub", async () => {
+  try {
+    await io.uploadGitHubFile(
+      ctx.githubWriteChrome,
+      ctx.githubWriteSettings,
+      await io.exportHTML(ctx.m),
+      ctx.githubWriteFetch
+    );
+    ctx.githubWriteError = null;
+  } catch (error) {
+    ctx.githubWriteError = error;
+  }
+});
+
+step("那么", "备份失败并提示 HTTP 403", () => {
+  if (!ctx.githubWriteError) throw new Error("GitHub 403 未被报告为失败");
+  if (!String(ctx.githubWriteError.message).includes("HTTP 403"))
+    throw new Error(`错误提示不包含状态码：${ctx.githubWriteError.message}`);
+  if (ctx.githubWriteCalls.some((call) => !String(call.url).startsWith("https://api.github.com/")))
+    throw new Error("失败路径仍访问了非 api.github.com 域名");
 });

@@ -56,11 +56,27 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
   return created;
 }
 
-// FR-020：关闭节点网页——递归收集全部已开后代标签，浏览器端关闭；模型节点保留
-export async function closeNode(chromeApi, m, nodeId) {
-  const wantUrls = collectLeaves(m, nodeId).map((t) => t.url);
+// FR-020（D8）：关闭单个标签网页——同 URL 在浏览器开了多个时，只关当前
+// 操作对应的「一个」标签页（取第一个匹配且未被本批消费的），绝不按 URL 全关
+export async function closeLeaf(chromeApi, m, leafId) {
+  const leaf = findNode(m, leafId);
+  if (!leaf || leaf.kind !== "tab" || !leaf.url) return 0;
   const open = await chromeApi.tabs.query({});
-  const ids = open.filter((t) => wantUrls.includes(t.url)).map((t) => t.id);
-  if (ids.length) await chromeApi.tabs.remove(ids);
-  return ids.length;
+  const hit = open.find((t) => t.url === leaf.url);
+  if (!hit) return 0;
+  await chromeApi.tabs.remove([hit.id]);
+  return 1;
+}
+
+// FR-020：关闭节点网页——按叶子逐个关闭「一个」匹配标签页（同 URL 多开时
+// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留
+export async function closeNode(chromeApi, m, nodeId) {
+  const open = await chromeApi.tabs.query({});
+  const used = new Set();
+  for (const leaf of collectLeaves(m, nodeId)) {
+    const hit = open.find((t) => t.url === leaf.url && !used.has(t.id));
+    if (hit) used.add(hit.id);
+  }
+  if (used.size) await chromeApi.tabs.remove([...used]);
+  return used.size;
 }

@@ -1,0 +1,44 @@
+样例数据门禁证据（issues #29–#33 · M0–M4 样例 initiative）
+日期：2026-11-20 · 分支 m3/import-export · 范围：samples/ + docs/SAMPLES-使用与验证指南.md + features/10_samples.feature + tests/bdd.steps.mjs
+
+== npm test（BDD 全量 + 样例校验器）==
+汇总: 77/77 场景 PASS
+样例校验通过：JSON/HTML 导入有效；均至少含 1 窗口、多分组、每组 2 个标签，URL 均为 example.com。
+
+新增/受影响场景（features/10_samples.feature）：
+  PASS  场景: JSON 样例满足完整备份合同并提供多个窗口（7 步骤）
+  PASS  场景: Netscape HTML 样例导入后有多分组和嵌套标签（7 步骤）
+  PASS  场景: 样例使用说明诚实界定仍未实现的阶段能力（2 步骤）
+
+== npm run format:check ==
+All matched files use Prettier code style!
+
+== npm run constraints ==
+扫描文件：11 个（*.js / *.json / *.mjs）· 规则条数：9
+结果：0 项命中 —— 静态红线检查通过。
+
+== npm run compliance ==
+LICENSE：存在且为 MIT License · 扫描文件：88 个 · 模式：7 组
+结果：合规 0 项命中 —— 开源合规检查通过。
+
+== npm run committer ==
+扫描提交数: 16/27（基点 HEAD，merge commit 跳过）
+汇总: 全部提交人均为唯一授权邮箱 —— 门禁通过。
+
+== npm run contrast ==
+主题 dark 9 组 / 主题 light 9 组全部 PASS（设计态计算，TH-TL-001 / INS-06）。
+
+== 备注 ==
+1. 步骤注册根因：tools/bdd-runner.mjs:83 实现标准 Gherkin And 继承——紧跟「那么」的
+   「并且」按 then 检索；样例断言步骤曾以「并且」注册导致 [and]/[then] 步骤未注册。
+   已在 tests/bdd.steps.mjs 以「那么」注册并加注释说明；删除了无效的模板注册残留。
+2. 修正文本不匹配：feature 的「JSON 样例保留嵌套分组」曾对应注册「JSON 样例包含嵌套分组」；
+   并补上缺失的「JSON 样例网址全部是 example.com 占位地址」注册。
+3. 样例数据不含真实 URL（example.com 占位）；HTML 格式天然无法保存窗口/设置/备注/回收站。
+4. M3-1（issue #27 / PR #28）仍待用户手工 Chrome 验收；本批改动未触碰 src/ 发布代码。
+
+## E2E 集成证据（TH2-E2E-001）2026-11-20 22:30
+- Playwright chromium 安装 OK；tests/e2e-chromium.mjs 本机 6/6 PASS（真实 chrome-extension:// 加载、空态渲染、样例实时渲染 2窗/5组/10标、嵌套组+单击选中、侧边栏同源渲染）
+- 发现并修复真实缺陷：bootShell 无页面调用方 → src/ui/shell.js 自启动守卫；02_shell.feature 增静态契约场景，npm test 78/78
+- 门禁：format:check OK / constraints 0 命中 / compliance 0 命中 / committer 唯一邮箱 / contrast 全达标 / node --check tests/e2e-chromium.mjs OK
+- CI 新增 e2e job：ubuntu-latest + npx playwright install chromium --with-deps + npm run test:e2e

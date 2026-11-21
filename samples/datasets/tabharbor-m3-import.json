@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "exportedAt": "2026-11-21T00:00:00.000Z",
+  "windows": [{ "id": "w_m3", "kind": "window", "title": "M3 演练窗口", "collapsed": false }],
+  "groups": [
+    { "id": "g_m3_a", "parentId": "w_m3", "title": "演练-研究", "collapsed": false },
+    { "id": "g_m3_b", "parentId": "w_m3", "title": "演练-阅读", "collapsed": false }
+  ],
+  "tabs": [
+    {
+      "id": "t_m3_1",
+      "parentId": "g_m3_a",
+      "title": "研究站A",
+      "url": "https://example.com/m3/a1"
+    },
+    {
+      "id": "t_m3_2",
+      "parentId": "g_m3_a",
+      "title": "研究站B",
+      "url": "https://example.com/m3/a2"
+    },
+    {
+      "id": "t_m3_3",
+      "parentId": "g_m3_b",
+      "title": "阅读站A",
+      "url": "https://example.com/m3/b1"
+    },
+    {
+      "id": "t_m3_4",
+      "parentId": "g_m3_b",
+      "title": "阅读站B",
+      "url": "https://example.com/m3/b2"
+    }
+  ],
+  "settings": { "theme": "dark", "openMode": "sidebar", "linkShow": false },
+  "trash": [
+    {
+      "kind": "group",
+      "payload": { "id": "g_m3_trash", "parentId": "w_m3", "title": "已删除的草稿组", "collapsed": false },
+      "parentId": "w_m3",
+      "time": "2026-11-21T00:00:00.000Z",
+      "desc": {
+        "groups": [],
+        "tabs": [
+          {
+            "id": "t_m3_trash_1",
+            "parentId": "g_m3_trash",
+            "title": "草稿页",
+            "url": "https://example.com/m3/draft"
+          }
+        ]
+      }
+    }
+  ]
+}
