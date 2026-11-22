@@ -200,6 +200,18 @@ export function makeChromeMock() {
       onDetached: { addListener: () => {} },
     },
     windows: {
+      // F2（m11442）：真实窗口存活探测——仅 id=1（当前窗口）存在，其余视为失效
+      get: async (id) => {
+        if (Number(id) === 1) return { id: 1 };
+        throw new Error(`窗口 ${id} 不存在`);
+      },
+      getAll: async () => [
+        {
+          id: 1,
+          focused: true,
+          tabs: ctx.openTabs.map((t, i) => ({ id: t.id ?? i + 1, url: t.url, title: t.title })),
+        },
+      ],
       getCurrent: async () => ({
         id: 1,
         alwaysOnTop: Boolean(ctx.winPinned),
@@ -213,7 +225,12 @@ export function makeChromeMock() {
       create: async (o) => {
         calls.windowsCreate.push(o);
         ctx.winPinned = Boolean(o && o.alwaysOnTop);
-        return { id: 100 + calls.windowsCreate.length };
+        const created = {
+          id: 100 + calls.windowsCreate.length,
+          tabs: [{ id: 900 + calls.tabsCreate.length }],
+        };
+        ctx.openTabs.push({ id: created.tabs[0].id, url: (o && o.url) || "", title: "" });
+        return created;
       },
       update: async (id, o) => {
         if (o && o.focused) calls.winFocus.push(id);
@@ -456,6 +473,36 @@ step("当", "把窗口 {} 拖到分组 {} 上（转为分组）", (winTitle, gro
   if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
   // 落点分组作为插入锚点：转出的分组插到它之后（与壳层 applyDrop 一致）
   ctx.dropOk = model.turnWindowIntoGroup(ctx.m, w.id, g.id, g.id);
+});
+
+/* ---------- F 轮（m11442）：windowId 绑定 / 落点矩阵补全 ---------- */
+step("当", "创建带 windowId 的窗口 {} 绑定 {}", (title, wid) => {
+  const w = model.addWindow(ctx.m, title, undefined, Number(wid));
+  ctx.named[title] = w;
+});
+
+step("当", "把窗口 {} 拖到直挂标签 {} 所在窗口（转为分组）", (winTitle, tabTitle) => {
+  const w = freshByTitle(winTitle);
+  const tab = freshByTitle(tabTitle);
+  if (w.kind !== "window" || tab.kind !== "tab") {
+    throw new Error(`${winTitle} 不是窗口或 ${tabTitle} 不是标签`);
+  }
+  // 直挂窗口的标签 → 其父容器就是那个窗口 → 转为该窗口下的分组
+  ctx.dropOk = model.turnWindowIntoGroupUnder(ctx.m, w.id, tab.parentId, tab.parentId);
+});
+
+step("那么", "分组 {} 保留 windowId {}", (title, wid) => {
+  const node = freshByTitle(title);
+  if (node.kind !== "group" || node.windowId !== Number(wid)) {
+    throw new Error(`${title} 应保留 windowId=${wid}，实际 ${node.windowId}`);
+  }
+});
+
+step("那么", "窗口 {} 为离线窗口（无 windowId）", (title) => {
+  const node = freshByTitle(title);
+  if (node.kind !== "window" || node.windowId != null) {
+    throw new Error(`${title} 应为离线窗口（windowId 为空），实际 ${node.windowId}`);
+  }
 });
 
 step("那么", "{} 是窗口节点", (title) => {
@@ -1000,6 +1047,59 @@ step("假如", "树模型有手工窗口含开发分组和标签 {}", (tabTitle)
   ctx.named[tabTitle] = t;
 });
 
+/* F2（m11442）：真实窗口 ↔ 模型窗口配对 */
+step("假如", "浏览器有 {} 个真实窗口各含 {} 个标签页", (winCount, tabCount) => {
+  ctx.realWindows = [];
+  for (let i = 1; i <= Number(winCount); i++) {
+    const tabs = [];
+    for (let j = 1; j <= Number(tabCount); j++) {
+      tabs.push({ id: i * 100 + j, title: `W${i}-T${j}`, url: `https://example.com/w${i}/t${j}` });
+    }
+    ctx.realWindows.push({ id: 77 + i - 1, focused: i === 1, tabs });
+  }
+});
+
+step("假如", "模型已有窗口 {} 绑定 windowId {}", (title, wid) => {
+  const w = model.addWindow(ctx.m, title, undefined, Number(wid));
+  ctx.named[title] = w;
+});
+
+step("假如", "浏览器窗口 {} 含标签 {}", (wid, title) => {
+  const url = tabUrl(title);
+  const url2 = `https://example.com/${title}-2`;
+  const tabs = [
+    { id: Number(wid) * 10 + 1, title, url },
+    { id: Number(wid) * 10 + 2, title: `${title}2`, url: url2 },
+  ];
+  if (!ctx.realWindows) ctx.realWindows = [];
+  ctx.realWindows.push({ id: Number(wid), focused: true, tabs });
+  ctx.openTabs = tabs;
+});
+
+step("当", "执行真实窗口配对", () => {
+  ctx.pairResult = align.pairWindows(ctx.m, ctx.realWindows || []);
+});
+
+step("那么", "每个窗口节点均绑定了 windowId", () => {
+  for (const w of ctx.m.windows) {
+    if (w.windowId == null) throw new Error(`窗口 ${w.title} 未绑定 windowId`);
+  }
+});
+
+step("那么", "窗口 {} 仍绑定 windowId {}", (title, wid) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w || w.windowId !== Number(wid)) {
+    throw new Error(`窗口 ${title} 应绑定 ${wid}，实际 ${w && w.windowId}`);
+  }
+});
+
+step("那么", "窗口 {} 无 windowId（离线窗口）", (title) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w || w.windowId != null) {
+    throw new Error(`窗口 ${title} 应为离线窗口，实际 ${w && w.windowId}`);
+  }
+});
+
 step("当", "执行启动归类", () => {
   align.bootAlign(ctx.m, ctx.openTabs || []);
 });
@@ -1031,6 +1131,12 @@ step("那么", "存在窗口节点 {}", (title) => {
   if (!hit) throw new Error(`窗口节点不存在：${title}`);
   ctx.named[title] = hit;
   ctx.curWin = hit;
+});
+
+step("那么", "旧窗口含 {} 个标签节点", (n) => {
+  const w = ctx.m.windows.find((x) => x.title === "旧窗口");
+  const actual = ctx.m.tabs.filter((t) => t.parentId === w.id).length;
+  if (actual !== Number(n)) throw new Error(`旧窗口含标签数不符：${actual} ≠ ${n}`);
 });
 
 step("那么", "该窗口含 {} 个标签节点", (n) => {
@@ -1189,8 +1295,42 @@ step("假如", "开发分组含子分组 {} 且含标签 {} 与 {}", (subTitle, 
   ctx.named[t2] = model.addTab(ctx.m, t2, tabUrl(t2), sub.id);
 });
 
+step("假如", "标签 {} 所在窗口绑定失效的 windowId {}", (title, wid) => {
+  const tab = ctx.named[title];
+  // 沿 parentId 上溯到 L1 窗口并绑定失效句柄
+  let owner = tab;
+  while (owner && owner.parentId) owner = model.findNode(ctx.m, owner.parentId);
+  if (!owner || owner.kind !== "window") throw new Error(`${title} 不在任何窗口下`);
+  owner.windowId = Number(wid);
+});
+
 step("当", "双击标签 {}", async (title) => {
-  ctx.openResult = await ops.openTab(ctx.mock.chrome, ctx.named[title], openUrlsOf());
+  const tab = ctx.named[title];
+  const opts = { windowId: model.boundWindowId(ctx.m, tab.id) };
+  ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), opts);
+});
+
+step("那么", "新建了 {} 个浏览器窗口", (n) => {
+  if (ctx.mock.calls.windowsCreate.length !== Number(n)) {
+    throw new Error(`windows.create=${ctx.mock.calls.windowsCreate.length} ≠ ${n}`);
+  }
+});
+
+step("那么", "标签 {} 所在窗口已回填新的 windowId", async (title) => {
+  // 壳层 openLeafById 负责回填；BDD 直接模拟这段回填逻辑并断言
+  const tab = ctx.named[title];
+  let owner = tab;
+  while (owner && owner.parentId) owner = model.findNode(ctx.m, owner.parentId);
+  const created = ctx.mock.calls.windowsCreate[0];
+  const res = ctx.openResult;
+  if (res && res.rebound && res.windowId != null) {
+    owner.windowId = res.windowId;
+    await store.saveModel(ctx.m, ctx.mock.chrome);
+  }
+  if (!owner || owner.windowId !== (res && res.windowId)) {
+    throw new Error(`回填失败：windowId=${owner && owner.windowId}，应为 ${res && res.windowId}`);
+  }
+  if (!created) throw new Error("未创建浏览器窗口");
 });
 
 step("当", "复制 {} 的整树内容", (title) => {

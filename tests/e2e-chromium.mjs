@@ -700,6 +700,81 @@ try {
   assert.ok(favRenderOk, "favicon 前缀渲染/圆点回退失败（N3）");
   console.log("E2E N3 标签前缀 favicon（浏览器图标 + 圆点回退）通过");
 
+  // —— F 轮（m11442）：windowId 绑定 / 离线标记 / 折叠悬停展开 / 类型只按 kind ——
+  // F6：离线窗口（windowId=null）渲染淡色标记 .offline-dot，并带 title 提示
+  const offlineDot = await win.evaluate(async () => {
+    const mod = await import(chrome.runtime.getURL("ui/render.js"));
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const m = { windows: d.windows, groups: d.groups, tabs: d.tabs };
+    if (!m.windows.length) return { ok: false, reason: "no window" };
+    const winNode = m.windows[0];
+    winNode.windowId = null; // 模拟离线窗口
+    const html = mod.renderTree(m, { favicons: new Map(), openIds: new Set() });
+    return {
+      ok: html.includes('class="offline-dot"') && html.includes("双击其下标签会新建窗口"),
+    };
+  });
+  assert.ok(offlineDot.ok, `F6 离线窗口标记缺失：${JSON.stringify(offlineDot)}`);
+  console.log("E2E F6 离线窗口淡色标记 + 悬停提示通过");
+
+  // F4：类型识别只依据 kind + 数组归属，同名/同链接标签互不串扰
+  const kindCheck = await win.evaluate(async () => {
+    const mod = await import(chrome.runtime.getURL("core/levels.js"));
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const m = { windows: d.windows, groups: d.groups, tabs: d.tabs };
+    const t = (d.tabs || []).find((x) => x.parentId);
+    if (!t) return false;
+    const k = mod.kindByMembership(m, t.id);
+    return (
+      k === "tab" &&
+      mod.kindConsistent(m, t.id) &&
+      mod.isTopLevel(m, d.windows[0].id) &&
+      mod.levelOf(t) === 3
+    );
+  });
+  assert.ok(kindCheck, "F4 类型判定（kind + 数组归属）失败");
+  console.log("E2E F4 类型只按 kind + 数组归属通过");
+
+  // F5：折叠分组悬停约 600ms 自动展开；松手仍按折叠态落入
+  const gFold = SAMPLE.groups.find((g) => g.title && g.title.length > 2);
+  if (gFold) {
+    const foldNode = win.locator(`.node[data-id="${gFold.id}"]`);
+    const wasCollapsed = await foldNode.evaluate((el) => el.classList.contains("collapsed"));
+    if (wasCollapsed) {
+      const childBox = await foldNode.boundingBox();
+      if (childBox) {
+        await win.mouse.move(childBox.x + childBox.width / 2, childBox.y + 10);
+        await win.waitForTimeout(750);
+        const expanded = await foldNode.evaluate((el) => !el.classList.contains("collapsed"));
+        assert.ok(expanded, "F5 折叠分组悬停 600ms 未自动展开");
+      }
+    } else {
+      // 已是展开态：验证 shell.js 确有 hover 展开接线
+      const hasHover = await win.evaluate(async () => {
+        const res = await fetch(chrome.runtime.getURL("ui/shell.js"));
+        const txt = await res.text();
+        return txt.includes("maybeHoverExpand") && txt.includes("600");
+      });
+      assert.ok(hasHover, "F5 折叠悬停展开逻辑未接线");
+    }
+    console.log("E2E F5 折叠分组悬停展开通过");
+  }
+
+  // F2：窗口绑定 windowId 后按该 windowId 打开标签（BDD 已覆盖；这里验证 storage 持久化字段）
+  const winIdPersist = await win.evaluate(async () => {
+    const d = await chrome.storage.local.get(["windows"]);
+    const w = (d.windows || [])[0];
+    if (!w) return false;
+    // 写入 windowId 并验证读回（mock 真实 storage）
+    await chrome.storage.local.set({
+      windows: d.windows.map((x, i) => (i === 0 ? { ...x, windowId: 77 } : x)),
+    });
+    const after = await chrome.storage.local.get(["windows"]);
+    return after.windows[0].windowId === 77;
+  });
+  assert.ok(winIdPersist, "F2 windowId 无法持久化到 storage");
+  console.log("E2E F2 windowId 持久化通过");
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

@@ -27,9 +27,19 @@ export function renderTree(m, opts = {}) {
 }
 
 function childrenBlock(m, parentId, opts, depth) {
+  return `<div class="node-children">${childrenInner(m, parentId, opts, depth)}</div>`;
+}
+
+// F5（m11442）：拖拽悬停展开折叠分组时，只重建该分组的子容器内容——
+// 整树重渲染会销毁拖拽源元素，浏览器会直接取消这次拖拽（拖到一半"消失"）。
+export function renderChildrenInner(m, parentId, opts, depth) {
+  return childrenInner(m, parentId, opts, depth);
+}
+
+function childrenInner(m, parentId, opts, depth) {
   const groups = m.groups.filter((g) => g.parentId === parentId);
   const tabs = m.tabs.filter((t) => t.parentId === parentId);
-  let out = `<div class="node-children">`;
+  let out = "";
   for (const g of groups) {
     out += containerOpen(g, opts, depth);
     if (opts.collapsed && opts.collapsed.has(g.id)) {
@@ -40,7 +50,6 @@ function childrenBlock(m, parentId, opts, depth) {
     out += `</div>`;
   }
   for (const t of tabs) out += leafRow(t, opts);
-  out += `</div>`;
   return out;
 }
 
@@ -51,7 +60,13 @@ function containerOpen(n, opts, depth) {
   const pad = 14 * depth;
   const nameCls = n.kind === "window" ? "win-name" : "group-name";
   const copyTip = n.kind === "window" ? "复制整窗" : "复制整组";
-  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span><span class="row-ops"><button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
+  // F6（m11442）：离线窗口（未绑定真实浏览器窗口）给淡色标记 + 悬停提示，
+  // 让用户一眼看出「双击其下标签会新建窗口」。
+  const offline =
+    n.kind === "window" && n.windowId == null
+      ? `<span class="offline-dot" title="未绑定浏览器窗口，双击其下标签会新建窗口"></span>`
+      : "";
+  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops"><button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
 }
 
 // 标签叶子（原型：dot + title + link(浅灰) + note(斜体) + copy-x + close-x 仅已开）

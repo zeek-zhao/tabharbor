@@ -33,7 +33,11 @@ export async function copyToClipboard(text, clipboardApi) {
 // FR-009：双击标签——已开 → 聚焦现有标签页不重复开；否则新建。
 // R1（m10454）：识别依据 = tabId（浏览器稳定 ID）优先，URL 兜底——同一链接
 // 可开多个标签页，按 URL 识别会聚焦/关闭错对象。
-export async function openTab(chromeApi, node, openUrls) {
+// F2（m11442）：未打开时按「所属真实窗口」打开——
+//   windowId 有效 → 在該窗口内 tabs.create({windowId})；
+//   windowId 失效/为空（离线窗口） → chrome.windows.create 新建真实窗口再打开，
+//   并把新窗口句柄回传（rebound: true）由调用方回填到窗口节点。
+export async function openTab(chromeApi, node, openUrls, opts = {}) {
   const tabs = await chromeApi.tabs.query({});
   let hit;
   if (node.tabId != null) {
@@ -47,8 +51,38 @@ export async function openTab(chromeApi, node, openUrls) {
     await chromeApi.windows.update(hit.windowId, { focused: true });
     return { focused: true };
   }
+  const winId = opts.windowId != null ? opts.windowId : null;
+  if (winId != null && (await windowAlive(chromeApi, winId))) {
+    const created = await chromeApi.tabs.create({ url: node.url, windowId: winId });
+    return { created: true, tabId: created && created.id != null ? created.id : undefined };
+  }
+  // 离线窗口 / 绑定已失效：
+  // 有明确绑定（winId != null）且已失效 → 新建真实浏览器窗口承载该网页并回填；
+  // 从未绑定任何窗口（winId == null，例如导入书签/手工整理数据）→ 在当前窗口
+  // tabs.create 打开即可，不必为单个标签弹新窗口（与既有 FR-009 语义一致）。
+  if (winId != null && typeof chromeApi.windows?.create === "function") {
+    const created = await chromeApi.windows.create({ url: node.url });
+    const first = (created && created.tabs && created.tabs[0]) || {};
+    return {
+      created: true,
+      rebound: true,
+      windowId: created && created.id != null ? created.id : undefined,
+      tabId: first.id != null ? first.id : undefined,
+    };
+  }
   const created = await chromeApi.tabs.create({ url: node.url });
   return { created: true, tabId: created && created.id != null ? created.id : undefined };
+}
+
+// 真实窗口是否仍然存在（Chrome 窗口被关闭后 get 会 reject）
+async function windowAlive(chromeApi, winId) {
+  if (typeof chromeApi.windows?.get !== "function") return false;
+  try {
+    const w = await chromeApi.windows.get(winId);
+    return !!w;
+  } catch {
+    return false;
+  }
 }
 
 // FR-021（Q-B）：打开全部——无确认直开，只开未开的

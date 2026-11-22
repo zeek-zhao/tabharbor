@@ -159,6 +159,18 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* F6（m11442）：离线窗口淡色标记——未绑定真实浏览器窗口，双击其下标签会新建窗口 */
+.offline-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--fg2);
+  opacity: 0.55;
+  flex: 0 0 auto;
+  cursor: help;
+}
 /* R6（m10454）：窗口/分组行内操作与原型一致——常显，不再 hover 才出现 */
 .row-ops {
   display: inline-flex;

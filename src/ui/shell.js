@@ -9,7 +9,7 @@ import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as editOp from "../core/edit-op.js";
 import * as trashOp from "../core/trash-op.js";
-import { bootAlign, computeOpenIds, realignIfEmpty } from "../core/align.js";
+import { bootAlign, pairWindows, computeOpenIds, realignIfEmpty } from "../core/align.js";
 import {
   findNode,
   moveLeafAfter,
@@ -18,6 +18,10 @@ import {
   mergeWindows,
   turnGroupIntoWindow,
   turnWindowIntoGroup,
+  turnWindowIntoGroupUnder,
+  boundWindowId,
+  windowIdOwner,
+  topWindowOf,
 } from "../core/model.js";
 import { conversionRule, kindByMembership } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
@@ -95,6 +99,22 @@ async function queryOpenTabs() {
   return tabs
     .filter((t) => /^https?:/.test(t.url || ""))
     .map((t) => ({ id: t.id, title: t.title || t.url, url: t.url }));
+}
+
+// F2（m11442）：真实浏览器窗口 → [{ id, focused, tabs }]；无 windows API 时返回 null
+// （退回旧 bootAlign 单窗口语义，测试环境/无权限时不至于整页不可用）。
+async function queryRealWindows() {
+  if (typeof chrome === "undefined" || !chrome.windows?.getAll) return null;
+  try {
+    const wins = await chrome.windows.getAll({ populate: true });
+    return (wins || []).map((w) => ({
+      id: w.id,
+      focused: !!w.focused,
+      tabs: (w.tabs || []).map((t) => ({ id: t.id, title: t.title || t.url, url: t.url })),
+    }));
+  } catch {
+    return null;
+  }
 }
 
 export async function bootShell(root) {
@@ -192,15 +212,21 @@ export async function bootShell(root) {
 
   // M1-1 启动归类（FR-024/027）：把浏览器已打开标签对齐到「当前浏览器窗口」（多退少补）。
   // R1：入参携带浏览器 tabId，叶子落库固化 tabId 识别依据。
+  // F2（m11442）：有 windows API 时先做「真实窗口 ↔ 模型窗口」配对，再逐窗口对齐直属标签；
+  // 无 API（测试环境）时退回旧 bootAlign。
   try {
-    const openTabs = await queryOpenTabs();
-    if (openTabs.length) {
-      const before = JSON.stringify(m.tabs);
-      bootAlign(m, openTabs);
-      if (JSON.stringify(m.tabs) !== before) {
-        await store.saveModel(m);
-        await applyOpenState();
-      }
+    const realWindows = await queryRealWindows();
+    const snap = () => JSON.stringify([m.windows, m.groups, m.tabs]);
+    const before = snap();
+    if (realWindows) {
+      pairWindows(m, realWindows);
+    } else {
+      const openTabs = await queryOpenTabs();
+      if (openTabs.length) bootAlign(m, openTabs);
+    }
+    if (snap() !== before) {
+      await store.saveModel(m);
+      await applyOpenState();
     }
   } catch {
     // 无浏览器 API（测试环境）时跳过归类
@@ -354,18 +380,31 @@ export async function bootShell(root) {
 
   // 双击/Enter 共用：打开选中标签（聚焦或新建）。
   // R1：新建成功后回填浏览器 tabId，此后该叶子以 tabId 精确识别。
+  // F2（m11442）：未打开的标签按「所属真实窗口」打开——所属窗口不存在（离线窗口/
+  // 绑定失效）时自动新建一个真实浏览器窗口，并把新窗口句柄回填到窗口节点。
   const openLeafById = async (id) => {
     const node = findNode(m, id);
     if (!node?.url) return;
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
-      const res = await tabsOp.openTab(chrome, node, urls);
+      const winId = boundWindowId(m, id);
+      const res = await tabsOp.openTab(chrome, node, urls, { windowId: winId });
+      let dirty = false;
       if (res.created && res.tabId != null && node.tabId !== res.tabId) {
         node.tabId = res.tabId;
-        await store.saveModel(m);
+        dirty = true;
       }
+      if (res.rebound && res.windowId != null) {
+        // 回填：优先写回原来持有 windowId 的节点（窗口或由窗口降级的分组），否则写顶层窗口
+        const owner = windowIdOwner(m, id) || topWindowOf(m, id);
+        if (owner && owner.windowId !== res.windowId) {
+          owner.windowId = res.windowId;
+          dirty = true;
+        }
+      }
+      if (dirty) await store.saveModel(m);
       await refreshOpen();
-      toast(res.focused ? "已聚焦已打开网页" : "已打开网页");
+      toast(res.focused ? "已聚焦已打开网页" : res.rebound ? "已新建窗口并打开网页" : "已打开网页");
     } catch (err) {
       say("打开失败：" + err.message);
     }
@@ -472,20 +511,27 @@ export async function bootShell(root) {
         toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
         return true;
       }
-      // R4 / N1：窗口拖到分组上 → 变成该分组的子分组（L1 → L2，支持来回转换）；
-      // 窗口拖到标签上 → 转为该标签所在分组（若标签直挂窗口则不支持）。
-      if (targetKind === "group" || (targetKind === "leaf" && target.parentId)) {
-        const destGroup = targetKind === "group" ? targetId : target.parentId;
-        const rule = conversionRule(m, srcId, "group", destGroup);
-        if (rule.op !== "window→group") {
-          toast(rule.reason || "不能转入该分组");
+      // R4 / N1 / F4（m11442）：窗口拖到分组上 → 变成该分组的子分组；
+      // 窗口拖到标签上 → 转为该标签所在容器下的分组（直挂窗口的标签 → 该窗口下的分组）。
+      if (targetKind === "group" || targetKind === "leaf" || targetKind === "window") {
+        // 目标容器：分组 → 自身；标签 → 其父容器；窗口 → 该窗口（转为窗口下的分组）
+        const destContainer =
+          targetKind === "group" ? targetId : targetKind === "window" ? targetId : target.parentId;
+        if (!destContainer) {
+          toast("不支持该放置位置");
           return false;
         }
-        // 插到落点分组之后（同级相邻），并展开源与目标，让转出的子组立刻可见
-        if (turnWindowIntoGroup(m, srcId, destGroup, destGroup)) {
+        const rule = conversionRule(m, srcId, "group", destContainer);
+        if (rule.op !== "window→group") {
+          toast(rule.reason || "不能转入该容器");
+          return false;
+        }
+        // 插到落点之后（同级相邻），并展开源与目标，让转出的子组立刻可见
+        if (turnWindowIntoGroupUnder(m, srcId, destContainer, destContainer)) {
           collapsed.delete(srcId);
-          collapsed.delete(destGroup);
-          toast(`「${titleOf(srcId)}」已转为分组（L2）并挂到「${titleOf(destGroup)}」下`);
+          collapsed.delete(destContainer);
+          const host = findNode(m, destContainer);
+          toast(`「${titleOf(srcId)}」已转为分组（L2）并挂到「${titleOf(host)}」下`);
           return true;
         }
         toast("不能转入自身子组");
@@ -495,6 +541,48 @@ export async function bootShell(root) {
       return false;
     }
     return false;
+  };
+
+  // F5（m11442）：折叠分组拖拽悬停 600ms 自动展开——只重建该分组的
+  // .node-children 内容，不整树重渲染，避免拖拽源元素被销毁导致拖到一半中断。
+  let hoverExpandTimer = null;
+  let hoverExpandId = null;
+  const clearHoverExpand = () => {
+    if (hoverExpandTimer) clearTimeout(hoverExpandTimer);
+    hoverExpandTimer = null;
+    hoverExpandId = null;
+  };
+  const maybeHoverExpand = (hit) => {
+    if (!hit || hit.kind !== "group") {
+      clearHoverExpand();
+      return;
+    }
+    const node = findNode(m, hit.id);
+    if (!node || !collapsed.has(hit.id)) {
+      clearHoverExpand();
+      return;
+    }
+    if (hoverExpandId === hit.id && hoverExpandTimer) return;
+    clearHoverExpand();
+    hoverExpandId = hit.id;
+    hoverExpandTimer = setTimeout(() => {
+      hoverExpandTimer = null;
+      if (!collapsed.has(hit.id)) return;
+      collapsed.delete(hit.id);
+      const nodeEl = body.querySelector(`.node[data-id="${hit.id}"]`);
+      const kids = nodeEl && nodeEl.querySelector(":scope > .node-children");
+      if (kids) {
+        const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
+        kids.innerHTML = renderChildrenInner(view, hit.id, {
+          openIds,
+          favicons,
+          linkShow: !!settings.linkShow,
+          selectedId,
+          collapsed,
+        });
+        body.classList.toggle("show-link", !!settings.linkShow);
+      }
+    }, 600);
   };
 
   const clearDragMarks = () => {
@@ -518,14 +606,20 @@ export async function bootShell(root) {
   });
   body.addEventListener("dragend", () => {
     clearDragMarks();
+    clearHoverExpand();
     dragSrc = null;
     dragOver = null;
+  });
+  body.addEventListener("dragleave", (e) => {
+    // 离开拖拽区域时取消悬停展开计时（避免拖出后仍偷偷展开）
+    if (!body.contains(e.relatedTarget)) clearHoverExpand();
   });
   body.addEventListener("dragover", (e) => {
     if (!dragSrc) return;
     const hit = resolveDrop(e.target);
     if (!hit) {
       dragOver = null;
+      clearHoverExpand();
       clearDragMarks();
       return;
     }
@@ -536,6 +630,7 @@ export async function bootShell(root) {
     dragOver = hit;
     body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
     hit.row.classList.add("dragover");
+    maybeHoverExpand(hit);
   });
   body.addEventListener("drop", async (e) => {
     if (!dragSrc) return;
@@ -545,6 +640,7 @@ export async function bootShell(root) {
     // 优先用 dragover 缓存的落点（与用户看到的虚线框一致），没有则现场解析
     const hit = dragOver || resolveDrop(e.target);
     clearDragMarks();
+    clearHoverExpand();
     dragSrc = null;
     dragOver = null;
     if (!hit) return;

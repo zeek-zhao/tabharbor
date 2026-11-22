@@ -26,8 +26,11 @@ export function buildModel() {
   return { windows: [], groups: [], tabs: [] };
 }
 
-export function addWindow(m, title, id) {
+// F1（m11442）：窗口节点可携带可选 windowId（真实 Chrome 窗口句柄）。
+// 只作「回到现场」的绑定依据，不参与类型/归属判定（类型仍只看 kind + 数组归属）。
+export function addWindow(m, title, id, windowId) {
   const node = { id: id || newId("w"), kind: "window", title, collapsed: false };
+  if (windowId != null) node.windowId = windowId;
   m.windows.push(node);
   return node;
 }
@@ -59,6 +62,30 @@ export function findNode(m, id) {
     if (hit) return hit;
   }
   return null;
+}
+
+// F2（m11442）：真实窗口绑定的查找。windowId 可能落在窗口节点上（正常窗口），
+// 也可能落在由窗口降级而来的分组上（窗口→分组保留绑定）。向上取最近持有者。
+export function windowIdOwner(m, id) {
+  let cur = findNode(m, id);
+  while (cur) {
+    if (cur.windowId != null) return cur;
+    cur = cur.parentId ? findNode(m, cur.parentId) : null;
+  }
+  return null;
+}
+
+// 节点所属的真实浏览器窗口句柄；未绑定（离线窗口/纯整理数据）返回 null。
+export function boundWindowId(m, id) {
+  const owner = windowIdOwner(m, id);
+  return owner ? owner.windowId : null;
+}
+
+// 节点所在的 L1 顶层窗口（沿 parentId 上溯到根）；不在窗口下时返回 null。
+export function topWindowOf(m, id) {
+  let cur = findNode(m, id);
+  while (cur && cur.parentId) cur = findNode(m, cur.parentId);
+  return cur && cur.kind === "window" ? cur : null;
 }
 
 // 直接子节点（分组在前、标签在后，与渲染序一致）
@@ -159,29 +186,39 @@ export function turnGroupIntoWindow(m, groupId, insertAfterWindowId) {
 
 // R4 / N1：窗口拖入分组 → 变成该分组的子分组（L1 → L2，子树随行，id 不变）。
 // 目标分组不得位于被拖窗口子树内（防自嵌套，L1 语义校验）。
+// F3（m11442）：保留 w.windowId —— 窗口降级为分组后，其下标签双击仍回到原真实窗口；
+// 若该分组日后又转回窗口（turnGroupIntoWindow），绑定自动恢复，往返不丢「回到现场」能力。
 export function turnWindowIntoGroup(m, windowId, targetGroupId, insertAfterGroupId) {
-  const w = m.windows.find((n) => n.id === windowId);
   const t = m.groups.find((n) => n.id === targetGroupId);
+  if (!t) return false;
+  return turnWindowIntoGroupUnder(m, windowId, targetGroupId, insertAfterGroupId);
+}
+
+// F4（m11442）：窗口可降到「窗口」或「分组」下——修掉「窗口拖到直挂窗口的标签上没反应」。
+// parentId 允许为窗口（该窗口下的分组，保持 L2 语义）或分组（子分组）。
+export function turnWindowIntoGroupUnder(m, windowId, parentId, insertAfterId) {
+  const w = m.windows.find((n) => n.id === windowId);
+  const parent = findNode(m, parentId);
   if (
     !w ||
     w.kind !== "window" ||
-    !t ||
-    t.kind !== "group" ||
+    !parent ||
+    parent.kind === "tab" ||
     !kindConsistent(m, windowId) ||
-    !kindConsistent(m, targetGroupId)
+    !kindConsistent(m, parentId)
   ) {
     return false;
   }
-  let cur = t;
+  let cur = parent;
   while (cur) {
-    if (cur.id === w.id) return false;
+    if (cur.id === w.id) return false; // 不能降到自身子树里
     cur = cur.parentId ? findNode(m, cur.parentId) : null;
   }
   w.kind = "group";
-  w.parentId = targetGroupId; // 降为 L1 内分组
+  w.parentId = parentId; // 降为 L2 分组（父可以是窗口或分组）
   m.windows.splice(m.windows.indexOf(w), 1);
-  // N1 修正：插到落点分组之后（同级相邻），让"拖到哪儿就出现在哪儿"，来回拖拽可连续进行。
-  const at = insertAfterGroupId ? m.groups.findIndex((g) => g.id === insertAfterGroupId) : -1;
+  // N1 修正：插到落点之后（同级相邻），让"拖到哪儿就出现在哪儿"，来回拖拽可连续进行。
+  const at = insertAfterId ? m.groups.findIndex((g) => g.id === insertAfterId) : -1;
   if (at >= 0) m.groups.splice(at + 1, 0, w);
   else m.groups.push(w);
   return true;

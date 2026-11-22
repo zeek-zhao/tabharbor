@@ -57,7 +57,10 @@ export function conversionRule(m, srcId, targetKind, targetId) {
     return { op: "group→window", reason: "" };
   }
   if (srcKind === "window" && targetKind === "group") {
-    const target = m.groups.find((g) => g.id === targetId);
+    // F4（m11442）：目标可以是分组（子分组），也可以是窗口（该窗口下的分组）——
+    // 「窗口拖到直挂窗口的标签上」时父容器就是那个窗口，不能因此判成非法落点。
+    const target =
+      m.groups.find((g) => g.id === targetId) || m.windows.find((w) => w.id === targetId);
     if (!target) return { op: null, reason: "目标不是分组" };
     // 沿 parentId 上溯，目标不得位于被转窗口子树内
     let cur = target;
