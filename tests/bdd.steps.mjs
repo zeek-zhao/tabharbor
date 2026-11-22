@@ -453,10 +453,6 @@ step("当", "把标签 {} 拖入 {}（容器）", (dragTitle, targetTitle) => {
   ctx.dropOk = model.moveLeafInto(ctx.m, freshByTitle(dragTitle).id, freshByTitle(targetTitle).id);
 });
 
-step("当", "把窗口 {} 合并到窗口 {}", (srcTitle, targetTitle) => {
-  ctx.dropOk = model.mergeWindows(ctx.m, freshByTitle(srcTitle).id, freshByTitle(targetTitle).id);
-});
-
 /* ---------- P0（m11790）：拖拽&互转断点修复 ---------- */
 step("当", "把窗口 {} 拖到窗口 {} 内部（降级为子组）", (srcTitle, targetTitle) => {
   const w = freshByTitle(srcTitle);
@@ -515,10 +511,18 @@ step("当", "把窗口 {} 拖到直挂标签 {} 所在窗口（转为分组）",
   ctx.dropOk = model.turnWindowIntoGroupUnder(ctx.m, w.id, tab.parentId, tab.parentId);
 });
 
-step("那么", "分组 {} 保留 windowId {}", (title, wid) => {
+// D7（评审稿 2026-11-22）：降级组不保留 windowId，绑定转给所属根窗口
+step("那么", "分组 {} 无 windowId 绑定", (title) => {
   const node = freshByTitle(title);
-  if (node.kind !== "group" || node.windowId !== Number(wid)) {
-    throw new Error(`${title} 应保留 windowId=${wid}，实际 ${node.windowId}`);
+  if (node.kind !== "group" || node.windowId != null) {
+    throw new Error(`${title} 降级为组后应清空 windowId，实际 ${node.windowId}`);
+  }
+});
+
+step("那么", "窗口 {} 的 windowId 为 {}", (title, wid) => {
+  const node = freshByTitle(title);
+  if (node.kind !== "window" || node.windowId !== Number(wid)) {
+    throw new Error(`${title} 应绑定 windowId=${wid}，实际 ${node.windowId}`);
   }
 });
 
@@ -1535,6 +1539,37 @@ step("那么", "渲染的树视图不包含 {}", (title) => {
 step("那么", "渲染的树视图包含 {}", (title) => {
   const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
   if (!html.includes(`>${title}<`)) throw new Error(`渲染视图缺 ${title}`);
+});
+
+// D5（评审稿 2026-11-22）：窗口折叠后子树不进 DOM，展开后恢复
+step("假如", "折叠了窗口 {}", (title) => {
+  const w = freshByTitle(title);
+  ctx.collapsed = editOp.collapsedToggle(ctx.collapsed || new Set(), w.id);
+});
+
+step("当", "展开了窗口 {}", (title) => {
+  const w = freshByTitle(title);
+  ctx.collapsed = editOp.collapsedToggle(ctx.collapsed || new Set(), w.id);
+});
+
+step("那么", "树视图不包含标签 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (html.includes(`>${title}<`)) throw new Error(`折叠窗口下不应含标签 ${title}`);
+});
+
+step("那么", "树视图不包含分组 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (html.includes(`>${title}<`)) throw new Error(`折叠窗口下不应含分组 ${title}`);
+});
+
+step("那么", "树视图包含标签 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (!html.includes(`>${title}<`)) throw new Error(`展开后应含标签 ${title}`);
+});
+
+step("那么", "树视图包含分组 {}", (title) => {
+  const html = render.renderTree(ctx.m, { collapsed: ctx.collapsed || new Set() });
+  if (!html.includes(`>${title}<`)) throw new Error(`展开后应含分组 ${title}`);
 });
 
 /* ---------- M3-1 书签导入导出（09_import_export.feature，FR-031~038，issue #27） ---------- */

@@ -89,3 +89,14 @@
      并且 标签 "GitHub" 的行显示浏览器图标 "fav-github"
      并且 节点 "邮件" 的行包含 "status-dot"
      并且 "src/assets/m2.css" 包含 ".leaf .status-dot.on"
+
+   场景: D5 窗口折叠后直属标签与所有子组不进 DOM，展开后恢复
+      假如 折叠了窗口 "手工窗口"
+      当 渲染树视图
+      那么 树视图不包含标签 "MDN IndexedDB"
+      并且 树视图不包含分组 "开发"
+      并且 "src/ui/render.js" 包含 "opts.collapsed.has(w.id)"
+      当 展开了窗口 "手工窗口"
+      当 渲染树视图
+      那么 树视图包含标签 "MDN IndexedDB"
+      并且 树视图包含分组 "开发"

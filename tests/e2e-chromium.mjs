@@ -580,6 +580,17 @@ try {
   // —— N1（m10950 / 修正 m11263）：分组 ↔ 窗口连续来回互转 ——
   // g_design（学习与研究 下的分组）→ 拖到 w_work 转窗口 → 拖到 g_project 转分组，
   // 如此连续四次；每步都断言 storage 的「数组归属 / kind / parentId / 位次 / 子树 / id」。
+  // 先重播种样例，避免前面段（打开网页/折叠/拖拽）留下的脏状态影响互转起点。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(
+    () => !!document.querySelector('.node[data-id="g_design"] > .node-row'),
+    undefined,
+    { timeout: 10000 }
+  );
   const convState = () =>
     win.evaluate(async () => {
       const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
@@ -776,8 +787,8 @@ try {
   assert.ok(winIdPersist, "F2 windowId 无法持久化到 storage");
   console.log("E2E F2 windowId 持久化通过");
 
-  // ---- P0（m11790）：拖拽&互转断点修复 E2E ----
-  // P0-A：窗口拖到另一窗口「内部空白区」→ 降级为子组（不合并）；拖到窗口「行」→ 合并
+  // ---- P0（m11790）+ 评审稿 D1-D10（2026-11-22）：拖拽&互转 E2E ----
+  // D2/D4：窗口拖到另一窗口（行或内部）一律降级为子组，不再合并
   await win.evaluate(() => {
     const winA = document.querySelector('.node[data-id="w_work"] > .node-children');
     const winB = document.querySelector('.node[data-id="w_study"] > .node-row');
@@ -814,6 +825,64 @@ try {
     assert.ok(promoted.isWindow && promoted.notGroup, "P0-B 组拖到 R1 空白区未升窗");
     console.log("E2E P0-B 组→顶层空白升窗通过");
   }
+
+  // D5（评审稿）：窗口折叠后子树不进 DOM，再次单击展开恢复
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_work"] > .node-row'));
+  const workRow = win.locator('.node[data-id="w_work"] > .node-row').first();
+  await workRow.click();
+  await win.waitForTimeout(150);
+  const folded = await win.evaluate(() => {
+    const workNode = document.querySelector('.node[data-id="w_work"]');
+    return {
+      hasCollapsed: !!workNode && workNode.classList.contains("collapsed"),
+      hasChildren: !!workNode?.querySelector(".node-children .leaf, .node-children .group-name"),
+    };
+  });
+  assert.ok(folded.hasCollapsed && !folded.hasChildren, "D5 窗口折叠后子树仍在 DOM");
+  await workRow.click();
+  await win.waitForTimeout(150);
+  const unfolded = await win.evaluate(() => {
+    const workNode = document.querySelector('.node[data-id="w_work"]');
+    return {
+      hasCollapsed: !!workNode && workNode.classList.contains("collapsed"),
+      hasChildren: !!workNode?.querySelector(".node-children .leaf"),
+    };
+  });
+  assert.ok(!unfolded.hasCollapsed && unfolded.hasChildren, "D5 窗口展开后子树未恢复");
+  console.log("E2E D5 窗口折叠/展开子树可见性通过");
+
+  // D4/D2（评审稿）：窗口拖到另一窗口统一降级，不再合并
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_study"] > .node-row'));
+  const srcRow = win.locator('.node[data-id="w_study"] > .node-row').first();
+  const dstRow = win.locator('.node[data-id="w_work"] > .node-row').first();
+  if ((await srcRow.count()) && (await dstRow.count())) {
+    await srcRow.dragTo(dstRow);
+    await win.waitForTimeout(300);
+    const demoted = await win.evaluate(async () => {
+      const d = await chrome.storage.local.get(["windows", "groups"]);
+      return {
+        srcWindowGone: !d.windows.some((w) => w.id === "w_study"),
+        srcIsGroup: d.groups.some((g) => g.id === "w_study" && g.parentId === "w_work"),
+        dstWindowAlive: d.windows.some((w) => w.id === "w_work"),
+      };
+    });
+    assert.ok(
+      demoted.srcWindowGone && demoted.srcIsGroup && demoted.dstWindowAlive,
+      "D2/D4 窗口拖到窗口未降级为子组（或错误执行了合并）"
+    );
+    console.log("E2E D2/D4 窗口→窗口降级（无合并）通过");
+  }
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

@@ -21,7 +21,6 @@ import {
   moveLeafAfter,
   moveLeafInto,
   moveNode,
-  mergeWindows,
   turnGroupIntoWindow,
   turnWindowIntoGroup,
   turnWindowIntoGroupUnder,
@@ -30,7 +29,7 @@ import {
   windowIdOwner,
   topWindowOf,
 } from "../core/model.js";
-import { conversionRule, kindByMembership } from "../core/levels.js";
+import { conversionRule, kindByMembership, rejection } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
@@ -507,6 +506,7 @@ export async function bootShell(root) {
     // 模型为唯一事实源：srcKind 以数组归属反推为准
     srcKind = dragKindOf(srcId, srcKind);
     // P0-B：根 R1 空白区——组拖到这里升为独立窗口
+    // D9（评审稿）：拒绝时模型零变更，toast 带可诊断信息
     if (targetKind === "root") {
       if (srcKind === "group") {
         if (promoteGroupToTopWindow(m, srcId)) {
@@ -514,15 +514,22 @@ export async function bootShell(root) {
           toast(`「${titleOf(srcId)}」已升级为独立窗口（R1）`);
           return true;
         }
-        toast("该分组不能升级为窗口");
+        toast(
+          rejection(
+            m,
+            "该分组不能升级为窗口（不在 groups 数组 / kind 不一致 / 已是顶层）",
+            srcId,
+            null
+          ).reason
+        );
         return false;
       }
-      toast("不支持该位置");
+      toast(rejection(m, "不支持该位置（标签/窗口不能拖到 R1 空白区）", srcId, null).reason);
       return false;
     }
     targetKind = dragKindOf(targetId, targetKind);
     if (!srcKind || !targetKind) {
-      toast("拖拽对象已不存在，请刷新后重试");
+      toast(rejection(m, "拖拽对象已不存在，请刷新后重试", srcId, targetId).reason);
       return false;
     }
     const src = findNode(m, srcId);
@@ -561,7 +568,7 @@ export async function bootShell(root) {
       if (targetKind === "window") {
         const rule = conversionRule(m, srcId, "window", targetId);
         if (rule.op !== "group→window") {
-          toast(rule.reason || "不能转为窗口");
+          toast(rejection(m, rule.reason || "不能转为窗口", srcId, targetId).reason);
           return false;
         }
         // 插到落点窗口之后（不是一律追加到末尾），并展开自身，保证来回拖拽连续可见
@@ -586,15 +593,8 @@ export async function bootShell(root) {
       return false;
     }
     if (srcKind === "window") {
-      // P0-A（m11790）：窗口→窗口两种落点——
-      // ①落到窗口「行」= 合并窗口（保留既有语义）；
-      // ②落到窗口「内部空白区」(inner=true) = 降级为该窗口下的子组。
-      if (targetKind === "window" && !dropMeta.inner) {
-        if (mergeWindows(m, srcId, targetId)) {
-          toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
-          return true;
-        }
-      }
+      // D2/D4（评审稿 2026-11-22）：窗口→窗口（行或内部）一律降级为子组，
+      // 合并窗口入口彻底移除，不再区分 inner；按 Q-A 裁决推翻 m11790 合并行为。
       // R4 / N1 / F4（m11442）：窗口拖到分组上 → 变成该分组的子分组；
       // 窗口拖到标签上 → 转为该标签所在容器下的分组（直挂窗口的标签 → 该窗口下的分组）。
       // P0-A：窗口拖到窗口内部（inner=true）→ 降级为该窗口下的分组。
@@ -608,7 +608,7 @@ export async function bootShell(root) {
         }
         const rule = conversionRule(m, srcId, "group", destContainer);
         if (rule.op !== "window→group") {
-          toast(rule.reason || "不能转入该容器");
+          toast(rejection(m, rule.reason || "不能转入该容器", srcId, destContainer).reason);
           return false;
         }
         // 插到落点之后（同级相邻），并展开源与目标，让转出的子组立刻可见

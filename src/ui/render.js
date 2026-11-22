@@ -1,7 +1,8 @@
 // TH2 共享渲染入口（FR-001：双模式复用同一渲染函数、同一数据源）
 // #30 对齐原型 v16 树标记：.node > .node-row(.tri + 名称 + .row-ops 复制) + .node-children；
 // 标签为 .leaf(.dot + .title + .link + .note + copy-x + close-x 仅已开)。
-// 折叠（FR-013）：折叠的分组不渲染子树（与原型 display:none 等效，DOM 更小）。
+// 折叠（FR-013 / D5 评审稿）：折叠的窗口或分组都不渲染子树（与原型 display:none 等效，DOM 更小）。
+// 窗口折叠时其直属标签与所有子组全部隐藏，展开后恢复。
 // opts：openIds（align 派生）、linkShow、selectedId、collapsed（Set，折叠派生视图态）
 // R8（m10454）：图标放大（12→14px）并加深（颜色由 CSS --fg1 控制）
 // N3（m10950）：标签前缀显示「浏览器标签页自身图标」（favicon）。派生数据由 shell
@@ -20,7 +21,12 @@ export function renderTree(m, opts = {}) {
   const out = [];
   for (const w of m.windows) {
     out.push(containerOpen(w, opts, 0));
-    out.push(childrenBlock(m, w.id, opts, 1));
+    // D5（评审稿）：窗口与分组共用折叠规则——折叠的窗口子树不进 DOM
+    if (opts.collapsed && opts.collapsed.has(w.id)) {
+      out.push(`<div class="node-children"></div>`);
+    } else {
+      out.push(childrenBlock(m, w.id, opts, 1));
+    }
     out.push(`</div>`);
   }
   return out.join("");
@@ -49,6 +55,8 @@ function childrenInner(m, parentId, opts, depth) {
     }
     out += `</div>`;
   }
+  // D5：折叠容器的直属标签同样隐藏——childrenInner 只在容器未折叠时被调用，
+  // 窗口/分组折叠分支都输出空 .node-children，因此这里无需额外判断。
   for (const t of tabs) out += leafRow(t, opts);
   return out;
 }

@@ -151,15 +151,6 @@ export function moveLeafInto(m, dragId, newParentId) {
   return true;
 }
 
-// P0-A（m11790）：窗口拖到窗口的两种落点要区分——
-// ①落到窗口「行」= 合并窗口（mergeWindows，既有语义）；
-// ②落到窗口「内部空白区」= 降级为子组挂到该窗口下（turnWindowIntoGroupUnder）。
-// 壳层通过落点是否位于 .node-children（或专门的 R1 dropzone）区分这两种，
-// 模型层提供两个明确的入口与锚点计算，互不覆盖。
-export function mergeWindowsAt(m, srcId, targetId) {
-  return mergeWindows(m, srcId, targetId);
-}
-
 // P0-B（m11790）：组/标签拖到根 R1 空白区 → 自动升级为独立窗口。
 // 仅对「已经在 groups 数组里、kind=group、非顶层」的节点生效；标签不自动升窗（标签须有容器）。
 // 新窗口沿用原节点 id 与子树，插到窗口列表末尾（空白区无锚点，追加即自然顺序）。
@@ -169,18 +160,8 @@ export function promoteGroupToTopWindow(m, groupId) {
   return turnGroupIntoWindow(m, groupId, null);
 }
 
-// M2（FR-031）：窗口合并——源窗口分组与直属标签并入目标窗口，源窗口移除
-export function mergeWindows(m, srcId, targetId) {
-  const src = findNode(m, srcId);
-  const target = findNode(m, targetId);
-  if (!src || src.kind !== "window" || !target || target.kind !== "window" || srcId === targetId) {
-    return false;
-  }
-  for (const g of m.groups) if (g.parentId === srcId) g.parentId = targetId;
-  for (const t of m.tabs) if (t.parentId === srcId) t.parentId = targetId;
-  m.windows.splice(m.windows.indexOf(src), 1);
-  return true;
-}
+// D4（评审稿 2026-11-22）：合并窗口能力彻底移除——窗口拖到窗口统一降级为子组，
+// 不再提供 mergeWindows / mergeWindowsAt 入口，BDD/E2E 合并用例一并清理。
 
 // R4（m10454）/ N1（m10950）：分组 ↔ 窗口互转。
 // 识别依据 = L1 结构（顶层为窗口，L1 内为分组），见 core/levels.js；
@@ -214,6 +195,8 @@ export function turnWindowIntoGroup(m, windowId, targetGroupId, insertAfterGroup
 
 // F4（m11442）：窗口可降到「窗口」或「分组」下——修掉「窗口拖到直挂窗口的标签上没反应」。
 // parentId 允许为窗口（该窗口下的分组，保持 L2 语义）或分组（子分组）。
+// D7（评审稿 2026-11-22）：降级后原 windowId 转给「所属根窗口」（沿 parentId 上溯），
+// 降级组自身清空绑定；tabId 不变、网页不关不重开。
 export function turnWindowIntoGroupUnder(m, windowId, parentId, insertAfterId) {
   const w = m.windows.find((n) => n.id === windowId);
   const parent = findNode(m, parentId);
@@ -232,8 +215,17 @@ export function turnWindowIntoGroupUnder(m, windowId, parentId, insertAfterId) {
     if (cur.id === w.id) return false; // 不能降到自身子树里
     cur = cur.parentId ? findNode(m, cur.parentId) : null;
   }
+  // D7：降级完成后按裁决 Q-C，把源 windowId 转给降级后所属的根窗口；
+  // 降级组清空绑定（分组不持有 windowId），标签 tabId 全程不动。
+  const transferredWindowId = w.windowId;
   w.kind = "group";
   w.parentId = parentId; // 降为 L2 分组（父可以是窗口或分组）
+  if (transferredWindowId != null) {
+    delete w.windowId;
+    let root = parent;
+    while (root && root.parentId) root = findNode(m, root.parentId) || root;
+    if (root && root.kind === "window") root.windowId = transferredWindowId;
+  }
   m.windows.splice(m.windows.indexOf(w), 1);
   // N1 修正：插到落点之后（同级相邻），让"拖到哪儿就出现在哪儿"，来回拖拽可连续进行。
   // P0-C（m11790）：锚点可能是「窗口 id」（父节点是 Window 时，落点不是 group）。

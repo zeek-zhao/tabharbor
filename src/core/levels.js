@@ -49,7 +49,14 @@ export function isTopLevel(m, id) {
 // 返回 { op, reason }；op ∈ "group→window" | "window→group" | null。
 export function conversionRule(m, srcId, targetKind, targetId) {
   const srcKind = kindByMembership(m, srcId);
-  if (!srcKind || !kindConsistent(m, srcId)) return { op: null, reason: "源节点类型不一致" };
+  if (!srcKind || !kindConsistent(m, srcId)) {
+    // D9（评审稿 2026-11-22）：拒绝提示要可诊断——带出源 id / 所属数组 / kind 字段。
+    const node = findAny(m, srcId);
+    const diag = node
+      ? `id=${srcId}，所属数组=${BUCKETS[srcKind] || "无"}，kind=${node.kind}`
+      : `id=${srcId}，所属数组=无，节点不存在`;
+    return { op: null, reason: `源节点类型不一致（${diag}）` };
+  }
   if (srcKind === "group" && targetKind === "window") {
     const target = m.windows.find((w) => w.id === targetId);
     if (!target) return { op: null, reason: "目标不是窗口" };
@@ -79,4 +86,16 @@ function findAny(m, id) {
     if (hit) return hit;
   }
   return null;
+}
+
+// D9（评审稿）：构造「模型零变更」拒绝结果，附源/目标诊断快照。
+// 壳层用它替代裸 toast，保证校验失败时既不换父、不改 kind、也不移动 DOM。
+export function rejection(m, reason, srcId, targetId) {
+  const describe = (id) => {
+    if (!id) return "无";
+    const bucket = kindByMembership(m, id);
+    const node = findAny(m, id);
+    return `id=${id}，数组=${bucket || "无"}，kind=${node?.kind ?? "无"}`;
+  };
+  return { ok: false, reason: `${reason}（源：${describe(srcId)}；目标：${describe(targetId)}）` };
 }
