@@ -445,8 +445,8 @@ step("当", "把分组 {} 拖到窗口 {} 上（转为窗口）", (groupTitle, w
   if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
   const w = freshByTitle(winTitle);
   if (w.kind !== "window") throw new Error(`${winTitle} 不是窗口`);
-  model.turnGroupIntoWindow(ctx.m, g.id);
-  ctx.dropOk = true;
+  // 落点窗口作为插入锚点：转出的窗口插到它之后（与壳层 applyDrop 一致）
+  ctx.dropOk = model.turnGroupIntoWindow(ctx.m, g.id, w.id);
 });
 
 step("当", "把窗口 {} 拖到分组 {} 上（转为分组）", (winTitle, groupTitle) => {
@@ -454,7 +454,8 @@ step("当", "把窗口 {} 拖到分组 {} 上（转为分组）", (winTitle, gro
   if (w.kind !== "window") throw new Error(`${winTitle} 不是窗口`);
   const g = freshByTitle(groupTitle);
   if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
-  ctx.dropOk = model.turnWindowIntoGroup(ctx.m, w.id, g.id);
+  // 落点分组作为插入锚点：转出的分组插到它之后（与壳层 applyDrop 一致）
+  ctx.dropOk = model.turnWindowIntoGroup(ctx.m, w.id, g.id, g.id);
 });
 
 step("那么", "{} 是窗口节点", (title) => {
@@ -468,6 +469,46 @@ step("那么", "{} 是分组节点", (title) => {
   const node = freshByTitle(title);
   if (node.kind !== "group" || !ctx.m.groups.includes(node)) {
     throw new Error(`${title} 应为分组节点`);
+  }
+});
+
+/* ---------- 场景组：N1 修正（m11263）连续来回互转的稳定性断言 ---------- */
+const recordNodeId = (title) => {
+  ctx.savedId = freshByTitle(title).id;
+};
+step("假如", "记录节点 {} 的 id", recordNodeId);
+step("当", "记录节点 {} 的 id", recordNodeId);
+
+step("那么", "节点 {} 的 id 与记录一致", (title) => {
+  const node = freshByTitle(title);
+  if (node.id !== ctx.savedId) {
+    throw new Error(`${title} 的 id 变了：${ctx.savedId} → ${node.id}（互转必须保持 id 不变）`);
+  }
+});
+
+step("那么", "{} 有 {} 个子节点", (title, n) => {
+  const node = freshByTitle(title);
+  const kids = model.childrenOf(ctx.m, node.id);
+  if (kids.length !== Number(n)) {
+    throw new Error(`${title} 子节点数=${kids.length} ≠ ${n}（子树必须随行）`);
+  }
+});
+
+step("那么", "{} 在其所属数组中排第 {} 位", (title, pos) => {
+  const node = freshByTitle(title);
+  const kind = kindByMembership(ctx.m, node.id);
+  const arr = kind === "window" ? ctx.m.windows : kind === "group" ? ctx.m.groups : ctx.m.tabs;
+  const at = arr.indexOf(node) + 1;
+  if (at !== Number(pos)) {
+    throw new Error(`${title} 在 ${kind} 数组中的位次=${at} ≠ ${pos}（落点应稳定在拖放位置附近）`);
+  }
+});
+
+step("那么", "{} 的 kind 与数组归属一致", (title) => {
+  const node = freshByTitle(title);
+  const kind = kindByMembership(ctx.m, node.id);
+  if (!kind || node.kind !== kind) {
+    throw new Error(`${title} kind=${node.kind} 与数组归属=${kind} 不一致`);
   }
 });
 

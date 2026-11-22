@@ -19,7 +19,7 @@ import {
   turnGroupIntoWindow,
   turnWindowIntoGroup,
 } from "../core/model.js";
-import { conversionRule } from "../core/levels.js";
+import { conversionRule, kindByMembership } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
 
 // FR-045/054：主题解析——仅接受 light，其余（含缺省）一律深色
@@ -374,10 +374,39 @@ export async function bootShell(root) {
   // ---- #31 拖拽（FR-025~032）：leaf/group/window 全层级事件委托 ----
   const titleOf = (id) => findNode(m, id)?.title || "";
   let dragSrc = null; // { id, kind: "leaf"|"group"|"window" }
+  let dragOver = null; // 本次 dragover 解析出的落点 { id, kind, row }（与 drop 复用，避免两处解析不一致）
+
+  // N1 修正：拖拽类型一律以「模型 kind + 数组归属」为准（levels.kindByMembership），
+  // 不信任 DOM data-kind（重渲染/互转后可能读到旧值）。DOM 仅作兜底。
+  // 模型里标签的 kind 是 "tab"，落点分支用的是 "leaf"，这里统一归一化（避免两套词表打架）。
+  const dragKindOf = (id, fallback) => {
+    const k = kindByMembership(m, id) || fallback || null;
+    return k === "tab" ? "leaf" : k;
+  };
+
+  // 落点解析：命中最近的 .leaf / .node；找不到时回落到最近容器（拖到容器空白区也有效）
+  const resolveDrop = (node) => {
+    if (!node || typeof node.closest !== "function") return null;
+    const el = node.closest(".leaf, .node");
+    if (!el) return null;
+    const id = el.dataset.id;
+    if (!id) return null;
+    const kind = el.classList.contains("leaf") ? "leaf" : dragKindOf(id, el.dataset.kind);
+    // 高亮只落在「行」上（整棵 .node 会连子树一起高亮，视觉上像落点很大/乱跳）
+    const row = el.classList.contains("leaf") ? el : el.querySelector(":scope > .node-row") || el;
+    return { id, kind, row };
+  };
 
   // 落点规则（原型 dropTo）：返回是否发生移动（已含 toast 文案）
   const applyDrop = async (srcId, srcKind, targetKind, targetId) => {
     if (!srcId || srcId === targetId) return false;
+    // 模型为唯一事实源：srcKind 以数组归属反推为准
+    srcKind = dragKindOf(srcId, srcKind);
+    targetKind = dragKindOf(targetId, targetKind);
+    if (!srcKind || !targetKind) {
+      toast("拖拽对象已不存在，请刷新后重试");
+      return false;
+    }
     const src = findNode(m, srcId);
     const target = findNode(m, targetId);
     if (!src || !target) return false;
@@ -417,8 +446,10 @@ export async function bootShell(root) {
           toast(rule.reason || "不能转为窗口");
           return false;
         }
-        if (turnGroupIntoWindow(m, srcId)) {
-          toast(`「${titleOf(srcId)}」已转为独立窗口`);
+        // 插到落点窗口之后（不是一律追加到末尾），并展开自身，保证来回拖拽连续可见
+        if (turnGroupIntoWindow(m, srcId, targetId)) {
+          collapsed.delete(srcId);
+          toast(`「${titleOf(srcId)}」已转为独立窗口（L1）`);
           return true;
         }
         return false;
@@ -450,8 +481,11 @@ export async function bootShell(root) {
           toast(rule.reason || "不能转入该分组");
           return false;
         }
-        if (turnWindowIntoGroup(m, srcId, destGroup)) {
-          toast(`「${titleOf(srcId)}」已转为分组并挂到「${titleOf(destGroup)}」下`);
+        // 插到落点分组之后（同级相邻），并展开源与目标，让转出的子组立刻可见
+        if (turnWindowIntoGroup(m, srcId, destGroup, destGroup)) {
+          collapsed.delete(srcId);
+          collapsed.delete(destGroup);
+          toast(`「${titleOf(srcId)}」已转为分组（L2）并挂到「${titleOf(destGroup)}」下`);
           return true;
         }
         toast("不能转入自身子组");
@@ -463,12 +497,18 @@ export async function bootShell(root) {
     return false;
   };
 
+  const clearDragMarks = () => {
+    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+    body.querySelectorAll(".dragging").forEach((x) => x.classList.remove("dragging"));
+  };
   body.addEventListener("dragstart", (e) => {
-    const el = e.target.closest(".node, .leaf");
-    if (!el) return;
+    const hit = resolveDrop(e.target);
+    if (!hit) return;
     e.stopPropagation();
-    dragSrc = { id: el.dataset.id, kind: el.dataset.kind === "leaf" ? "leaf" : el.dataset.kind };
-    el.classList.add("dragging");
+    // 拖拽源类型以模型为准（互转后 DOM data-kind 与模型保持一致，但仍以模型为唯一事实源）
+    dragSrc = { id: hit.id, kind: hit.kind };
+    const el = e.target.closest(".leaf, .node");
+    if (el) el.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", dragSrc.id);
@@ -477,28 +517,38 @@ export async function bootShell(root) {
     }
   });
   body.addEventListener("dragend", () => {
-    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
-    body.querySelectorAll(".dragging").forEach((x) => x.classList.remove("dragging"));
+    clearDragMarks();
     dragSrc = null;
+    dragOver = null;
   });
   body.addEventListener("dragover", (e) => {
-    const el = e.target.closest(".node, .leaf");
-    if (!el || !dragSrc) return;
+    if (!dragSrc) return;
+    const hit = resolveDrop(e.target);
+    if (!hit) {
+      dragOver = null;
+      clearDragMarks();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
+    // 落点缓存：drop 直接复用，避免两次解析得到不同目标
+    dragOver = hit;
     body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
-    el.classList.add("dragover");
+    hit.row.classList.add("dragover");
   });
   body.addEventListener("drop", async (e) => {
-    const el = e.target.closest(".node, .leaf");
-    if (!el || !dragSrc) return;
+    if (!dragSrc) return;
     e.preventDefault();
     e.stopPropagation();
-    body.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
     const src = dragSrc;
+    // 优先用 dragover 缓存的落点（与用户看到的虚线框一致），没有则现场解析
+    const hit = dragOver || resolveDrop(e.target);
+    clearDragMarks();
     dragSrc = null;
-    const moved = await applyDrop(src.id, src.kind, el.dataset.kind, el.dataset.id);
+    dragOver = null;
+    if (!hit) return;
+    const moved = await applyDrop(src.id, src.kind, hit.kind, hit.id);
     if (moved) {
       await store.saveModel(m);
       await refreshOpen();

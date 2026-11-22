@@ -577,52 +577,110 @@ try {
   );
   console.log("E2E 14/7 历史跳转 + 置顶 PiP 真实实现（D5/R7 同构树）通过");
 
-  // —— N1（m10950）：分组 ↔ 窗口拖拽互转（真实鼠标拖拽，L1 类型识别）——
-  const initialKind = await win.evaluate(async () => {
-    const d = await chrome.storage.local.get(["windows", "groups"]);
-    return {
-      isGroup: d.groups.some((x) => x.id === "g_design"),
-      isWindow: d.windows.some((x) => x.id === "g_design"),
-      hasWork: d.windows.some((x) => x.id === "w_work"),
-      hasProject: d.groups.some((x) => x.id === "g_project"),
-    };
-  });
-  assert.ok(initialKind.isGroup && !initialKind.isWindow, "g_design 初始应为分组");
-  assert.ok(initialKind.hasWork && initialKind.hasProject, "缺少互转所需落点节点");
-  // group → window（拖到窗口行）
-  await win
-    .locator('.node[data-id="g_design"] > .node-row')
-    .first()
-    .dragTo(win.locator('.node[data-id="w_work"] > .node-row').first());
-  await win.waitForFunction(
-    async () => {
-      const d = await chrome.storage.local.get(["windows", "groups"]);
-      return (
-        d.windows.some((x) => x.id === "g_design") && !d.groups.some((x) => x.id === "g_design")
-      );
-    },
-    undefined,
-    { timeout: 5000 }
+  // —— N1（m10950 / 修正 m11263）：分组 ↔ 窗口连续来回互转 ——
+  // g_design（学习与研究 下的分组）→ 拖到 w_work 转窗口 → 拖到 g_project 转分组，
+  // 如此连续四次；每步都断言 storage 的「数组归属 / kind / parentId / 位次 / 子树 / id」。
+  const convState = () =>
+    win.evaluate(async () => {
+      const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+      const wi = d.windows.findIndex((x) => x.id === "g_design");
+      const gi = d.groups.findIndex((x) => x.id === "g_design");
+      const node = wi >= 0 ? d.windows[wi] : gi >= 0 ? d.groups[gi] : null;
+      return {
+        id: node?.id ?? null,
+        kind: node?.kind ?? null,
+        parentId: node ? (node.parentId ?? null) : null,
+        bucket: wi >= 0 ? "windows" : gi >= 0 ? "groups" : "none",
+        index: wi >= 0 ? wi : gi,
+        winIndex: d.windows.findIndex((x) => x.id === "w_work"),
+        grpIndex: d.groups.findIndex((x) => x.id === "g_project"),
+        children: (d.tabs || [])
+          .filter((t) => t.parentId === "g_design")
+          .map((t) => t.id)
+          .sort(),
+
+        domKind: document.querySelector('.node[data-id="g_design"]')?.dataset.kind ?? null,
+        winCount: d.windows.length,
+        grpCount: d.groups.length,
+        tabCount: (d.tabs || []).length,
+      };
+    });
+
+  const baseline = await convState();
+  assert.strictEqual(baseline.bucket, "groups", "g_design 初始应为分组（groups 数组）");
+  assert.strictEqual(baseline.kind, "group", "g_design 初始 kind 应为 group");
+  assert.ok(
+    baseline.children.length >= 2 && baseline.children.includes("t_design_1"),
+    `初始子树应含 g_design 原有标签（实际：${baseline.children.join(",")}）`
   );
-  assert.ok((await win.textContent("#toast")).includes("已转为独立窗口"), "分组转窗口未提示（N1）");
-  // window → group（拖回分组行，验证来回转换）
-  await win
-    .locator('.node[data-id="g_design"] > .node-row')
-    .first()
-    .dragTo(win.locator('.node[data-id="g_project"] > .node-row').first());
-  await win.waitForFunction(
-    async () => {
-      const d = await chrome.storage.local.get(["windows", "groups"]);
-      const g = d.groups.find((x) => x.id === "g_design");
-      return Boolean(
-        g && g.parentId === "g_project" && !d.windows.some((x) => x.id === "g_design")
-      );
-    },
-    undefined,
-    { timeout: 5000 }
-  );
-  assert.ok((await win.textContent("#toast")).includes("已转为分组"), "窗口转分组未提示（N1）");
-  console.log("E2E N1 分组↔窗口拖拽互转（L1 类型识别 + 来回转换）通过");
+  assert.ok(baseline.winIndex >= 0 && baseline.grpIndex >= 0, "缺少互转所需落点节点");
+
+  // 四次连续拖拽：0/2 拖到窗口（转窗口），1/3 拖到分组（转分组）
+  for (let i = 0; i < 4; i += 1) {
+    const toWindow = i % 2 === 0;
+    const anchor = toWindow ? "w_work" : "g_project";
+    await win
+      .locator('.node[data-id="g_design"] > .node-row')
+      .first()
+      .dragTo(win.locator(`.node[data-id="${anchor}"] > .node-row`).first());
+    const expected = toWindow ? "windows" : "groups";
+    await win.waitForFunction(
+      async ([bucket, anchorId]) => {
+        const d = await chrome.storage.local.get(["windows", "groups"]);
+        const inWin = d.windows.some((x) => x.id === "g_design");
+        const inGrp = d.groups.some((x) => x.id === "g_design");
+        const node =
+          d.windows.find((x) => x.id === "g_design") || d.groups.find((x) => x.id === "g_design");
+        const anchorArr = bucket === "windows" ? d.windows : d.groups;
+        const ai = anchorArr.findIndex((x) => x.id === anchorId);
+        const selfArr = bucket === "windows" ? d.windows : d.groups;
+        const si = selfArr.findIndex((x) => x.id === "g_design");
+        return (
+          (bucket === "windows" ? inWin && !inGrp : inGrp && !inWin) &&
+          Boolean(node) &&
+          node.kind === (bucket === "windows" ? "window" : "group") &&
+          (bucket === "windows" ? node.parentId == null : node.parentId === anchorId) &&
+          si === ai + 1
+        );
+      },
+      [expected, anchor],
+      { timeout: 5000 }
+    );
+
+    const st = await convState();
+    const label = `第 ${i + 1} 步（拖到 ${anchor}）`;
+    // 1) 数组归属切换且互斥（同一时刻只在一个数组里）
+    assert.strictEqual(st.bucket, expected, `${label}：g_design 应只存在于 ${expected} 数组`);
+    // 2) kind 与数组归属一致（L1 语义：窗口数组=window，分组数组=group）
+    assert.strictEqual(st.kind, toWindow ? "window" : "group", `${label}：kind 未随归属切换`);
+    assert.strictEqual(st.domKind, st.kind, `${label}：DOM data-kind 与模型不一致`);
+    // 3) 父引用：窗口为 L1 顶层（null），分组挂到落点分组
+    assert.strictEqual(st.parentId, toWindow ? null : "g_project", `${label}：parentId 不正确`);
+    // 4) 落点位次稳定：紧跟拖放锚点之后（不是一律追加到列表末尾）
+    assert.strictEqual(
+      st.index,
+      (toWindow ? st.winIndex : st.grpIndex) + 1,
+      `${label}：未插到落点锚点之后（位次 ${st.index}）`
+    );
+    // 5) id 与子树随行：id 不变，两个标签仍挂在自己下面
+    assert.strictEqual(st.id, baseline.id, `${label}：id 被改写（互转必须保持 id）`);
+    // 子树随行：互转前后「挂在自己下面的标签集合」必须完全一致（parentId 未被改写/丢失）
+    assert.deepStrictEqual(st.children, baseline.children, `${label}：子树标签丢失或被改挂`);
+    // 6) 总量守恒：互转不增减对象
+    assert.strictEqual(
+      st.winCount + st.grpCount,
+      baseline.winCount + baseline.grpCount,
+      `${label}：窗口+分组总数发生变化`
+    );
+    assert.strictEqual(st.tabCount, baseline.tabCount, `${label}：标签总数发生变化`);
+    // 7) 用户可见反馈
+    const toastText = await win.textContent("#toast");
+    assert.ok(
+      toastText.includes(toWindow ? "已转为独立窗口" : "已转为分组"),
+      `${label}：缺少转换提示（实际：${toastText}）`
+    );
+  }
+  console.log("E2E N1 分组↔窗口连续四次来回互转（归属/kind/parentId/位次/子树/id 全断言）通过");
 
   // —— N3（m10950）：标签前缀显示浏览器标签页自身图标（favicon）——
   // 在真实 Chromium 页面里调用生产渲染函数，注入合成 favIconUrl 验证前缀 img.fav，
