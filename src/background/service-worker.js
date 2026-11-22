@@ -1,6 +1,7 @@
 // TH2 service worker（FR-013/014/015/016）——点击图标按打开模式分支；右键图标开侧边栏；安装默认值；快捷键命令广播
-import { DEFAULT_SETTINGS, loadAll, saveSettings } from "../core/store.js";
+import { DEFAULT_SETTINGS, loadAll, saveSettings, saveModel } from "../core/store.js";
 import { registerAutoBackup, runAutoBackup } from "../core/import-export.js";
+import { syncBrowserSnapshot } from "../core/align.js";
 
 async function openWindow() {
   return chrome.windows.create({
@@ -102,6 +103,51 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   chromeApi.commands.onCommand.addListener(async (name) => {
     await chromeApi.storage.local.set({ cmd: { name, ts: Date.now() } });
   });
+
+  // P0（m11790）：浏览器标签/窗口动态变动 → 后台快照同步模型不变式。
+  // 在 service worker（而非 UI）做，避免定时器重渲染与拖拽/折叠交互竞态；
+  // 结果写入 storage，UI 通过 storage.onChanged 订阅刷新。
+  let syncTimer = 0;
+  const resyncFromBrowser = () => {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const ws = await chromeApi.windows.getAll({ populate: true });
+          const realWindows = (ws || [])
+            .filter((w) => w && w.id != null && Array.isArray(w.tabs))
+            .map((w) => ({
+              id: w.id,
+              focused: !!w.focused,
+              tabs: w.tabs.map((t) => ({ id: t.id, url: t.url, title: t.title })),
+            }));
+          if (!realWindows.length) return;
+          const allTabs = await chromeApi.tabs.query({});
+          const tabs = (allTabs || []).map((t) => ({ id: t.id, url: t.url, title: t.title }));
+          const { windows, groups, tabs: modelTabs, trash, settings } = await loadAll(chromeApi);
+          const model = {
+            version: 1,
+            windows: windows || [],
+            groups: groups || [],
+            tabs: modelTabs || [],
+            trash: trash || [],
+            settings: settings || {},
+          };
+          const result = syncBrowserSnapshot(model, { windows: realWindows, tabs });
+          if (result.invariant.repaired || result.created) {
+            await saveModel(model, chromeApi);
+          }
+        } catch {
+          // 动态同步失败不影响浏览器；下次事件会重试
+        }
+      })();
+    }, 300);
+  };
+  for (const evt of ["onCreated", "onAttached", "onDetached", "onMoved"]) {
+    chromeApi.tabs?.[evt]?.addListener?.(resyncFromBrowser);
+  }
+  chromeApi.windows?.onCreated?.addListener?.(resyncFromBrowser);
+  chromeApi.windows?.onRemoved?.addListener?.(resyncFromBrowser);
 }
 
 if (globalThis.chrome?.runtime?.id) initServiceWorker(globalThis.chrome);

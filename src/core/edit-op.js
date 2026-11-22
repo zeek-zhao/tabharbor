@@ -25,6 +25,13 @@ export function createGroupAt(m, windowId, title) {
   return addGroup(m, title, windowId);
 }
 
+// P0（m11790）：组右键「新建子组」——在指定父分组下创建子分组
+export function createGroupUnder(m, parentGroupId, title) {
+  const parent = m.groups.find((g) => g.id === parentGroupId);
+  if (!parent) throw new Error("父分组不存在");
+  return addGroup(m, title, parentGroupId);
+}
+
 // FR-004：搜索过滤——命中 title/url 的节点连同其祖先链一起保留
 export function searchFilter(m, q) {
   const needle = String(q || "")

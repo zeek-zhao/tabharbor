@@ -151,6 +151,24 @@ export function moveLeafInto(m, dragId, newParentId) {
   return true;
 }
 
+// P0-A（m11790）：窗口拖到窗口的两种落点要区分——
+// ①落到窗口「行」= 合并窗口（mergeWindows，既有语义）；
+// ②落到窗口「内部空白区」= 降级为子组挂到该窗口下（turnWindowIntoGroupUnder）。
+// 壳层通过落点是否位于 .node-children（或专门的 R1 dropzone）区分这两种，
+// 模型层提供两个明确的入口与锚点计算，互不覆盖。
+export function mergeWindowsAt(m, srcId, targetId) {
+  return mergeWindows(m, srcId, targetId);
+}
+
+// P0-B（m11790）：组/标签拖到根 R1 空白区 → 自动升级为独立窗口。
+// 仅对「已经在 groups 数组里、kind=group、非顶层」的节点生效；标签不自动升窗（标签须有容器）。
+// 新窗口沿用原节点 id 与子树，插到窗口列表末尾（空白区无锚点，追加即自然顺序）。
+export function promoteGroupToTopWindow(m, groupId) {
+  const g = m.groups.find((n) => n.id === groupId);
+  if (!g || g.kind !== "group" || !kindConsistent(m, groupId)) return false;
+  return turnGroupIntoWindow(m, groupId, null);
+}
+
 // M2（FR-031）：窗口合并——源窗口分组与直属标签并入目标窗口，源窗口移除
 export function mergeWindows(m, srcId, targetId) {
   const src = findNode(m, srcId);
@@ -218,7 +236,23 @@ export function turnWindowIntoGroupUnder(m, windowId, parentId, insertAfterId) {
   w.parentId = parentId; // 降为 L2 分组（父可以是窗口或分组）
   m.windows.splice(m.windows.indexOf(w), 1);
   // N1 修正：插到落点之后（同级相邻），让"拖到哪儿就出现在哪儿"，来回拖拽可连续进行。
-  const at = insertAfterId ? m.groups.findIndex((g) => g.id === insertAfterId) : -1;
+  // P0-C（m11790）：锚点可能是「窗口 id」（父节点是 Window 时，落点不是 group）。
+  // 此时用该窗口下的第一个分组作为锚点；若窗口下无分组则插到同级分组列表的最前面，
+  // 而不是一律 push 到末尾。这样窗口降级后紧跟落点，不"跳到列表底部"。
+  let anchorId = insertAfterId;
+  if (anchorId && !m.groups.some((g) => g.id === anchorId)) {
+    const anchorNode = findNode(m, anchorId);
+    if (anchorNode && anchorNode.kind === "window") {
+      const firstGroup = m.groups.find((g) => g.parentId === anchorId);
+      anchorId = firstGroup ? firstGroup.id : null;
+      if (!anchorId) {
+        // 落点窗口当前无子分组：插到它所在位置的同级分组之前（窗口在 windows 列表的位置近似）
+        m.groups.unshift(w);
+        return true;
+      }
+    }
+  }
+  const at = anchorId ? m.groups.findIndex((g) => g.id === anchorId) : -1;
   if (at >= 0) m.groups.splice(at + 1, 0, w);
   else m.groups.push(w);
   return true;

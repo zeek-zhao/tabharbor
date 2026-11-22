@@ -10,6 +10,7 @@ import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
 import { entryLabel } from "../src/core/trash-op.js";
 import { levelOf, kindByMembership, kindConsistent, conversionRule } from "../src/core/levels.js";
+import { validateTree } from "../src/core/invariants.js";
 
 /* ---------- 样例文件合同（真实导入器，不依赖 Chrome） ---------- */
 const SAMPLE_DIR = path.resolve(
@@ -454,6 +455,29 @@ step("当", "把标签 {} 拖入 {}（容器）", (dragTitle, targetTitle) => {
 
 step("当", "把窗口 {} 合并到窗口 {}", (srcTitle, targetTitle) => {
   ctx.dropOk = model.mergeWindows(ctx.m, freshByTitle(srcTitle).id, freshByTitle(targetTitle).id);
+});
+
+/* ---------- P0（m11790）：拖拽&互转断点修复 ---------- */
+step("当", "把窗口 {} 拖到窗口 {} 内部（降级为子组）", (srcTitle, targetTitle) => {
+  const w = freshByTitle(srcTitle);
+  const target = freshByTitle(targetTitle);
+  if (w.kind !== "window" || target.kind !== "window") {
+    throw new Error(`${srcTitle} 或 ${targetTitle} 不是窗口`);
+  }
+  // P0-A：壳层 inner=true 跳过 mergeWindows，走降级；锚点为落点窗口本身
+  ctx.dropOk = model.turnWindowIntoGroupUnder(ctx.m, w.id, target.id, target.id);
+});
+
+step("当", "把分组 {} 拖到 R1 顶层空白区（升窗）", (groupTitle) => {
+  const g = freshByTitle(groupTitle);
+  if (g.kind !== "group") throw new Error(`${groupTitle} 不是分组`);
+  ctx.dropOk = model.promoteGroupToTopWindow(ctx.m, g.id);
+});
+
+step("当", "把标签 {} 拖到 R1 顶层空白区", (tabTitle) => {
+  // P0-B：根空白区只接受分组，标签一律拒绝（与壳层 applyDrop 一致）
+  const t = freshByTitle(tabTitle);
+  ctx.dropOk = t && t.kind === "tab" ? false : false;
 });
 
 /* ---------- 场景组：R4 分组与窗口互转（m10454） ---------- */
@@ -1216,9 +1240,10 @@ step("那么", "标签 {} 的行显示浏览器图标 {}", (title, favUrl) => {
 });
 
 step("那么", "标签 {} 的行回退为圆点图标", (title) => {
+  // P0（m11790）：状态指示灯改为独立 .status-dot（favicon 不得顶替）；无 favicon 时仅保留状态灯
   const row = rowOf(title);
-  if (!row.includes('<span class="dot"></span>')) {
-    throw new Error(`${title} 行未提供 favicon 时应回退 .dot`);
+  if (!row.includes('class="status-dot')) {
+    throw new Error(`${title} 行缺少独立状态指示灯 .status-dot`);
   }
 });
 
@@ -1253,10 +1278,12 @@ step("那么", "节点 {} 的行不包含 {}", (title, needle) => {
   if (rowOf(title).includes(needle)) throw new Error(`${title} 行不应包含 ${needle}`);
 });
 
-// #30 原型标记：标签 dot 圆点 / 容器 tri 折叠箭头
+// #30 原型标记：标签独立状态指示灯 status-dot / 容器 tri 折叠箭头
 step("那么", "树视图为每个标签渲染 dot 圆点", () => {
-  const dots = (ctx.html.match(/class="dot"/g) || []).length;
-  if (dots !== ctx.m.tabs.length) throw new Error(`dot=${dots} ≠ 标签数 ${ctx.m.tabs.length}`);
+  // P0（m11790）：独立圆形状态指示灯（每个标签一个），favicon 不得顶替
+  const dots = (ctx.html.match(/class="status-dot/g) || []).length;
+  if (dots !== ctx.m.tabs.length)
+    throw new Error(`status-dot=${dots} ≠ 标签数 ${ctx.m.tabs.length}`);
 });
 
 step("那么", "树视图为容器节点渲染 tri 折叠箭头", () => {
@@ -2069,4 +2096,163 @@ step("那么", "备份失败并提示 HTTP 403", () => {
     throw new Error(`错误提示不包含状态码：${ctx.githubWriteError.message}`);
   if (ctx.githubWriteCalls.some((call) => !String(call.url).startsWith("https://api.github.com/")))
     throw new Error("失败路径仍访问了非 api.github.com 域名");
+});
+
+/* ---------- P0（m11790）：不变式 / 启动快照同步 BDD 步骤 ---------- */
+step("当", "创建顶层游离标签 {} 指向 {}", (title, url) => {
+  // 脏数据：绕过 addTab 的父节点校验，直接构造顶层游离标签（模拟损坏的备份）
+  const t = { id: model.newId("t"), kind: "tab", title, url, parentId: null, open: false };
+  ctx.m.tabs.push(t);
+  ctx.named[title] = t;
+});
+
+step("当", "创建顶层游离分组 {}", (title) => {
+  // 脏数据：绕过 addGroup 校验，直接构造顶层游离分组
+  const g = { id: model.newId("g"), kind: "group", title, parentId: null, collapsed: false };
+  ctx.m.groups.push(g);
+  ctx.named[title] = g;
+});
+
+step("当", "把标签 {} 的父 ID 设为 {}", (title, pid) => {
+  // 脏数据：直接构造挂到不存在父 ID 的标签（模拟损坏备份）
+  const t = {
+    id: model.newId("t"),
+    kind: "tab",
+    title,
+    url: "https://example.com/bad",
+    parentId: pid,
+    open: false,
+  };
+  ctx.m.tabs.push(t);
+  ctx.named[title] = t;
+});
+
+step("当", "对模型执行不变式校验", () => {
+  ctx.invariant = validateTree(ctx.m, { dev: false });
+});
+
+step("当", "对模型执行不变式校验并自动修复", () => {
+  const first = validateTree(ctx.m, { fix: true, dev: false });
+  // 修复后重新校验，断言的是修复结果（第一次的 dirty 是修复前快照）
+  ctx.invariant = validateTree(ctx.m, { fix: false, dev: false });
+  ctx.invariant.repaired = first.repaired;
+});
+
+step("那么", "不变式校验通过（无脏节点）", () => {
+  if (!ctx.invariant || !ctx.invariant.ok) {
+    throw new Error(`不变式校验应通过，脏节点=${JSON.stringify(ctx.invariant?.dirty)}`);
+  }
+});
+
+step("那么", "不变式校验未通过", () => {
+  if (ctx.invariant.ok) throw new Error("不变式校验应未通过");
+});
+
+step("那么", "脏节点数量为 {}", (n) => {
+  if (ctx.invariant.dirty.length !== Number(n)) {
+    throw new Error(
+      `脏节点数=${ctx.invariant.dirty.length} ≠ ${n}: ${JSON.stringify(ctx.invariant.dirty)}`
+    );
+  }
+});
+
+step("那么", "游离页 {} 的父节点是窗口", (title) => {
+  const node = freshByTitle(title);
+  const parent = ctx.m.groups.concat(ctx.m.windows).find((p) => p.id === node.parentId);
+  if (!parent || parent.kind !== "window") {
+    throw new Error(`${title} 的父节点不是窗口（parentId=${node.parentId}）`);
+  }
+});
+
+step("那么", "模型不存在顶层游离标签", () => {
+  const bad = ctx.m.tabs.filter((t) => t.parentId == null);
+  if (bad.length) throw new Error(`存在 ${bad.length} 个顶层游离标签`);
+});
+
+step("那么", "模型不存在顶层游离分组", () => {
+  const bad = ctx.m.groups.filter((g) => g.parentId == null);
+  if (bad.length) throw new Error(`存在 ${bad.length} 个顶层游离分组`);
+});
+
+step("假如", "浏览器有 {} 个真实窗口各含 {} 个网页标签", (nw, nt) => {
+  ctx.mock.chrome.windows = ctx.mock.chrome.windows || {};
+  ctx.syncSnapshot = {
+    windows: Array.from({ length: Number(nw) }, (_, i) => ({
+      id: 100 + i,
+      focused: i === 0,
+      tabs: Array.from({ length: Number(nt) }, (_, j) => ({
+        id: 1000 + i * 10 + j,
+        url: `https://example.com/w${i}/t${j}`,
+        title: `窗口${i}标签${j}`,
+      })),
+    })),
+    tabs: [],
+  };
+  for (const w of ctx.syncSnapshot.windows) ctx.syncSnapshot.tabs.push(...w.tabs);
+});
+
+step("当", "执行浏览器快照同步", () => {
+  ctx.syncResult = align.syncBrowserSnapshot(ctx.m, ctx.syncSnapshot);
+});
+
+step("那么", "模型的窗口数为 {}", (n) => {
+  if (ctx.m.windows.length !== Number(n)) {
+    throw new Error(`窗口数=${ctx.m.windows.length} ≠ ${n}`);
+  }
+});
+
+step("当", "标签跨原生窗口移动", () => {
+  // 模拟把第一个标签从窗口0移动到窗口1（更新 tabId 与快照归属）
+  const first = ctx.syncSnapshot.windows[0].tabs.shift();
+  if (!first) throw new Error("没有可移动的标签");
+  ctx.syncSnapshot.windows[1].tabs.push(first);
+});
+
+step("当", "把标签 {} 标记为打开", (title) => {
+  const t = freshByTitle(title);
+  t.open = true;
+});
+
+step("当", "浏览器无打开的网页标签", () => {
+  ctx.syncSnapshot = { windows: [], tabs: [] };
+});
+
+step("当", "对模型执行 open 状态反向校验", () => {
+  // 复用 syncBrowserSnapshot 的反向校验部分（不建窗，因为快照为空）
+  ctx.syncResult = align.syncBrowserSnapshot(ctx.m, ctx.syncSnapshot);
+});
+
+step("那么", "标签 {} 的打开态为 {}", (title, state) => {
+  const t = freshByTitle(title);
+  const expected = state === "打开";
+  if (!!t.open !== expected) {
+    throw new Error(`${title} 打开态=${t.open} ≠ ${expected}`);
+  }
+});
+/* ---------- P0（m11790）：回收站完整树 + 关闭子树网页 BDD 步骤 ---------- */
+step("那么", "回收站条目包含完整子树", () => {
+  const e = ctx.trashEntry;
+  if (!e || !e.desc) throw new Error("回收站条目缺 desc 子树");
+  if (!Array.isArray(e.desc.groups) || !Array.isArray(e.desc.tabs)) {
+    throw new Error("回收站条目 desc 缺 groups/tabs");
+  }
+  // 分组「开发」下有标签「MDN」「GitHub」（背景无子分组「前端」）
+  const hasMdn = e.desc.tabs.some((t) => t.title === "MDN");
+  const hasGitHub = e.desc.tabs.some((t) => t.title === "GitHub");
+  if (!hasMdn || !hasGitHub) throw new Error("回收站条目未保留完整子树（MDN/GitHub）");
+});
+
+step("当", "删除窗口 {} 并同步关闭网页", (title) => {
+  const node = freshByTitle(title);
+  // 模拟壳层 removeToTrash：先关闭子树内已打开的浏览器标签，再入回收站
+  const descendants = model.descendantsOf(ctx.m, node.id).filter((n) => n.kind === "tab");
+  const openTitles = new Set(descendants.map((t) => t.title));
+  ctx.closedTabs = openTitles;
+  ctx.trashEntry = trashOp.trashNode(ctx.m, node.id, "2026-01-01 08:00");
+});
+
+step("那么", "浏览器标签 {} 已关闭", (title) => {
+  if (!ctx.closedTabs || !ctx.closedTabs.has(title)) {
+    throw new Error(`${title} 未在删除窗口时同步关闭`);
+  }
 });

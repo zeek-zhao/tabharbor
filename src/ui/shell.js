@@ -9,7 +9,13 @@ import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as editOp from "../core/edit-op.js";
 import * as trashOp from "../core/trash-op.js";
-import { bootAlign, pairWindows, computeOpenIds, realignIfEmpty } from "../core/align.js";
+import {
+  bootAlign,
+  pairWindows,
+  computeOpenIds,
+  realignIfEmpty,
+  syncBrowserSnapshot,
+} from "../core/align.js";
 import {
   findNode,
   moveLeafAfter,
@@ -19,6 +25,7 @@ import {
   turnGroupIntoWindow,
   turnWindowIntoGroup,
   turnWindowIntoGroupUnder,
+  promoteGroupToTopWindow,
   boundWindowId,
   windowIdOwner,
   topWindowOf,
@@ -129,6 +136,21 @@ export async function bootShell(root) {
   let settings = initial.settings;
   applyTheme(document, themeOf(settings));
   const body = root.querySelector("#spBody");
+  // P0-B（m11790）：根 R1 空白区 dropzone——组拖到这里自动升为独立窗口。
+  // 每次 render() 重建 #spBody.innerHTML 后需重新 append（见 render 内 ensureDropzone）。
+  const ensureDropzone = () => {
+    if (!body) return null;
+    let dz = body.querySelector("#r1Dropzone");
+    if (!dz) {
+      dz = document.createElement("div");
+      dz.id = "r1Dropzone";
+      dz.className = "r1-dropzone";
+      dz.textContent = "拖拽分组到此处，升级为独立窗口";
+    }
+    if (dz.parentElement !== body) body.appendChild(dz);
+    return dz;
+  };
+  ensureDropzone();
   const { renderTree, renderEmpty, renderStats } = await import("./render.js");
   const status = root.querySelector("#dataStatus");
   const toastEl = root.querySelector("#toast");
@@ -176,6 +198,7 @@ export async function bootShell(root) {
           collapsed,
         })
       : renderEmpty();
+    ensureDropzone();
     const stats = root.querySelector("#stats");
     if (stats) stats.innerHTML = renderStats(m, openIds);
     body.classList.toggle("show-link", !!settings.linkShow);
@@ -195,6 +218,19 @@ export async function bootShell(root) {
   // R5（m10454）：删除到回收站后的统一收尾——若模型被删空且浏览器仍有
   // 未关闭网页，重新读取当天浏览器状态重建「当前浏览器窗口」展示。
   const removeToTrash = async (id, msg) => {
+    // P0（m11790）：删除窗口/分组入回收站时保留完整树结构（trashNode 已有 desc），
+    // 并同步关闭子树内所有已打开网页（标签只关浏览器、不删历史）。
+    const node = findNode(m, id);
+    const isContainer = node && node.kind !== "tab";
+    let closed = 0;
+    if (isContainer) {
+      try {
+        closed = await tabsOp.closeNode(chrome, m, id);
+      } catch {
+        // 无浏览器 API（测试环境）时跳过
+      }
+    }
+    // 单标签删除遵循 FR-018：浏览器标签不动，仅移入回收站
     const entry = trashOp.trashNode(m, id, new Date().toLocaleString("zh-CN"));
     if (!entry) return;
     try {
@@ -206,6 +242,7 @@ export async function bootShell(root) {
     }
     await store.saveModel(m);
     await refreshOpen();
+    if (closed) msg = `${msg}；已同步关闭 ${closed} 个网页`;
     toast(msg);
   };
   await applyOpenState();
@@ -219,7 +256,16 @@ export async function bootShell(root) {
     const snap = () => JSON.stringify([m.windows, m.groups, m.tabs]);
     const before = snap();
     if (realWindows) {
-      pairWindows(m, realWindows);
+      // P0（m11790）：启动快照同步 = 窗口配对 + 标签挂靠 + 不变式校验/自动修复
+      const openTabs = await queryOpenTabs();
+      const snapshot = {
+        windows: realWindows,
+        tabs: openTabs.length ? openTabs : realWindows.flatMap((w) => w.tabs || []),
+      };
+      const result = syncBrowserSnapshot(m, snapshot);
+      if (result.invariant.dirty.length && !result.invariant.repaired) {
+        console.warn("[TabHarbor] 启动同步后仍有脏节点", result.invariant.dirty);
+      }
     } else {
       const openTabs = await queryOpenTabs();
       if (openTabs.length) bootAlign(m, openTabs);
@@ -291,7 +337,12 @@ export async function bootShell(root) {
     if (!newMode) return;
     if (newMode.kind === "group") {
       if (!text) return;
-      editOp.createGroupAt(m, newMode.windowId, text);
+      if (newMode.targetId) {
+        // P0：组右键「新建子组」——挂到该分组下
+        editOp.createGroupUnder(m, newMode.targetId, text);
+      } else {
+        editOp.createGroupAt(m, newMode.windowId, text);
+      }
       await store.saveModel(m);
       closeModal("modalNew");
       await render();
@@ -424,23 +475,51 @@ export async function bootShell(root) {
   };
 
   // 落点解析：命中最近的 .leaf / .node；找不到时回落到最近容器（拖到容器空白区也有效）
+  // P0-B（m11790）：根 R1 空白区（#r1Dropzone）单独识别为 {kind:"root"} —— 组拖到这里升窗。
+  // P0-A：窗口「行」= 合并；窗口「内部空白区」(.node-children) = 降级为子组。
   const resolveDrop = (node) => {
     if (!node || typeof node.closest !== "function") return null;
+    if (node.closest?.("#r1Dropzone") && !node.closest(".leaf, .node")) {
+      return { id: "root", kind: "root", row: node.closest("#r1Dropzone") };
+    }
     const el = node.closest(".leaf, .node");
-    if (!el) return null;
+    if (!el) {
+      // 落在 #spBody 但不在任何节点里 → 视为 R1 根空白区
+      if (node.closest?.("#spBody")) {
+        const dz = root.querySelector("#r1Dropzone") || body;
+        return { id: "root", kind: "root", row: dz };
+      }
+      return null;
+    }
     const id = el.dataset.id;
     if (!id) return null;
     const kind = el.classList.contains("leaf") ? "leaf" : dragKindOf(id, el.dataset.kind);
     // 高亮只落在「行」上（整棵 .node 会连子树一起高亮，视觉上像落点很大/乱跳）
     const row = el.classList.contains("leaf") ? el : el.querySelector(":scope > .node-row") || el;
-    return { id, kind, row };
+    // 窗口内部空白区：命中点是 .node-children（或其后代空白），kind 保持 window 但标记 inner=true
+    const inner = kind === "window" && !!node.closest?.(".node-children");
+    return { id, kind, row, inner };
   };
 
   // 落点规则（原型 dropTo）：返回是否发生移动（已含 toast 文案）
-  const applyDrop = async (srcId, srcKind, targetKind, targetId) => {
+  const applyDrop = async (srcId, srcKind, targetKind, targetId, dropMeta = {}) => {
     if (!srcId || srcId === targetId) return false;
     // 模型为唯一事实源：srcKind 以数组归属反推为准
     srcKind = dragKindOf(srcId, srcKind);
+    // P0-B：根 R1 空白区——组拖到这里升为独立窗口
+    if (targetKind === "root") {
+      if (srcKind === "group") {
+        if (promoteGroupToTopWindow(m, srcId)) {
+          collapsed.delete(srcId);
+          toast(`「${titleOf(srcId)}」已升级为独立窗口（R1）`);
+          return true;
+        }
+        toast("该分组不能升级为窗口");
+        return false;
+      }
+      toast("不支持该位置");
+      return false;
+    }
     targetKind = dragKindOf(targetId, targetKind);
     if (!srcKind || !targetKind) {
       toast("拖拽对象已不存在，请刷新后重试");
@@ -507,12 +586,18 @@ export async function bootShell(root) {
       return false;
     }
     if (srcKind === "window") {
-      if (targetKind === "window" && mergeWindows(m, srcId, targetId)) {
-        toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
-        return true;
+      // P0-A（m11790）：窗口→窗口两种落点——
+      // ①落到窗口「行」= 合并窗口（保留既有语义）；
+      // ②落到窗口「内部空白区」(inner=true) = 降级为该窗口下的子组。
+      if (targetKind === "window" && !dropMeta.inner) {
+        if (mergeWindows(m, srcId, targetId)) {
+          toast(`已将「${titleOf(srcId)}」合并到「${titleOf(targetId)}」，分组与标签随行`);
+          return true;
+        }
       }
       // R4 / N1 / F4（m11442）：窗口拖到分组上 → 变成该分组的子分组；
       // 窗口拖到标签上 → 转为该标签所在容器下的分组（直挂窗口的标签 → 该窗口下的分组）。
+      // P0-A：窗口拖到窗口内部（inner=true）→ 降级为该窗口下的分组。
       if (targetKind === "group" || targetKind === "leaf" || targetKind === "window") {
         // 目标容器：分组 → 自身；标签 → 其父容器；窗口 → 该窗口（转为窗口下的分组）
         const destContainer =
@@ -644,7 +729,7 @@ export async function bootShell(root) {
     dragSrc = null;
     dragOver = null;
     if (!hit) return;
-    const moved = await applyDrop(src.id, src.kind, hit.kind, hit.id);
+    const moved = await applyDrop(src.id, src.kind, hit.kind, hit.id, hit);
     if (moved) {
       await store.saveModel(m);
       await refreshOpen();
@@ -812,6 +897,9 @@ export async function bootShell(root) {
         toast(`已关闭 ${n} 个网页`);
       } else if (act === "add-group") {
         openNewModal({ kind: "group", windowId: kind === "window" ? id : windowIdOf(node) });
+      } else if (act === "add-subgroup") {
+        // P0（m11790）：组右键「新建子组」——新组挂在被右击的组下
+        openNewModal({ kind: "group", windowId: windowIdOf(node), targetId: id });
       } else if (act === "fold") {
         collapsed = editOp.collapsedToggle(collapsed, id);
         await render();
@@ -1335,6 +1423,12 @@ export async function bootShell(root) {
         if (info.url || info.status === "complete") tabsChanged();
       });
   }
+
+  // ---- P0（m11790）：浏览器标签/窗口动态变动 → 快照重同步，保证模型树不变式 ----
+  // onCreated/onAttached/onDetached/onMoved + windows.onCreated/onRemoved：
+  // 标签跨原生窗口移动时自动切换宿主 Window，不破坏用户分组。
+  // 动态联动由 background/service-worker 统一监听并在 storage 层落盘；
+  // UI 通过下方 storage.onChanged 订阅刷新，避免 UI 定时器重渲染与拖拽/折叠交互竞态。
 
   // ---- 存储联动 ----
   chrome.storage.onChanged.addListener((changes, area) => {

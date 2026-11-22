@@ -81,3 +81,11 @@
     并且 标签 "邮件" 的行回退为圆点图标
     并且 "src/ui/shell.js" 包含 "favIconUrl"
     并且 "src/assets/m2.css" 包含 ".leaf .fav"
+
+   场景: 标签行有独立状态指示灯不被 favicon 顶替（P0 m11790）
+     假如 标签 "GitHub" 的浏览器图标为 "fav-github"
+     当 渲染树视图
+     那么 节点 "GitHub" 的行包含 "status-dot"
+     并且 标签 "GitHub" 的行显示浏览器图标 "fav-github"
+     并且 节点 "邮件" 的行包含 "status-dot"
+     并且 "src/assets/m2.css" 包含 ".leaf .status-dot.on"

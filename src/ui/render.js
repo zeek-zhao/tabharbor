@@ -69,21 +69,22 @@ function containerOpen(n, opts, depth) {
   return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops"><button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
 }
 
-// 标签叶子（原型：dot + title + link(浅灰) + note(斜体) + copy-x + close-x 仅已开）
+// 标签叶子（原型：status-dot + favicon + title + link(浅灰) + note(斜体) + copy-x + close-x 仅已开）
 function leafRow(t, opts) {
   const open = opts.openIds ? opts.openIds.has(t.id) : false;
   const sel = opts.selectedId === t.id ? " selected" : "";
   const dim = open ? "" : " dimmed";
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
+  // P0（m11790）：独立圆形状态指示灯（开=绿色实心、关=灰色空心），favicon 不得顶替状态点。
   // N3：前缀图标 = 浏览器标签页自身图标；tabId 优先、url 兜底，缺失则保留 .dot。
+  const statusDot = `<span class="status-dot${open ? " on" : ""}" title="${open ? "网页已打开" : "网页未打开"}"></span>`;
   const favicons = opts.favicons;
   const favUrl =
     favicons &&
     ((t.tabId != null && favicons.get(`id:${t.tabId}`)) || favicons.get(`url:${t.url}`));
-  const prefix = favUrl
-    ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />`
-    : `<span class="dot"></span>`;
+  const fav = favUrl ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />` : "";
+  const prefix = statusDot + fav;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
   const openBtn = `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
   const closeBtn = open

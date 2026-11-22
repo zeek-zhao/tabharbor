@@ -694,7 +694,8 @@ try {
     const map = new Map([[`url:${t.url}`, "fav-e2e-token"]]);
     const html = mod.renderTree(m, { favicons: map, openIds: new Set([t.id]) });
     return (
-      html.includes('<img class="fav" src="fav-e2e-token"') && html.includes('<span class="dot">')
+      // P0（m11790）：favicon 仍是独立 img.fav；无图标时回退独立状态灯 .status-dot（不再用 .dot）
+      html.includes('<img class="fav" src="fav-e2e-token"') && html.includes('class="status-dot')
     );
   });
   assert.ok(favRenderOk, "favicon 前缀渲染/圆点回退失败（N3）");
@@ -775,6 +776,44 @@ try {
   assert.ok(winIdPersist, "F2 windowId 无法持久化到 storage");
   console.log("E2E F2 windowId 持久化通过");
 
+  // ---- P0（m11790）：拖拽&互转断点修复 E2E ----
+  // P0-A：窗口拖到另一窗口「内部空白区」→ 降级为子组（不合并）；拖到窗口「行」→ 合并
+  await win.evaluate(() => {
+    const winA = document.querySelector('.node[data-id="w_work"] > .node-children');
+    const winB = document.querySelector('.node[data-id="w_study"] > .node-row');
+    return { a: !!winA, b: !!winB };
+  });
+  const dropzoneExists = await win.locator("#r1Dropzone").count();
+  assert.ok(dropzoneExists === 1, "P0-B 根 R1 dropzone 未创建");
+  const statusDots = await win.locator(".leaf .status-dot").count();
+  assert.ok(statusDots > 0, "P0 标签行缺独立状态指示灯 .status-dot");
+  console.log("E2E P0 dropzone + status-dot 通过");
+
+  // P0-B 真实拖拽：把分组 g_design 拖到 #r1Dropzone → 升为独立窗口
+  // 先重新播种样例并展开全部，确保 g_design 是可见的分组行（D9/互转轮可能改过状态）
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(
+    () => !!document.querySelector('.node[data-id="g_design"] > .node-row')
+  );
+  const gDesignNode = win.locator('.node[data-id="g_design"] > .node-row').first();
+  const dz = win.locator("#r1Dropzone");
+  if ((await gDesignNode.count()) && (await dz.count())) {
+    await gDesignNode.dragTo(dz);
+    await win.waitForTimeout(300);
+    const promoted = await win.evaluate(async () => {
+      const d = await chrome.storage.local.get(["windows", "groups"]);
+      return {
+        isWindow: d.windows.some((w) => w.id === "g_design"),
+        notGroup: !d.groups.some((g) => g.id === "g_design"),
+      };
+    });
+    assert.ok(promoted.isWindow && promoted.notGroup, "P0-B 组拖到 R1 空白区未升窗");
+    console.log("E2E P0-B 组→顶层空白升窗通过");
+  }
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

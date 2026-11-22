@@ -7,6 +7,7 @@
 // 与模型窗口配对（windowId 精确匹配 → 「当前浏览器窗口」优先绑聚焦窗口 → 标签重叠度 → 新建），
 // 未配对模型窗口视为离线（清掉失效 windowId，节点保留）。
 import { addWindow, addTab, childrenOf, descendantsOf } from "./model.js";
+import { validateTree } from "./invariants.js";
 
 export const CURRENT_WINDOW_TITLE = "当前浏览器窗口";
 
@@ -130,7 +131,13 @@ export function pairWindows(model, realWindows, focusedWindowId) {
     const win = rw.__win;
     if (!win) continue;
     if (win.windowId !== rw.id) win.windowId = rw.id;
-    syncWindowTabs(model, win, rw.tabs);
+    // P0（m11790）：只把真正的网页标签（http(s)）同步进模型；
+    // about:blank / chrome-extension:// 等内部页面不建模型叶子，避免顶层游离标签。
+    syncWindowTabs(
+      model,
+      win,
+      (rw.tabs || []).filter((t) => isWebUrl(t.url))
+    );
     paired += 1;
   }
 
@@ -161,6 +168,87 @@ export function computeOpenIds(model, openTabs) {
     }
   }
   return open;
+}
+
+// P0（m11790）：启动快照同步合并流程——读取浏览器真实窗口+标签，
+// 映射到模型 Window、挂靠已打开标签（open=true）、合并不覆盖用户分组、反向校验失效 open。
+// 同步完成后执行不变式校验 + 自动修复（生产模式），开发模式只打印脏节点不修复。
+// @returns { paired, created, invariant }
+export function syncBrowserSnapshot(model, snapshot, opts = {}) {
+  // snapshot: { windows: [{id,focused,tabs:[{id,url,title}]}], tabs: [...] }
+  const realWindows = snapshot?.windows || [];
+  const allTabs = snapshot?.tabs || [];
+  const dev = !!opts.dev;
+  const focusedWindowId = realWindows.find((w) => w.focused)?.id;
+
+  // 1) 用既有配对流程（windowId→重叠度→新建）映射窗口并挂靠标签
+  const { paired, created } = pairWindows(model, realWindows, focusedWindowId);
+
+  // 2) 飞在模型顶层、未挂靠到任何 Window 的游离标签：挂到对应的模型 Window
+  //    （按 tabId/URL 找到所属真实窗口 → 对应模型 Window；找不到就挂首个窗口）
+  const flat = allTabs.filter((t) => isWebUrl(t.url));
+  const usedTabIds = new Set();
+  const usedUrls = new Set();
+  for (const win of model.windows) {
+    for (const leaf of descendantsOf(model, win.id)) {
+      if (leaf.kind !== "tab") continue;
+      if (leaf.tabId != null) usedTabIds.add(leaf.tabId);
+      // P0（m11790）：模型已有同 URL 节点时，绑定 tabId 并复用，不重复新建游离标签
+      if (leaf.url) usedUrls.add(leaf.url);
+    }
+  }
+  for (const t of flat) {
+    if (t.id != null && usedTabIds.has(t.id)) continue;
+    if (usedUrls.has(t.url)) {
+      const existing = model.tabs.find((x) => x.url === t.url && x.tabId == null);
+      if (existing) {
+        existing.tabId = t.id;
+        existing.open = true;
+        usedTabIds.add(t.id);
+        continue;
+      }
+    }
+  }
+  const fallbackWin = model.windows[0];
+  if (fallbackWin) {
+    for (const t of flat) {
+      if (t.id != null && usedTabIds.has(t.id)) continue;
+      // 找到该真实标签所属的模型窗口
+      let ownerWin = null;
+      for (const rw of realWindows) {
+        if ((rw.tabs || []).some((rt) => rt.id === t.id || rt.url === t.url)) {
+          ownerWin = model.windows.find(
+            (w) => w.windowId === rw.id || w.title === rw.tabs?.find((rt) => rt.id === t.id)?.title
+          );
+          if (ownerWin) break;
+        }
+      }
+      const target = ownerWin || fallbackWin;
+      // P0（m11790）：优先挂到该窗口下首个分组（与 9 格矩阵「标签→窗口」一致），
+      // 无分组时直挂窗口（FR-024 允许）；open=true，记录 tabId。
+      const firstGroup = (model.groups || []).find((g) => g.parentId === target.id);
+      const leaf = addTab(model, t.title || t.url, t.url, firstGroup ? firstGroup.id : target.id);
+      leaf.tabId = t.id;
+      leaf.open = true;
+    }
+  }
+
+  // 3) 反向校验：open=true 但浏览器快照已无 → 置 false
+  const tabIds = new Set(allTabs.map((t) => t.id).filter((v) => v != null));
+  const urls = new Set(allTabs.map((t) => t.url));
+  for (const t of model.tabs) {
+    const actuallyOpen = (t.tabId != null && tabIds.has(t.tabId)) || urls.has(t.url);
+    if (t.open === true && !actuallyOpen) t.open = false;
+    if (actuallyOpen) t.open = true;
+  }
+
+  // 4) 不变式校验 + 修复
+  const invariant = validateTree(model, {
+    fix: !dev, // 开发模式只打印脏节点；生产自动修复
+    dev,
+    snapshot: allTabs,
+  });
+  return { paired, created, invariant };
 }
 
 // R5（m10454）：删空重读——模型被删空（无窗口/分组/标签）时重新读取浏览器
