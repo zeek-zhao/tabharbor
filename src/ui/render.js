@@ -88,9 +88,11 @@ function leafRow(t, opts) {
   // N3：前缀图标 = 浏览器标签页自身图标；tabId 优先、url 兜底，缺失则保留 .dot。
   const statusDot = `<span class="status-dot${open ? " on" : ""}" title="${open ? "网页已打开" : "网页未打开"}"></span>`;
   const favicons = opts.favicons;
+  // D12：导入/未绑定节点不得走 URL 兜底取 favicon（同 URL 不跨点亮）
   const favUrl =
     favicons &&
-    ((t.tabId != null && favicons.get(`id:${t.tabId}`)) || favicons.get(`url:${t.url}`));
+    ((t.tabId != null && favicons.get(`id:${t.tabId}`)) ||
+      (!t.imported && !t.importSource && favicons.get(`url:${t.url}`)));
   const fav = favUrl ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />` : "";
   const prefix = statusDot + fav;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
@@ -98,7 +100,17 @@ function leafRow(t, opts) {
   const closeBtn = open
     ? `<button class="close-x" data-act="close" title="关闭网页">${XI}</button>`
     : "";
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(t.title || t.url || "")}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
+  // D11（2026-11-23）：内部页（chrome:///about:/file:///chrome-extension://）标题缺失时
+  // 用「协议页面」兜底；所有文本走 escapeHtml，异常 URL 不产生裸 HTML。
+  const rawTitle = String(t.title || "").trim();
+  const internal = /^(chrome|about|file|chrome-extension|edge|moz-extension):/i.exec(
+    String(t.url || "")
+  );
+  const showTitle =
+    rawTitle ||
+    String(t.url || "").trim() ||
+    (internal ? `${internal[1].replace(/-/g, "")} 页面` : "未命名标签");
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断

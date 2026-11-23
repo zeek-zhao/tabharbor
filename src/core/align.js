@@ -11,11 +11,24 @@ import { validateTree } from "./invariants.js";
 
 export const CURRENT_WINDOW_TITLE = "当前浏览器窗口";
 
-const isWebUrl = (u) => /^https?:/.test(String(u || ""));
+// D11（2026-11-23）：采集范围全部纳入——http(s) / chrome://（含历史记录页）/ about: /
+// file:// / chrome-extension:// 等一律视为可采集页面；不再用 http(s) 白名单过滤。
+// 仍排除空 URL 与纯协议占位（tabs.query 对新标签页可能给出 chrome://newtab/，按 URL 有值纳入）。
+const isWebUrl = (u) => {
+  const s = String(u || "").trim();
+  return s.length > 0;
+};
+
+// D12（2026-11-23）：URL 兜底只适用于「本扩展既往管理、只是 tabId 丢失」的节点。
+// 导入书签节点带 imported=true 且无 tabId，不能被 URL 兜底点亮；只有用户主动打开
+// 拿到 tabId 后才进入识别链。
+const isUrlFallbackEligible = (t) => t.tabId == null && !t.imported && !t.importSource;
 
 // 叶子是否仍对应一个打开的浏览器标签页（tabId 优先，URL 兜底）
 function stillOpen(t, openIds, openUrls) {
-  return (t.tabId != null && openIds.has(t.tabId)) || (t.tabId == null && openUrls.has(t.url));
+  return (
+    (t.tabId != null && openIds.has(t.tabId)) || (isUrlFallbackEligible(t) && openUrls.has(t.url))
+  );
 }
 
 // 在窗口的全部后代里按 tabId / URL 找已存在的叶子（避免重复补入同一网页）
@@ -24,7 +37,7 @@ function findRepresented(model, winId, tab, matched) {
   return pool.find(
     (leaf) =>
       (tab.id != null && leaf.tabId === tab.id) ||
-      (leaf.tabId == null && !matched.has(leaf.id) && leaf.url === tab.url)
+      (isUrlFallbackEligible(leaf) && !matched.has(leaf.id) && leaf.url === tab.url)
   );
 }
 
@@ -158,7 +171,8 @@ export function computeOpenIds(model, openTabs) {
   const byId = new Map();
   for (const k of ["windows", "groups", "tabs"]) for (const n of model[k]) byId.set(n.id, n);
   for (const t of model.tabs) {
-    const hit = (t.tabId != null && tabIds.has(t.tabId)) || urls.has(t.url);
+    const hit =
+      (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
     if (!hit) continue;
     open.add(t.id);
     let cur = byId.get(t.id);
@@ -180,6 +194,10 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
   const allTabs = snapshot?.tabs || [];
   const dev = !!opts.dev;
   const focusedWindowId = realWindows.find((w) => w.focused)?.id;
+  // P0-2（2026-11-23）：同步前的模型快照，用于精确判定「模型是否真的变了」。
+  // 后台必须凭 changed 落盘，不能只看 invariant.repaired || created——
+  // 补入新标签/改挂父节点/校正 open 时两者都可能为 false。
+  const before = JSON.stringify([model.windows, model.groups, model.tabs]);
 
   // 1) 用既有配对流程（windowId→重叠度→新建）映射窗口并挂靠标签
   const { paired, created } = pairWindows(model, realWindows, focusedWindowId);
@@ -237,7 +255,8 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
   const tabIds = new Set(allTabs.map((t) => t.id).filter((v) => v != null));
   const urls = new Set(allTabs.map((t) => t.url));
   for (const t of model.tabs) {
-    const actuallyOpen = (t.tabId != null && tabIds.has(t.tabId)) || urls.has(t.url);
+    const actuallyOpen =
+      (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
     if (t.open === true && !actuallyOpen) t.open = false;
     if (actuallyOpen) t.open = true;
   }
@@ -248,7 +267,8 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
     dev,
     snapshot: allTabs,
   });
-  return { paired, created, invariant };
+  const changed = before !== JSON.stringify([model.windows, model.groups, model.tabs]);
+  return { paired, created, changed, invariant };
 }
 
 // R5（m10454）：删空重读——模型被删空（无窗口/分组/标签）时重新读取浏览器

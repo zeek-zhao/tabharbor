@@ -79,9 +79,10 @@ async function deriveOpenState(m) {
   try {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return empty;
     const tabs = await chrome.tabs.query({});
-    // 仅 http(s) 网页参与打开态派生（扩展页/chrome:// 页不入树）。
-    // R1（m10454）：携带浏览器 tabId，识别依据 tabId 优先、URL 兜底。
-    const webTabs = tabs.filter((t) => /^https?:/.test(t.url || ""));
+    // D11（2026-11-23）：全部页面参与派生（http(s)/chrome:///about:/file:///chrome-extension://）。
+    // R1（m10454）：携带浏览器 tabId，识别依据 tabId 优先、URL 兜底；
+    // D12：导入/未绑定节点由 computeOpenIds 内部排除 URL 兜底，不会被同 URL 点亮。
+    const webTabs = tabs.filter((t) => String(t.url || "").trim().length > 0);
     const openIds = computeOpenIds(
       m,
       webTabs.map((t) => ({ id: t.id, url: t.url }))
@@ -98,12 +99,12 @@ async function deriveOpenState(m) {
   }
 }
 
-// 浏览器当前打开的 http(s) 标签页 → bootAlign/realignIfEmpty 入参 [{id,title,url}]
+// 浏览器当前打开的页面（D11：全部类型）→ bootAlign/realignIfEmpty 入参 [{id,title,url}]
 async function queryOpenTabs() {
   if (typeof chrome === "undefined" || !chrome.tabs?.query) return [];
   const tabs = await chrome.tabs.query({});
   return tabs
-    .filter((t) => /^https?:/.test(t.url || ""))
+    .filter((t) => String(t.url || "").trim().length > 0)
     .map((t) => ({ id: t.id, title: t.title || t.url, url: t.url }));
 }
 
@@ -1418,11 +1419,34 @@ export async function bootShell(root) {
   if (typeof chrome !== "undefined" && chrome.tabs?.onCreated) {
     chrome.tabs.onCreated.addListener(tabsChanged);
     if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(tabsChanged);
+    // D13（2026-11-23）：补齐跨窗口移动/挂靠事件，UI 打开态同步刷新。
+    for (const evt of ["onAttached", "onDetached", "onMoved"]) {
+      chrome.tabs?.[evt]?.addListener?.(tabsChanged);
+    }
     if (chrome.tabs.onUpdated)
       chrome.tabs.onUpdated.addListener((tabId, info) => {
         if (info.url || info.status === "complete") tabsChanged();
       });
   }
+  // D13a：面板激活 / 聚焦时主动拉一次快照兜底（后台事件漏发或 SW 未唤醒时）
+  // ——仅请求后台同步并刷新打开态，不新增任何手动刷新入口。
+  const focusResync = () => {
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      void refreshOpen();
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage({ type: "tabharbor:resync" }, () => {
+        void refreshOpen();
+      });
+    } catch {
+      void refreshOpen();
+    }
+  };
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) focusResync();
+  });
+  window.addEventListener("focus", focusResync);
 
   // ---- P0（m11790）：浏览器标签/窗口动态变动 → 快照重同步，保证模型树不变式 ----
   // onCreated/onAttached/onDetached/onMoved + windows.onCreated/onRemoved：

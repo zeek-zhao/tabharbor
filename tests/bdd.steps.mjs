@@ -2257,11 +2257,12 @@ step("当", "对模型执行 open 状态反向校验", () => {
   ctx.syncResult = align.syncBrowserSnapshot(ctx.m, ctx.syncSnapshot);
 });
 
-step("那么", "标签 {} 的打开态为 {}", (title, state) => {
+// D12：直接读模型 open 字段（反向校验结果），不与旧 openIds 派生步骤重名
+step("那么", "标签 {} 的模型打开态为 {}", (title, state) => {
   const t = freshByTitle(title);
   const expected = state === "打开";
   if (!!t.open !== expected) {
-    throw new Error(`${title} 打开态=${t.open} ≠ ${expected}`);
+    throw new Error(`${title} 模型打开态=${t.open} ≠ ${expected}`);
   }
 });
 /* ---------- P0（m11790）：回收站完整树 + 关闭子树网页 BDD 步骤 ---------- */
@@ -2289,5 +2290,95 @@ step("当", "删除窗口 {} 并同步关闭网页", (title) => {
 step("那么", "浏览器标签 {} 已关闭", (title) => {
   if (!ctx.closedTabs || !ctx.closedTabs.has(title)) {
     throw new Error(`${title} 未在删除窗口时同步关闭`);
+  }
+});
+
+/* ---------- P0-1（2026-11-23）：导入节点 kind / 互转 / 不绑定 BDD 步骤 ---------- */
+step("那么", "导入分组 {} 的 kind 为 {}", (title, kind) => {
+  const g = ctx.m.groups.find((x) => x.title === title);
+  if (!g) throw new Error(`未找到导入分组 ${title}`);
+  if (g.kind !== kind) throw new Error(`导入分组 ${title} 的 kind=${g.kind} ≠ ${kind}`);
+});
+step("那么", "导入标签 {} 的 kind 为 {}", (title, kind) => {
+  const t = ctx.m.tabs.find((x) => x.title === title);
+  if (!t) throw new Error(`未找到导入标签 ${title}`);
+  if (t.kind !== kind) throw new Error(`导入标签 ${title} 的 kind=${t.kind} ≠ ${kind}`);
+});
+step("那么", "导入节点不含浏览器 tabId 绑定", () => {
+  for (const t of ctx.m.tabs) {
+    if (t.tabId != null) throw new Error(`导入标签 ${t.title} 仍绑定浏览器 tabId=${t.tabId}`);
+  }
+});
+step("当", "把分组 {} 拖到 R1 顶层空白区升窗", (title) => {
+  const g = ctx.m.groups.find((x) => x.title === title);
+  if (!g) throw new Error(`未找到分组 ${title}`);
+  ctx.dropOk = model.promoteGroupToTopWindow(ctx.m, g.id);
+});
+step("那么", "分组 {} 已是独立窗口", (title) => {
+  const w = ctx.m.windows.find((x) => x.title === title);
+  if (!w || w.kind !== "window") throw new Error(`分组 ${title} 未升为独立窗口`);
+});
+step("当", "创建缺 kind 的分组 {} 挂在窗口 {} 下", (title, winTitle) => {
+  const w = ctx.m.windows.find((x) => x.title === winTitle);
+  if (!w) throw new Error(`未找到窗口 ${winTitle}`);
+  const g = { id: model.newId("g"), parentId: w.id, title, collapsed: false };
+  ctx.m.groups.push(g);
+});
+
+// D12（2026-11-23）：导入标签与已开网页同 URL 互不影响
+step("当", "导入标签 {} 的 URL 改为 {}", (title, url) => {
+  const t = ctx.m.tabs.find((x) => x.title === title);
+  if (!t) throw new Error(`未找到导入标签 ${title}`);
+  t.url = url;
+});
+step("当", "浏览器快照打开网页 {}", (url) => {
+  ctx.syncSnapshot = ctx.syncSnapshot || { windows: [], tabs: [] };
+  const tab = { id: 5000 + ctx.syncSnapshot.tabs.length, url, title: "快照网页" };
+  ctx.syncSnapshot.tabs.push(tab);
+  if (!ctx.syncSnapshot.windows.length) {
+    ctx.syncSnapshot.windows.push({ id: 9001, focused: true, tabs: [tab] });
+  } else {
+    ctx.syncSnapshot.windows[0].tabs.push(tab);
+  }
+});
+
+// D11（2026-11-23）：chrome:///about:/file:///chrome-extension:// 全部纳入快照
+step("当", "浏览器快照包含内部页面集合", () => {
+  const tabs = [
+    { id: 6001, url: "chrome://history/", title: "" },
+    { id: 6002, url: "about:blank", title: "空白页" },
+    { id: 6003, url: "file:///C:/tmp/local.html", title: "本地文件" },
+    { id: 6004, url: "chrome-extension://abc/panel.html", title: "扩展页" },
+  ];
+  ctx.syncSnapshot = {
+    windows: [{ id: 9100, focused: true, tabs }],
+    tabs: [...tabs],
+  };
+});
+step("那么", "模型新增标签数不少于 {}", (n) => {
+  if (ctx.m.tabs.length < Number(n)) {
+    throw new Error(`模型标签数=${ctx.m.tabs.length} < ${n}`);
+  }
+});
+step("那么", "模型包含 {} 标签", (title) => {
+  if (!ctx.m.tabs.some((t) => t.title === title)) {
+    throw new Error(`模型未包含标签 ${title}`);
+  }
+});
+
+step("当", "把标签 {} 绑定到浏览器标签页号 {}", (title, tabId) => {
+  const t = ctx.m.tabs.find((x) => x.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  t.tabId = Number(tabId);
+});
+step("当", "浏览器快照打开标签页号 {} 指向 {}", (tabId, url) => {
+  // 每个场景重建快照，避免跨场景残留的 windows/tabs 影响反向校验
+  ctx.syncSnapshot = { windows: [], tabs: [] };
+  const tab = { id: Number(tabId), url, title: "快照网页" };
+  ctx.syncSnapshot.tabs.push(tab);
+  if (!ctx.syncSnapshot.windows.length) {
+    ctx.syncSnapshot.windows.push({ id: 9001, focused: true, tabs: [tab] });
+  } else {
+    ctx.syncSnapshot.windows[0].tabs.push(tab);
   }
 });

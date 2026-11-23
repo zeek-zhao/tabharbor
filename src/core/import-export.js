@@ -139,13 +139,21 @@ export function mergeAsImportedWindow(model, imported) {
     return idMap.get(pid) ?? win.id; // 引用导入窗口的 → 并入新窗口
   };
   for (const g of imported.groups || []) {
-    const node = { ...g, id: idMap.get(g.id), parentId: resolveParent(g.parentId) };
+    // P0-1（2026-11-23）：不依赖导入源自带 kind，按落库数组强制补 kind；
+    // 同时剥离浏览器绑定字段，导入节点一律默认关闭、以独立哈希 ID 标识（D12）。
+    const node = { ...g, id: idMap.get(g.id), parentId: resolveParent(g.parentId), kind: "group" };
     delete node.tabId;
+    delete node.windowId;
+    node.open = false;
     model.groups.push(node);
   }
   for (const t of imported.tabs || []) {
-    const node = { ...t, id: idMap.get(t.id), parentId: resolveParent(t.parentId) };
+    const node = { ...t, id: idMap.get(t.id), parentId: resolveParent(t.parentId), kind: "tab" };
     delete node.tabId;
+    delete node.windowId;
+    node.open = false;
+    // D12：标记导入来源，URL 兜底不得点亮这类未绑定节点
+    node.imported = true;
     model.tabs.push(node);
   }
   model.windows.push(win);

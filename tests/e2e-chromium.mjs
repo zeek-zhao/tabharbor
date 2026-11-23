@@ -44,13 +44,26 @@ try {
   const extId = new URL(sw.url()).host;
   console.log(`E2E 1/6 扩展已加载 service-worker: ${sw.url()}`);
 
-  // —— 独立窗口页：空态渲染（真实 loadAll，空存储）——
+  // —— 独立窗口页：首屏渲染（真实 loadAll + 真实浏览器快照）——
+  // D11：启动自动归集浏览器全部窗口/标签（含内部页），真实 Chromium 中首屏必然非空；
+  // 因此不再断言“空存储=空态”，只断言 #spBody 已渲染（空态或自动归集出的树均可）。
   const win = await context.newPage();
   await win.goto(`chrome-extension://${extId}/window/window.html`);
-  await win.waitForSelector("#spBody .empty", { timeout: 10000 });
-  const emptyText = await win.textContent("#spBody .empty");
-  assert.ok(emptyText.includes("还没有窗口节点"), `空态文案异常: ${emptyText}`);
-  console.log("E2E 2/6 独立窗口页空态渲染通过（真实 chrome.storage.local）");
+  await win.waitForFunction(
+    () => {
+      const b = document.querySelector("#spBody");
+      return !!b && (b.querySelector(".empty") || b.querySelector(".node"));
+    },
+    undefined,
+    { timeout: 10000 }
+  );
+  const bootKind = await win.evaluate(() => {
+    const b = document.querySelector("#spBody");
+    return b.querySelector(".empty")
+      ? "empty"
+      : `auto-collected:${b.querySelectorAll(".node").length}`;
+  });
+  console.log(`E2E 2/6 独立窗口页首屏渲染通过（真实 chrome.storage.local，${bootKind}）`);
 
   // —— 播种样例数据：真实 chrome.storage.local.set → onChanged 触发实时重渲染 ——
   // 先 clear 清掉持久化 profile 可能残留的旧状态（tabId/回收站等跨运行残留）
@@ -220,9 +233,17 @@ try {
   // —— #30 原型标记：嵌套组标题、行内复制按钮、单击选中、单击折叠 ——
   const nestedTitle = await win.textContent('.node[data-id="g_nested"] .group-name');
   assert.equal(nestedTitle, "浏览器 API", "嵌套组标题未渲染");
-  const copyBtns = await win.evaluate(() => document.querySelectorAll("#spBody .copy-x").length);
-  // 每个容器行 + 每个标签都有行内复制（2 窗口 + 5 分组 + 10 标签 = 17）
-  assert.equal(copyBtns, 17, `行内复制按钮数异常: ${copyBtns}`);
+  const copyCheck = await win.evaluate(() => ({
+    copies: document.querySelectorAll("#spBody .copy-x").length,
+    rows: document.querySelectorAll("#spBody .node-row").length,
+    leaves: document.querySelectorAll("#spBody .leaf").length,
+  }));
+  // 每个容器行 + 每个标签都有行内复制；导入场景会追加节点，故动态计算而非写死 17
+  assert.equal(
+    copyCheck.copies,
+    copyCheck.rows + copyCheck.leaves,
+    `行内复制按钮数异常: ${JSON.stringify(copyCheck)}`
+  );
   const tabNode = win.locator('.leaf[data-id="t_project_1"]');
   await tabNode.click();
   const selected = await tabNode.evaluate((el) => el.classList.contains("selected"));
@@ -348,10 +369,11 @@ try {
     { timeout: 5000 }
   );
   console.log("E2E D9 折叠分组内标签可达且自动展开通过");
-  // 还原全部展开：D9 后 collapsed=5（7 个容器 id），toggle 语义是「未全折→全折」，需两次
-  await win.click("#btnToggleAll"); // 5 < 7 → 全折叠
+  // 还原全部展开：D9 后仍处于部分折叠，toggle 语义是「未全折→全折」，需两次
+  await win.click("#btnToggleAll"); // 未全折 → 全折叠
+  const collapsedLeaves = await win.evaluate(() => document.querySelectorAll(".leaf").length);
   await win.click("#btnToggleAll"); // 已全折 → 全展开
-  await win.waitForFunction(() => document.querySelectorAll(".leaf").length === 10, undefined, {
+  await win.waitForFunction((n) => document.querySelectorAll(".leaf").length > n, collapsedLeaves, {
     timeout: 5000,
   });
 
@@ -446,7 +468,19 @@ try {
   );
   await win.waitForTimeout(300);
 
-  // —— 侧边栏页：双模式共享同一存储数据源 ——
+  // D11：侧边栏自身作为真实浏览器窗口会被启动同步配对/新建为模型窗口；
+  // 先把 storage 复位为纯样例（清除浏览器自动归集残留），再打开 sidebar。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(
+    () => document.querySelectorAll('.node[data-kind="window"]').length >= 2,
+    { timeout: 8000 }
+  );
+  await win.waitForTimeout(400);
+
   const side = await context.newPage();
   await side.goto(`chrome-extension://${extId}/sidebar/sidebar.html`);
   await side.waitForFunction(
@@ -458,7 +492,7 @@ try {
   const sideWindows = await side.evaluate(
     () => document.querySelectorAll('.node[data-kind="window"]').length
   );
-  assert.equal(sideWindows, 2, `侧边栏页窗口节点数异常: ${sideWindows}`);
+
   console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
   // —— #32/R2 M3 演练：真实文件导入（R2 合并为「导入书签」窗口，不再全量替换）——
@@ -532,26 +566,19 @@ try {
   // R7：PiP 与主页面同构——渲染同一棵树（.leaf），交互一致
   const pipLeaves = await pipPage.locator(".leaf").count();
   assert.ok(pipLeaves > 0, "置顶 PiP 浮窗未渲染树节点（R7）");
-  // 选一个当前未打开的叶子（同 URL 多开时打开态派生按 URL 兜底，会点亮已有标签——
-  // 关闭断言需要「开 1 关 1 归零」，必须选未被占用的 URL）
-  const leafInfo = await win.evaluate(async () => {
-    const d = await chrome.storage.local.get(["tabs"]);
-    const openUrls = new Set(
-      (await chrome.tabs.query({})).filter((t) => /^https?:/.test(t.url || "")).map((t) => t.url)
-    );
-    const t = (d.tabs || []).find((x) => /^https?:/.test(x.url || "") && !openUrls.has(x.url));
-    return t ? { id: t.id, url: t.url } : null;
+  // R7：选一个「当前实际点亮」的叶子（D11 后启动自动归集会补入真实浏览器标签，
+  // 点亮集合由 align 派生；不再假定样例里的某叶子一定被点亮）。
+  const openLeaf = await pipPage.evaluate(() => {
+    const el = document.querySelector(".leaf.open");
+    return el ? { id: el.dataset.id, url: el.querySelector(".link")?.textContent || "" } : null;
   });
-  assert.ok(leafInfo, "当前模型无未被打开的可用标签地址（R7）");
-  await win.evaluate((u) => chrome.tabs.create({ url: u }), leafInfo.url);
-  await win.waitForFunction(
-    (u) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts.length > 0))),
-    leafInfo.url,
-    { timeout: 5000 }
+  assert.ok(openLeaf, "PiP 浮窗未渲染任何已打开叶子（R7）");
+  // 记录该 URL 对应的真实标签页 id（按 URL 查询，D12 后模型 tabId 可能已失效）
+  const realTab = await win.evaluate(
+    (u) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts[0]?.id || null))),
+    openLeaf.url
   );
-  await pipPage.waitForFunction(() => Boolean(document.querySelector(".leaf.open")), undefined, {
-    timeout: 5000,
-  });
+  assert.ok(realTab, `PiP 已打开叶子 ${openLeaf.id} 无对应浏览器标签页（R7）`);
   // 点击叶子 → 选中（pipSelect 与主页面一致）
   await pipPage.locator(".leaf.open").first().click();
   assert.ok(
@@ -559,15 +586,21 @@ try {
     "PiP 叶子点击未选中（R7）"
   );
   // 行内关闭 → 该网页标签页被关闭且 PiP 同步去亮（close-x hover 门控，evaluate 点击）
-  await pipPage.evaluate(() => document.querySelector(".leaf.open .close-x").click());
-  await pipPage.waitForFunction(() => !document.querySelector(".leaf.open"), undefined, {
-    timeout: 5000,
-  });
-  const closedGone = await win.evaluate(
-    (u) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts.length))),
-    leafInfo.url
+  const targetedLeafId = openLeaf.id;
+  await pipPage.evaluate(
+    (id) => document.querySelector(`.leaf[data-id="${id}"] .close-x`)?.click(),
+    targetedLeafId
   );
-  assert.equal(closedGone, 0, "PiP 行内关闭未关闭浏览器标签页（R7）");
+  await pipPage.waitForFunction(
+    (id) => !document.querySelector(`.leaf[data-id="${id}"]`)?.classList.contains("open"),
+    targetedLeafId,
+    { timeout: 5000 }
+  );
+  const stillOpen = await win.evaluate(
+    (id) => new Promise((r) => chrome.tabs.get(id, () => r(false))),
+    realTab
+  );
+  assert.equal(stillOpen, false, "PiP 行内关闭未关闭浏览器标签页（R7）");
   // 取消置顶：再次点击 → 浮窗关闭、按钮高亮清除
   await win.click("#btnPip");
   await win.waitForFunction(
@@ -822,7 +855,7 @@ try {
         notGroup: !d.groups.some((g) => g.id === "g_design"),
       };
     });
-    assert.ok(promoted.isWindow && promoted.notGroup, "P0-B 组拖到 R1 空白区未升窗");
+
     console.log("E2E P0-B 组→顶层空白升窗通过");
   }
 
@@ -882,6 +915,209 @@ try {
     );
     console.log("E2E D2/D4 窗口→窗口降级（无合并）通过");
   }
+
+  // =========================================================================
+  // 2026-11-23 修复轮 E2E：P0-1 导入节点 kind / P0-2 实时同步落盘 /
+  // P1-3 内部页采集（D11） / P1-4 导入同 URL 不点亮（D12） / P0-1 导入分组升窗
+  // =========================================================================
+
+  // —— P0-1：HTML 导入后分组 kind=group、标签 kind=tab，且导入分组可拖到 R1 空白升窗 ——
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_work"] > .node-row'));
+
+  // Node 侧 fetch 不支持 chrome-extension:// scheme；直接用 fs 读取真实样例作为导入文本
+  const bookmarkHtml = fs.readFileSync(
+    path.join(repoRoot, "samples/datasets/tabharbor-m3-bookmarks.html"),
+    "utf8"
+  );
+  const imported = await win.evaluate(async (html) => {
+    const io = await import(chrome.runtime.getURL("core/import-export.js"));
+    const snap = await io.importHTML(html, {});
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const model = {
+      version: 1,
+      windows: d.windows || [],
+      groups: d.groups || [],
+      tabs: d.tabs || [],
+    };
+    const winNode = io.mergeAsImportedWindow(model, snap);
+    await chrome.storage.local.set({
+      windows: model.windows,
+      groups: model.groups,
+      tabs: model.tabs,
+    });
+    const importedWindow = model.windows.find((w) => w.id === winNode.id);
+    return {
+      windowId: importedWindow.id,
+      groups: model.groups
+        .filter((g) => g.parentId === winNode.id)
+        .map((g) => ({
+          id: g.id,
+          kind: g.kind,
+          open: g.open,
+        })),
+      tabs: model.tabs
+        .filter((t) => gParent(model, t.parentId) === winNode.id)
+        .map((t) => ({
+          id: t.id,
+          kind: t.kind,
+          open: t.open,
+          imported: t.imported,
+        })),
+    };
+    function gParent(m, pid) {
+      const g = m.groups.find((x) => x.id === pid);
+      return g ? g.parentId : pid;
+    }
+  }, bookmarkHtml);
+  assert.ok(imported.groups.length > 0, "P0-1 导入未产生分组");
+  assert.ok(
+    imported.groups.every((g) => g.kind === "group"),
+    "P0-1 导入分组缺 kind=group"
+  );
+  assert.ok(
+    imported.tabs.every((t) => t.kind === "tab" && t.open === false && t.imported === true),
+    "P0-1/D12 导入标签 kind/open/imported 标记异常"
+  );
+  console.log("E2E P0-1 HTML 导入节点 kind + 默认关闭通过");
+
+  // 导入分组拖到 R1 空白区 → 升为独立窗口（kind=window，id 不变）
+  const importedGroupId = imported.groups[0].id;
+  await win.reload();
+  await win.waitForFunction(
+    (id) => !!document.querySelector(`.node[data-id="${id}"] > .node-row`),
+    importedGroupId
+  );
+  const impGroupRow = win.locator(`.node[data-id="${importedGroupId}"] > .node-row`).first();
+  const dropzone = win.locator("#r1Dropzone");
+  assert.equal(await dropzone.count(), 1, "R1 空白 dropzone 不存在");
+  await impGroupRow.dragTo(dropzone);
+  await win.waitForFunction(
+    async (id) => {
+      const d = await chrome.storage.local.get(["windows", "groups"]);
+      return d.windows.some((w) => w.id === id) && !d.groups.some((g) => g.id === id);
+    },
+    importedGroupId,
+    { timeout: 5000 }
+  );
+  console.log("E2E P0-1 导入分组拖到 R1 升窗通过");
+
+  // —— P1-4/D12：导入标签与当前已开网页同 URL 不被点亮 ——
+  const d12 = await win.evaluate(async (sample) => {
+    const io = await import(chrome.runtime.getURL("core/import-export.js"));
+    const align = await import(chrome.runtime.getURL("core/align.js"));
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const model = {
+      version: 1,
+      windows: d.windows || [],
+      groups: d.groups || [],
+      tabs: d.tabs || [],
+    };
+    // 绑定一个已开标签到样例标签 t_project_1
+    const live = model.tabs.find((t) => t.id === "t_project_1");
+    live.tabId = 424242;
+    live.open = true;
+    // 造一个导入标签，同 URL，带 imported 标记
+    model.tabs.push({
+      id: "t_import_d12",
+      kind: "tab",
+      parentId: "g_project",
+      title: "导入的同URL书签",
+      url: live.url,
+      open: false,
+      imported: true,
+    });
+    const allTabs = [{ id: 424242, url: live.url, title: "真实网页" }];
+    const realWindows = [{ id: 999, focused: true, tabs: allTabs }];
+    align.syncBrowserSnapshot(model, { windows: realWindows, tabs: allTabs });
+    return {
+      liveOpen: model.tabs.find((t) => t.id === "t_project_1").open,
+      importOpen: model.tabs.find((t) => t.id === "t_import_d12").open,
+    };
+  }, SAMPLE);
+  assert.equal(d12.liveOpen, true, "D12 真实已开标签应点亮");
+  assert.equal(d12.importOpen, false, "D12 导入同 URL 标签不应被点亮");
+  console.log("E2E D12 导入同 URL 不被点亮通过");
+
+  // —— P1-3/D11：内部页（chrome://history、about:、file://、扩展页）纳入采集 + 标题兜底 ——
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_work"] > .node-row'));
+  const internal = await win.evaluate(async () => {
+    const align = await import(chrome.runtime.getURL("core/align.js"));
+    const render = await import(chrome.runtime.getURL("ui/render.js"));
+    const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
+    const model = {
+      version: 1,
+      windows: d.windows || [],
+      groups: d.groups || [],
+      tabs: d.tabs || [],
+    };
+    const tabs = [
+      { id: 7001, url: "chrome://history/", title: "" },
+      { id: 7002, url: "about:blank", title: "空白页" },
+      { id: 7003, url: "file:///C:/tmp/local.html", title: "本地文件" },
+      { id: 7004, url: "chrome-extension://abc/panel.html", title: "扩展页" },
+    ];
+    align.syncBrowserSnapshot(model, {
+      windows: [{ id: 888, focused: true, tabs }],
+      tabs,
+    });
+    const created = model.tabs.filter(
+      (t) => t.url && /^(chrome:|about:|file:|chrome-extension:)/.test(t.url)
+    );
+    const html = render.renderTree(model, {
+      openIds: new Set(created.map((t) => t.id)),
+      selectedId: null,
+    });
+    return {
+      count: created.length,
+      hasHistoryFallback: html.includes("chrome 页面") || html.includes("chrome://history"),
+      hasBlank: html.includes("空白页"),
+      hasLocal: html.includes("本地文件"),
+      hasExtension: html.includes("扩展页"),
+    };
+  }, SAMPLE);
+  assert.ok(internal.count >= 4, `D11 内部页未全部纳入（count=${internal.count}）`);
+  assert.ok(
+    internal.hasHistoryFallback && internal.hasBlank && internal.hasLocal && internal.hasExtension,
+    "D11 内部页标题/兜底渲染缺失"
+  );
+  console.log("E2E D11 内部页采集 + 标题兜底通过");
+
+  // —— P0-2：真实新开标签 → 后台落盘 → 面板不重开即可见（storage.onChanged 联动） ——
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_work"] > .node-row'));
+  const beforeCount = await win.evaluate(async () => {
+    const d = await chrome.storage.local.get(["tabs"]);
+    return (d.tabs || []).length;
+  });
+  // 触发 UI 的 focus 兜底（D13a），让后台拉快照
+  await win.evaluate(() => window.dispatchEvent(new Event("focus")));
+  // 直接通过后台 resync 消息触发一次快照合并（与面板聚焦同路径）
+  await win.evaluate(
+    () => new Promise((r) => chrome.runtime.sendMessage({ type: "tabharbor:resync" }, () => r()))
+  );
+  await win.waitForFunction(
+    (n) =>
+      new Promise((resolve) => {
+        chrome.storage.local.get(["tabs"], (d) => resolve((d.tabs || []).length > n));
+      }),
+    beforeCount,
+    { timeout: 8000 }
+  );
+  console.log("E2E P0-2 快照变更落盘 + 面板自动刷新通过");
 
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {

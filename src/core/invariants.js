@@ -15,7 +15,9 @@
 
 import { addWindow } from "./model.js";
 
-const isWebUrl = (u) => /^https?:/.test(String(u || ""));
+// D11（2026-11-23）：快照规范化不再按 http(s) 白名单过滤——
+// chrome://（含历史记录页）、about:、file://、chrome-extension:// 全部纳入。
+const isWebUrl = (u) => String(u || "").trim().length > 0;
 
 /**
  * 校验并（可选）修复模型树不变式。
@@ -45,7 +47,25 @@ export function validateTree(model, opts = {}) {
     }
   }
 
-  // 2) parentId 必须指向存在的节点；根层级（parentId==null）只能是 window
+  // 2) 数组归属 ↔ kind 字段一致性（P0-1 / 2026-11-23）：
+  //    HTML 导入等来源可能缺 kind；节点虽进 groups[]/tabs[]，但 kind=undefined 会让
+  //    levels.kindConsistent / conversionRule / turnGroupIntoWindow 全部拒绝互转。
+  //    这里按所属数组校验，修复阶段强制回填，避免脏数据进入导出备份。
+  const bucketKind = { windows: "window", groups: "group", tabs: "tab" };
+  for (const bucket of buckets) {
+    for (const node of model[bucket] || []) {
+      if (!node || !node.id) continue;
+      if (node.kind !== bucketKind[bucket]) {
+        dirty.push({
+          id: node.id,
+          kind: node.kind,
+          problem: `数组归属 ${bucket} 与 kind=${node.kind} 不一致（应为 ${bucketKind[bucket]}）`,
+        });
+      }
+    }
+  }
+
+  // 3) parentId 必须指向存在的节点；根层级（parentId==null）只能是 window
   for (const bucket of buckets) {
     for (const node of model[bucket] || []) {
       if (!node || !node.id) continue;
@@ -91,8 +111,12 @@ export function validateTree(model, opts = {}) {
   if (snapshot) {
     const tabIds = new Set(snapshot.map((t) => t.id).filter((v) => v != null));
     const urls = new Set(snapshot.map((t) => t.url));
+    // D12（2026-11-23）：导入/未绑定节点不得被 URL 兜底点亮，
+    // 与 align.computeOpenIds 同源（tabId 优先、URL 兜底仅用于既往管理节点）。
+    const urlEligible = (t) => t.tabId == null && !t.imported && !t.importSource;
     for (const t of model.tabs || []) {
-      const actuallyOpen = (t.tabId != null && tabIds.has(t.tabId)) || urls.has(t.url);
+      const actuallyOpen =
+        (t.tabId != null && tabIds.has(t.tabId)) || (urlEligible(t) && urls.has(t.url));
       if (t.open === true && !actuallyOpen) {
         dirty.push({ id: t.id, kind: "tab", problem: "open=true 但浏览器快照已无此标签" });
       }
@@ -117,8 +141,24 @@ function repair(model, dirty, byId, opts) {
   let fallback = model.windows.find((w) => w && w.kind === "window" && w.id);
   if (!fallback) fallback = addWindow(model, opts.fallbackTitle || "浏览器窗口");
 
+  // kind 不一致的节点只需原地回填 kind（不改父、不换桶），不能按脏父处理挂到兜底窗口
+  for (const bucket of ["windows", "groups", "tabs"]) {
+    for (const node of model[bucket] || []) {
+      if (!node || !node.id) continue;
+      const expect = bucket === "windows" ? "window" : bucket === "groups" ? "group" : "tab";
+      if (node.kind !== expect) node.kind = expect;
+    }
+  }
+
   const problemIds = new Set(
-    dirty.filter((d) => d.problem !== "open=true 但浏览器快照已无此标签").map((d) => d.id)
+    dirty
+      .filter(
+        (d) =>
+          d.problem !== "open=true 但浏览器快照已无此标签" &&
+          !d.problem.includes("数组归属") &&
+          !d.problem.includes("根层级")
+      )
+      .map((d) => d.id)
   );
 
   // a) 有问题的 group / tab：清 parentId（成环/坏父），挂到兜底 Window
@@ -127,9 +167,14 @@ function repair(model, dirty, byId, opts) {
       if (!node || !problemIds.has(node.id)) continue;
       // 若节点自身就是环的一部分，先断开 parentId
       node.parentId = fallback.id;
-      if (node.kind !== bucket.replace(/s$/, "")) {
-        node.kind = bucket === "groups" ? "group" : "tab";
-      }
+    }
+  }
+
+  // a2) 根层级游离节点（parentId==null 且非 window）：挂到兜底 Window，不换桶
+  for (const bucket of ["groups", "tabs"]) {
+    for (const node of model[bucket] || []) {
+      if (!node || !node.id) continue;
+      if (node.parentId == null) node.parentId = fallback.id;
     }
   }
 
@@ -148,8 +193,10 @@ function repair(model, dirty, byId, opts) {
   if (opts.snapshot) {
     const tabIds = new Set(opts.snapshot.map((t) => t.id).filter((v) => v != null));
     const urls = new Set(opts.snapshot.map((t) => t.url));
+    const urlEligible = (t) => t.tabId == null && !t.imported && !t.importSource;
     for (const t of model.tabs || []) {
-      const actuallyOpen = (t.tabId != null && tabIds.has(t.tabId)) || urls.has(t.url);
+      const actuallyOpen =
+        (t.tabId != null && tabIds.has(t.tabId)) || (urlEligible(t) && urls.has(t.url));
       if (actuallyOpen) t.open = true;
       else if (t.open === true) t.open = false;
     }

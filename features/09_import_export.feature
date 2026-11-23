@@ -67,6 +67,20 @@
   那么 HTML 子分组挂在正确父分组下
   并且 HTML 标签与 URL 实体已解码
 
+ 场景: P0-1 导入 HTML 的节点强制补 kind 且默认关闭
+   假如 已有导入文件 "bookmarks.html" 含文件夹层级和书签
+   当 触发导入 HTML 文件 "bookmarks.html"
+   那么 导入分组 "开发" 的 kind 为 "group"
+   并且 导入标签 "MDN" 的 kind 为 "tab"
+   并且 导入节点不含浏览器 tabId 绑定
+
+ 场景: P0-1 导入分组可拖到 R1 顶层空白区升窗
+   假如 已有导入文件 "bookmarks.html" 含文件夹层级和书签
+   当 触发导入 HTML 文件 "bookmarks.html"
+   当 把分组 "开发" 拖到 R1 顶层空白区升窗
+   那么 "开发" 的 kind 与数组归属一致
+   并且 分组 "开发" 已是独立窗口
+
 场景: 导出 HTML - 顶层标签与特殊字符
   假如 树模型含顶层标签和特殊字符标题
   当 触发导出 HTML

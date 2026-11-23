@@ -134,7 +134,9 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
             settings: settings || {},
           };
           const result = syncBrowserSnapshot(model, { windows: realWindows, tabs });
-          if (result.invariant.repaired || result.created) {
+          // P0-2（2026-11-23）：只要模型发生任何变更就落盘（新增标签/改挂父节点/
+          // 校正 open 都可能不体现在 repaired/created 上），否则 UI 不刷新、要重开才见。
+          if (result.changed || result.invariant.repaired || result.created) {
             await saveModel(model, chromeApi);
           }
         } catch {
@@ -143,11 +145,24 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
       })();
     }, 300);
   };
-  for (const evt of ["onCreated", "onAttached", "onDetached", "onMoved"]) {
+  // P0-2（2026-11-23）：补齐全部标签/窗口变动事件——
+  // onRemoved 让关闭标签后模型 open 反向校正落盘；onUpdated 让标题/URL 变更回写模型。
+  for (const evt of [
+    "onCreated",
+    "onAttached",
+    "onDetached",
+    "onMoved",
+    "onRemoved",
+    "onUpdated",
+  ]) {
     chromeApi.tabs?.[evt]?.addListener?.(resyncFromBrowser);
   }
   chromeApi.windows?.onCreated?.addListener?.(resyncFromBrowser);
   chromeApi.windows?.onRemoved?.addListener?.(resyncFromBrowser);
+  // D13a：面板激活/聚焦时由 UI 请求的一次性快照兜底（事件漏发/SW 未唤醒时使用）。
+  chromeApi.runtime?.onMessage?.addListener?.((msg) => {
+    if (msg?.type === "tabharbor:resync") resyncFromBrowser();
+  });
 }
 
 if (globalThis.chrome?.runtime?.id) initServiceWorker(globalThis.chrome);
