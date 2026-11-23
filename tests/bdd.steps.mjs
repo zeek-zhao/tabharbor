@@ -152,6 +152,7 @@ export function makeChromeMock() {
     tabsCreate: [],
     tabsUpdate: [],
     tabsRemove: [],
+    tabsMove: [],
     winFocus: [],
     clipboard: [],
     downloads: [],
@@ -189,6 +190,14 @@ export function makeChromeMock() {
       },
       remove: async (ids) => {
         calls.tabsRemove.push(...(Array.isArray(ids) ? ids : [ids]));
+      },
+      // D14/D21：拖拽时同步移动真实 tab；ctx.failTabsMove 可注入失败以验证整体回滚。
+      move: async (id, opts) => {
+        if (ctx.failTabsMove) throw new Error("模拟标签移动失败");
+        calls.tabsMove.push({ id, ...opts });
+        const tab = ctx.openTabs.find((t) => t.id === id || t.id === Number(id));
+        if (tab && opts.windowId != null) tab.windowId = opts.windowId;
+        return { id: Number(id), ...opts };
       },
       // R1：openTabs 条目可带显式 id（模拟浏览器稳定 tabId）；缺省按序分配
       query: async () =>
@@ -1018,7 +1027,10 @@ step("假如", "浏览器打开了 {} 个标签页", (n) => {
 });
 
 step("假如", "浏览器打开了标签 {}", (title) => {
-  ctx.openTabs = [{ id: 1, title, url: tabUrl(title) }];
+  const node = ctx.named[title] || findAnyByTitle(title);
+  const id = node && node.tabId != null ? node.tabId : 1;
+  if (node && node.tabId == null) node.tabId = id;
+  ctx.openTabs = [{ id, title, url: tabUrl(title) }];
 });
 
 step("假如", "浏览器标签页变为 {} 个", (n) => {
@@ -1228,9 +1240,10 @@ step("当", "渲染树视图", () => {
 // N3（m10950）：浏览器标签页自身图标（favicon）作为派生态渲染到标签前缀
 step("假如", "标签 {} 的浏览器图标为 {}", (title, favUrl) => {
   const node = freshByTitle(title);
+  // D17：render 只按模型 tabId 索 favicon，须先给节点固化 tabId。
+  if (node.tabId == null) node.tabId = nextOpenTabId();
   ctx.favicons = ctx.favicons || new Map();
-  ctx.favicons.set(`url:${node.url}`, favUrl);
-  if (node.tabId != null) ctx.favicons.set(`id:${node.tabId}`, favUrl);
+  ctx.favicons.set(`id:${node.tabId}`, favUrl);
 });
 
 step("那么", "标签 {} 的行显示浏览器图标 {}", (title, favUrl) => {
@@ -1310,11 +1323,18 @@ step("那么", "主题设置 {} 解析为 {}", (theme, want) => {
 import * as ops from "../src/core/tabs-op.js";
 
 const openUrlsOf = () => new Set((ctx.openTabs || []).map((t) => t.url));
+// D17：为浏览器标签生成稳定且唯一的 tabId（从 1000 起，避开固定 1/2 场景）
+let _nextOpenTabId = 1000;
+const nextOpenTabId = () => _nextOpenTabId++;
 
 step("假如", "标签 {} 的网页已在浏览器打开", (title) => {
   ctx.openTabs = ctx.openTabs || [];
   const url = tabUrl(title);
-  if (!ctx.openTabs.some((t) => t.url === url)) ctx.openTabs.push({ title, url });
+  // D17：open 态只信 tabId，浏览器标签必须带 id 并固化到模型节点才能被识别。
+  const node = ctx.named[title] || findAnyByTitle(title);
+  const id = node && node.tabId != null ? node.tabId : nextOpenTabId();
+  if (node && node.tabId == null) node.tabId = id;
+  if (!ctx.openTabs.some((t) => t.id === id)) ctx.openTabs.push({ id, title, url });
 });
 
 step("假如", "开发分组含子分组 {} 且含标签 {} 与 {}", (subTitle, t1, t2) => {
@@ -1391,6 +1411,12 @@ step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, n) 
   // R1：同 URL 多开的浏览器标签页各有稳定 tabId（1..n）
   for (let i = 0; i < Number(n); i += 1)
     ctx.openTabs.push({ id: i + 1, title, url: tabUrl(title) });
+  // D17：open 态只信 tabId——把第 1 个浏览器标签页绑定到该模型叶子；
+  // 其余同 URL 标签页保持游离（不绑定），验证关闭只消费已绑定的那个。
+  // D17：open 态只信 tabId——若模型已有该节点则绑定第 1 个浏览器标签页；
+  // 启动归集场景（模型尚空）不预绑定，由 syncBrowserSnapshot 自行按 tabId 收纳。
+  const node = ctx.named[title] || ctx.m.tabs.find((x) => x.title === title);
+  if (node && node.tabId == null && !node.imported && !node.importSource) node.tabId = 1;
 });
 
 /* R1：叶子固化的 tabId 优先于 URL 识别（m10454） */
@@ -1410,7 +1436,17 @@ step("当", "行内关闭标签 {}", async (title) => {
 });
 
 step("当", "对 {} 执行打开全部", async (title) => {
-  ctx.openCount = await ops.openAll(ctx.mock.chrome, ctx.m, ctx.named[title].id, openUrlsOf());
+  const res = await ops.openAll(ctx.mock.chrome, ctx.m, ctx.named[title].id, openUrlsOf());
+  ctx.openCount = res;
+  for (const g of res.groups || []) {
+    for (let i = 0; i < (g.leafIds || []).length; i++) {
+      const leaf = ctx.m.tabs.find((t) => t.id === g.leafIds[i]);
+      if (leaf && g.tabIds[i] != null) {
+        leaf.tabId = g.tabIds[i];
+        leaf.open = true;
+      }
+    }
+  }
 });
 
 step("那么", "新建了 {} 个浏览器标签页", (n) => {
@@ -1798,6 +1834,7 @@ step("那么", "现有窗口仍保留", () => {
 step("当", "触发导入 HTML 文件 {}", async (filename) => {
   // R2：解析为独立快照后合并为「导入书签」窗口（当前数据保留）
   const snapshot = await io.importHTML(ctx.importHtml, ctx.m);
+  ctx.importSnapshot = snapshot;
   ctx.importedWindow = io.mergeAsImportedWindow(ctx.m, snapshot);
   ctx.importHtmlResult = ctx.m;
 });
@@ -1816,10 +1853,18 @@ step("那么", "书签转为标签", () => {
   if (!t1 || !t2 || !t3) throw new Error("书签未转为标签");
 });
 
-step("那么", "去重合并（URL+title 相同视为同一条）", () => {
-  const urls = ctx.m.tabs.map((t) => t.url);
-  const uniq = new Set(urls);
-  if (urls.length !== uniq.size) throw new Error("存在重复 URL");
+step("那么", "D20 重复 URL/标题书签全部保留（不去重不合并）", () => {
+  // D20（定稿 2026-11-23）：HTML 导入不做 URL/title 去重；重复项全部保留。
+  // mergeAsImportedWindow 会重生成哈希 id，因此按 (title,url) 计数核对而非 id。
+  const imported = ctx.importSnapshot || { tabs: [] };
+  const all = ctx.m.tabs;
+  const key = (t) => `${t.title}|${t.url}`;
+  const modelKeys = all.map(key);
+  for (const t of imported.tabs) {
+    const k = key(t);
+    if (!modelKeys.includes(k)) throw new Error(`导入标签未保留：${t.title}`);
+    modelKeys.splice(modelKeys.indexOf(k), 1); // 每个快照节点都应有对应落库节点
+  }
 });
 
 step("当", "触发手动备份", async () => {
@@ -2420,14 +2465,7 @@ step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, cou
 });
 step("当", "双击打开标签 {}", async (title) => {
   const tab = ctx.m.tabs.find((n) => n.title === title);
-  console.log("N5DBG tab", JSON.stringify(tab), "openTabs", JSON.stringify(ctx.openTabs));
   if (!tab) throw new Error(`未找到标签 ${title}`);
-  console.log(
-    "N5DBG find",
-    JSON.stringify(
-      (await import("../src/core/url-fallback.js")).findTabForNode(ctx.openTabs, tab, null)
-    )
-  );
   ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), {
     windowId: model.boundWindowId(ctx.m, tab.id),
     topWindow: model.topWindowOf(ctx.m, tab.id),
@@ -2452,7 +2490,6 @@ step("假如", "标签 {} 是导入节点", (title) => {
   const t = ctx.m.tabs.find((n) => n.title === title);
   if (!t) throw new Error(`未找到标签 ${title}`);
   t.imported = true;
-  console.log("N5DBG marked", JSON.stringify(t));
 });
 // N5：导入节点同 URL 不误聚焦——URL 必须与 tabUrl(title) 一致（mock 用 encodeURIComponent）
 step("当", "在窗口 {} 下创建同 URL 标签 {} 指向本地页 URL", (winTitle, title) => {
@@ -2473,4 +2510,90 @@ step("那么", "新建了一个独立浏览器标签页且未聚焦旧标签", (
     throw new Error(`tabs.create=${c.tabsCreate.length} ≠ 1（导入标签应开独立新标签）`);
   if (c.tabsUpdate.length !== 0)
     throw new Error(`tabs.update=${c.tabsUpdate.length} ≠ 0（不应聚焦同 URL 旧标签）`);
+});
+
+// ===== D14/D21/D15（定稿 2026-11-23）拖拽事务 / tab 移动 / 空窗删除 BDD =====
+step("假如", "窗口 {} 绑定浏览器窗口号 {}", (title, wid) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w) throw new Error(`未找到窗口 ${title}`);
+  w.windowId = Number(wid);
+});
+step("假如", "标签 {} 已打开且绑定 tabId {}", (title, tabId) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  t.open = true;
+  t.tabId = Number(tabId);
+  if (!ctx.openTabs.some((x) => x.id === Number(tabId)))
+    ctx.openTabs.push({ id: Number(tabId), title, url: t.url, windowId: 1 });
+});
+step("假如", "浏览器窗口 {} 存在", (wid) => {
+  ctx.existingWindowIds = ctx.existingWindowIds || [];
+  ctx.existingWindowIds.push(Number(wid));
+});
+step("假如", "注入浏览器标签移动失败", () => {
+  ctx.failTabsMove = true;
+});
+step("当", "执行拖拽事务：把标签 {} 移到窗口 {} 下", async (tabTitle, winTitle) => {
+  const t = ctx.m.tabs.find((n) => n.title === tabTitle);
+  const w = ctx.m.windows.find((n) => n.title === winTitle);
+  if (!t || !w) throw new Error(`未找到 ${tabTitle} / ${winTitle}`);
+  const before = JSON.stringify(ctx.m);
+  const tabIds = t.open && t.tabId != null ? [t.tabId] : [];
+  ctx.dropError = null;
+  ctx.dragSnapshot = before;
+  try {
+    if (tabIds.length && w.windowId != null) {
+      await ctx.mock.chrome.tabs.move(tabIds[0], { windowId: w.windowId, index: 0 });
+    }
+    ctx.dropOk = model.moveLeafInto(ctx.m, t.id, w.id);
+    ctx.dragSnapshot = before;
+  } catch (e) {
+    ctx.dropOk = false;
+    ctx.dropError = e.message;
+    Object.keys(ctx.m).forEach((k) => delete ctx.m[k]);
+    Object.assign(ctx.m, JSON.parse(before));
+  }
+});
+step("那么", "浏览器标签 {} 被移动到窗口 {}", (tabId, wid) => {
+  const mv = ctx.mock.calls.tabsMove.find((m) => m.id === Number(tabId));
+  if (!mv || mv.windowId !== Number(wid))
+    throw new Error(
+      `tabs.move(${tabId}) 未到窗口 ${wid}：${JSON.stringify(ctx.mock.calls.tabsMove)}`
+    );
+});
+step("那么", "浏览器标签移动失败时模型完整回滚且提示用户", () => {
+  if (!ctx.dropError) throw new Error("未捕获移动失败");
+  if (JSON.stringify(ctx.m) !== ctx.dragSnapshot) throw new Error("模型未完整回滚");
+});
+step("当", "按 D15 清理因拖拽变空的窗口 {}", (title) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w) throw new Error(`未找到窗口 ${title}`);
+  const kids = model.childrenOf(ctx.m, w.id);
+  if (kids.length === 0) {
+    ctx.wasEmptiedByDrop = true;
+    ctx.m.windows.splice(ctx.m.windows.indexOf(w), 1);
+  }
+});
+step("那么", "模型窗口 {} 已不再存在", (title) => {
+  if (ctx.m.windows.some((w) => w.title === title)) throw new Error(`窗口 ${title} 仍存在`);
+});
+// Case 补充：when 版本兼容 + tabId 非空断言
+step("那么", "标签 {} 的浏览器标签页号非空", (title) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t || t.tabId == null) throw new Error(`${title} 未回填 tabId`);
+});
+
+// Case 补充：openAll 使用「执行打开全部」步骤名，这里补 when 别名与断言
+step("当", "窗口 {} 已绑定浏览器窗口号 {}", (title, wid) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w) throw new Error(`未找到窗口 ${title}`);
+  w.windowId = Number(wid);
+});
+step("当", "标签 {} 标记为打开且绑定 tabId {}", (title, tabId) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  t.open = true;
+  t.tabId = Number(tabId);
+  if (!ctx.openTabs.some((x) => x.id === Number(tabId)))
+    ctx.openTabs.push({ id: Number(tabId), title, url: t.url, windowId: 1 });
 });

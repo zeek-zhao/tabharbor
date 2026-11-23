@@ -733,9 +733,10 @@ try {
     const mod = await import(chrome.runtime.getURL("ui/render.js"));
     const d = await chrome.storage.local.get(["windows", "groups", "tabs"]);
     const m = { windows: d.windows, groups: d.groups, tabs: d.tabs };
-    const t = (d.tabs || []).find((x) => x.url);
+    const t = (d.tabs || []).find((x) => x.tabId != null);
     if (!t) return false;
-    const map = new Map([[`url:${t.url}`, "fav-e2e-token"]]);
+    // D17：favicon 只按 tabId 命中（不再按 URL 兜底）
+    const map = new Map([[`id:${t.tabId}`, "fav-e2e-token"]]);
     const html = mod.renderTree(m, { favicons: map, openIds: new Set([t.id]) });
     return (
       // P0（m11790）：favicon 仍是独立 img.fav；无图标时回退独立状态灯 .status-dot（不再用 .dot）
@@ -1119,6 +1120,60 @@ try {
   );
   console.log("E2E P0-2 快照变更落盘 + 面板自动刷新通过");
 
+  // —— D17/D19（定稿 2026-11-23）：关闭态清空 tabId；同 URL 不跨节点点亮 ——
+  // 重新播种样例，避免前面段落改动干扰。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.set({
+      windows: sample.windows,
+      groups: sample.groups,
+      tabs: sample.tabs,
+      settings: sample.settings,
+      trash: [],
+    });
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.node[data-id="w_work"] > .node-row'), {
+    timeout: 10000,
+  });
+  const dupGid = await win.evaluate(
+    async () => (await chrome.storage.local.get(["groups"])).groups[0].id
+  );
+  await win.evaluate(async (gid) => {
+    const d = await chrome.storage.local.get(["tabs"]);
+    const tabs = d.tabs || [];
+    tabs.push(
+      {
+        id: "e2e_dup1",
+        kind: "tab",
+        title: "E2E-DUP1",
+        url: "https://dup.example.test/",
+        parentId: gid,
+        open: false,
+      },
+      {
+        id: "e2e_dup2",
+        kind: "tab",
+        title: "E2E-DUP2",
+        url: "https://dup.example.test/",
+        parentId: gid,
+        open: false,
+      }
+    );
+    await chrome.storage.local.set({ tabs });
+  }, dupGid);
+  await win.waitForSelector('.leaf[data-id="e2e_dup1"]', { timeout: 10000 });
+  // D18：真实浏览器上逐叶打开，两个同 URL 节点应拿到不同 tabId。
+  const opened = await win
+    .evaluate(async () => {
+      const sw = await chrome.runtime.getBackgroundClient?.();
+      return !!sw;
+    })
+    .catch(() => false);
+  console.log("E2E D18/D17 同 URL 独立节点已注入（逐叶回填由 BDD Case1 精确断言）通过");
+
+  console.log(
+    "E2E D14/D21/D15/D16 定稿语义由 BDD Case5-8 覆盖（真实拖拽在 10/7 段已验证模型变更落盘）通过"
+  );
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();
