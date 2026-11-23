@@ -2645,3 +2645,120 @@ step("当", "标签 {} 标记为打开且绑定 tabId {}", (title, tabId) => {
   if (!ctx.openTabs.some((x) => x.id === Number(tabId)))
     ctx.openTabs.push({ id: Number(tabId), title, url: t.url, windowId: 1 });
 });
+
+/* ---------- LinkMap 导出格式导入（2026-11-24）---------- */
+// 内联构造一份 LinkMap 导出（fancyTree 风格）：窗口→note 分组→tab，含嵌套 tab 与 favicon。
+step("假如", "已有 LinkMap 导出数据含窗口分组标签和嵌套标签", () => {
+  const mkTab = (id, title, url, extra = {}) => ({
+    expanded: false,
+    key: `k-${id}`,
+    title,
+    icon: `https://example.com/fav-${id}.ico`,
+    data: {
+      nodeType: "tab",
+      id,
+      title,
+      url,
+      favIconUrl: `https://example.com/fav-${id}.ico`,
+      ...extra,
+    },
+    children: [],
+  });
+  const child1 = mkTab(102, "嵌套标签B", "https://example.com/b");
+  const tabA = mkTab(101, "标签A", "https://example.com/a");
+  tabA.children = [child1]; // tab→tab 嵌套，需扁平化为兄弟
+  const note = {
+    expanded: false,
+    key: "k-note",
+    data: { nodeType: "note", alias: "分组N" },
+    children: [tabA],
+  };
+  const looseTab = mkTab(103, "直属标签", "https://example.com/c");
+  const subWindow = {
+    expanded: false,
+    key: "k-subwin",
+    data: { nodeType: "window", alias: "子窗口W" },
+    children: [mkTab(104, "子窗标签", "https://example.com/d")],
+  };
+  const win = {
+    expanded: false,
+    key: "k-win",
+    title: "Window",
+    data: { nodeType: "window", alias: "主窗口", windowId: 888 },
+    children: [note, looseTab, subWindow],
+  };
+  ctx.linkMapData = {
+    version: "1.1.5",
+    exportTime: "2026-11-24 01_52_34",
+    rawData: [win],
+  };
+});
+
+step("当", "导入 LinkMap 导出数据", async () => {
+  ctx.importRejected = false;
+  ctx.importError = "";
+  try {
+    ctx.importSnapshot = await io.importLinkMap(ctx.linkMapData);
+    ctx.importedWindow = io.mergeAsImportedWindow(ctx.m, ctx.importSnapshot);
+  } catch (e) {
+    ctx.importRejected = true;
+    ctx.importError = e.message;
+  }
+});
+
+step("那么", "LinkMap 识别为真且非自有快照", () => {
+  if (!io.isLinkMapExport(ctx.linkMapData)) throw new Error("LinkMap 格式未被识别");
+  if (io.isLinkMapExport({ version: 1, windows: [], groups: [], tabs: [] }))
+    throw new Error("自有快照被误判为 LinkMap");
+});
+
+step("那么", "LinkMap 窗口转模型窗口且标题取 alias", () => {
+  // 快照解析层：window.alias 应成为窗口标题（合并落库时整体归入「导入书签」窗口是既有约定）
+  if (!ctx.importSnapshot.windows.some((w) => w.title === "主窗口"))
+    throw new Error("LinkMap window.alias 未转为窗口标题");
+  if (!ctx.m.windows.some((w) => w.title === "导入书签"))
+    throw new Error("LinkMap 未合并为导入书签窗口");
+});
+
+step("那么", "LinkMap note 转分组且 alias 为标题", () => {
+  if (!ctx.m.groups.some((g) => g.title === "分组N"))
+    throw new Error("LinkMap note.alias 未转为分组标题");
+});
+
+step("那么", "LinkMap 嵌套 window 降级为分组", () => {
+  if (!ctx.m.groups.some((g) => g.title === "子窗口W")) throw new Error("嵌套 window 未降级为分组");
+  if (ctx.m.windows.some((w) => w.title === "子窗口W"))
+    throw new Error("嵌套 window 不应再建顶层窗口");
+});
+
+step("那么", "LinkMap tab 转标签且嵌套标签扁平化为兄弟", () => {
+  for (const title of ["标签A", "嵌套标签B", "直属标签", "子窗标签"]) {
+    if (!ctx.m.tabs.some((t) => t.title === title)) throw new Error(`缺少标签 ${title}`);
+  }
+  const a = ctx.m.tabs.find((t) => t.title === "标签A");
+  const b = ctx.m.tabs.find((t) => t.title === "嵌套标签B");
+  if (!a || !b || a.parentId !== b.parentId) throw new Error("嵌套 tab 未扁平化为同父兄弟");
+});
+
+step("那么", "LinkMap 标签保留 URL 与 favicon 且默认关闭未绑定", () => {
+  const a = ctx.m.tabs.find((t) => t.title === "标签A");
+  if (!a || a.url !== "https://example.com/a") throw new Error("LinkMap 标签 URL 未保留");
+  if (!a.favicon) throw new Error("LinkMap 标签 favicon 未保留");
+  // 只校验本次导入的标签（imported=true），不要误伤场景中预先存在的手工窗口标签
+  for (const t of ctx.m.tabs.filter((x) => x.imported === true)) {
+    if (t.open !== false) throw new Error(`${t.title} 应为关闭态`);
+    if (t.tabId != null || t.windowId != null) throw new Error(`${t.title} 仍带浏览器绑定`);
+  }
+});
+
+step("那么", "LinkMap 导入树结构闭合且无孤儿节点", () => {
+  const ids = new Set([...ctx.m.windows, ...ctx.m.groups, ...ctx.m.tabs].map((n) => n.id));
+  for (const n of [...ctx.m.groups, ...ctx.m.tabs]) {
+    if (!ids.has(n.parentId)) throw new Error(`孤儿节点 ${n.title} 的 parentId=${n.parentId}`);
+  }
+  try {
+    validateTree(ctx.m);
+  } catch (e) {
+    throw new Error("LinkMap 导入树未通过不变量校验：" + e.message);
+  }
+});

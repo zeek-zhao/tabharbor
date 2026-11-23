@@ -153,3 +153,10 @@
     那么 "src/ui/shell.js" 包含 "pipRefresh = () => void renderPip"
     并且 "src/ui/shell.js" 包含 "pipRefresh()"
     并且 "src/ui/shell.js" 包含 "pipRefresh = () => {}"
+
+  # LinkMap 导出格式导入（2026-11-24）：文件入口自动识别 rawData 树并走专用解析器
+  场景: LinkMap 导入入口自动识别
+    那么 "src/ui/shell.js" 包含 "isLinkMapExport"
+    并且 "src/ui/shell.js" 包含 "importLinkMap"
+    并且 "src/core/import-export.js" 包含 "isLinkMapExport"
+    并且 "src/core/import-export.js" 包含 "rawData"

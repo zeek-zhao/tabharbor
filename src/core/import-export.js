@@ -2,7 +2,7 @@
  * M3-1 书签导入导出 + 备份恢复
  * FR-031~038 / issue #27
  */
-import { newId } from "./model.js";
+import { newId, DEFAULT_WINDOW_TITLE } from "./model.js";
 
 export const EXPORT_VERSION = 1;
 
@@ -194,6 +194,139 @@ export function mergeAsImportedWindow(model, imported) {
   }
   model.windows.push(win);
   return win;
+}
+
+/**
+ * LinkMap 导出格式识别（2026-11-24）。
+ * LinkMap 类扩展导出的 JSON 形如 { version:"1.1.5", exportTime, rawData:[...] }，
+ * rawData 是 FancyTree 树：节点 data.nodeType ∈ {window,note,tab}，
+ * window.data.alias = 窗口名、note.data.alias = 分组名、tab.data.{title,url,favIconUrl}。
+ * 与 TabHarbor 自有快照（version:1 + windows/groups/tabs 三数组）完全不同，需单独识别。
+ */
+export function isLinkMapExport(data) {
+  return !!(
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    Array.isArray(data.rawData) &&
+    data.rawData.length > 0 &&
+    data.rawData.some((n) => n && n.data && ["window", "note", "tab"].includes(n.data.nodeType))
+  );
+}
+
+/**
+ * 导入 LinkMap 导出数据（解析为独立模型，由 mergeAsImportedWindow 合并落库）。
+ *
+ * 映射规则：
+ *   - window → TabHarbor window（title=data.alias||data.title||"Window"）
+ *   - note   → TabHarbor group（title=data.alias）
+ *   - tab    → TabHarbor tab（title/url/favicon；url 为空时回退 pendingUrl）
+ *   - 嵌套 tab→tab（LinkMap 用子 tab 表示「同组打开的一串标签」）→ 扁平化为同一父下的兄弟 tab，
+ *     因为 TabHarbor 中 tab 是叶子，不能承载子节点；这样能保住全部标签不丢失。
+ *   - 子 window / tab→note 中的 note → 提升为 group，挂到最近的窗口/分组下。
+ *   - 所有导入节点：open=false、imported=true、剥离 tabId/windowId（D12：URL 兜底不得点亮）。
+ *
+ * @param {object} data LinkMap 导出 JSON（含 rawData）
+ * @returns {Promise<{windows:Array,groups:Array,tabs:Array,settings:object,trash:Array}>}
+ */
+export async function importLinkMap(data) {
+  if (!isLinkMapExport(data)) {
+    throw new Error("LinkMap 数据无效：缺少 rawData 树");
+  }
+  const model = { windows: [], groups: [], tabs: [], settings: {}, trash: [] };
+  const nodeData = (n) => (n && n.data && typeof n.data === "object" ? n.data : {});
+  const cleanText = (v) => (typeof v === "string" ? v.trim() : "");
+
+  // 统一递归：把 LinkMap 节点挂到 ownerId（一个 window 或 group）下。
+  //   - window：isRoot=true 建模型窗口；嵌套 window 降级为 group（保持单窗口导入约定）。
+  //   - note：建 group，成为新的 owner。
+  //   - tab：建 tab（叶子）；其嵌套 tab 作为兄弟挂同一 owner；嵌套 note/window 建 group 挂同 owner。
+  const walk = (node, ownerId, isRoot) => {
+    if (!node || typeof node !== "object") return;
+    const d = nodeData(node);
+    const type = d.nodeType;
+    const children = Array.isArray(node.children) ? node.children : [];
+
+    if (type === "window") {
+      if (isRoot) {
+        const title = cleanText(d.alias) || cleanText(d.title) || DEFAULT_WINDOW_TITLE;
+        const win = { id: newId("w"), kind: "window", title, collapsed: false };
+        model.windows.push(win);
+        for (const c of children) walk(c, win.id, false);
+        return win;
+      }
+      // 嵌套 window → group（挂当前 owner）
+      const title = cleanText(d.alias) || cleanText(d.title) || "窗口";
+      const grp = {
+        id: newId("g"),
+        kind: "group",
+        title,
+        parentId: ownerId,
+        collapsed: false,
+        note: "",
+      };
+      model.groups.push(grp);
+      for (const c of children) walk(c, grp.id, false);
+      return grp;
+    }
+
+    if (type === "note") {
+      const title = cleanText(d.alias) || cleanText(node.title) || "分组";
+      const grp = {
+        id: newId("g"),
+        kind: "group",
+        title,
+        parentId: ownerId,
+        collapsed: false,
+        note: "",
+      };
+      model.groups.push(grp);
+      for (const c of children) walk(c, grp.id, false);
+      return grp;
+    }
+
+    if (type === "tab") {
+      const title = cleanText(d.title) || cleanText(node.title) || cleanText(d.url) || "未命名标签";
+      const url = cleanText(d.url) || cleanText(d.pendingUrl) || "";
+      const tab = {
+        id: newId("t"),
+        kind: "tab",
+        title,
+        url,
+        parentId: ownerId,
+        note: "",
+        open: false,
+        imported: true,
+      };
+      const fav =
+        cleanText(d.favIconUrl) || (typeof node.icon === "string" ? cleanText(node.icon) : "");
+      if (fav) tab.favicon = fav;
+      model.tabs.push(tab);
+      // tab 是叶子：嵌套 tab 扁平化为兄弟（同 ownerId）；嵌套 note/window 提为 group。
+      for (const c of children) walk(c, ownerId, false);
+      return tab;
+    }
+
+    // 未知 nodeType：穿透 children，避免整枝丢失
+    for (const c of children) walk(c, ownerId, false);
+    return null;
+  };
+
+  for (const root of data.rawData) {
+    const d = nodeData(root);
+    if (d.nodeType === "window") {
+      walk(root, null, true);
+    } else if (!model.windows.length) {
+      // 顶层非 window：包一个窗口承载
+      const win = { id: newId("w"), kind: "window", title: DEFAULT_WINDOW_TITLE, collapsed: false };
+      model.windows.push(win);
+      walk(root, win.id, false);
+    } else {
+      walk(root, model.windows[0].id, false);
+    }
+  }
+
+  return model;
 }
 
 /**

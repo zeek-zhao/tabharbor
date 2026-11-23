@@ -158,3 +158,17 @@
   并且 GitHub 写入接口返回 403
   当 尝试上传备份到 GitHub
   那么 备份失败并提示 HTTP 403
+
+# LinkMap 导出格式导入（2026-11-24）
+场景: 导入 LinkMap 导出 - 窗口分组标签映射且嵌套标签扁平化
+  假如 树模型有手工窗口含开发分组和标签 "MDN IndexedDB"
+  并且 已有 LinkMap 导出数据含窗口分组标签和嵌套标签
+  当 导入 LinkMap 导出数据
+  那么 LinkMap 识别为真且非自有快照
+  并且 LinkMap 窗口转模型窗口且标题取 alias
+  并且 LinkMap note 转分组且 alias 为标题
+  并且 LinkMap 嵌套 window 降级为分组
+  并且 LinkMap tab 转标签且嵌套标签扁平化为兄弟
+  并且 LinkMap 标签保留 URL 与 favicon 且默认关闭未绑定
+  并且 LinkMap 导入树结构闭合且无孤儿节点
+  并且 现有手工窗口数据未被导入替换

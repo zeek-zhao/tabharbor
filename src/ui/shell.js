@@ -1729,7 +1729,14 @@ export async function bootShell(root) {
       let imported;
       const text = await file.text();
       if (file.name.toLowerCase().endsWith(".json")) {
-        imported = await io.importJSON({ ...JSON.parse(text), settings: settings || {} }, m);
+        const parsed = JSON.parse(text);
+        // LinkMap 导出（{rawData,version,exportTime} 树）→ 专用解析器；
+        // 否则按 TabHarbor 自有快照（version:1 + 三数组）处理。
+        if (io.isLinkMapExport(parsed)) {
+          imported = await io.importLinkMap(parsed);
+        } else {
+          imported = await io.importJSON({ ...parsed, settings: settings || {} }, m);
+        }
       } else if (file.name.toLowerCase().endsWith(".html")) {
         imported = await io.importHTML(text, m);
       } else {
