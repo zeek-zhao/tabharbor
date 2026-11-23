@@ -379,14 +379,33 @@ try {
 
   // —— #31 M2 整理：拖拽落点 / 键盘导航 / 回收站恢复与彻底删除 ——
   // D1：真实鼠标拖拽（Playwright 原生 HTML5 DnD，不再用合成 DragEvent）：
+  // 先重新播种样例并展开全部，避免前面段落折叠/互转造成的 DOM 不稳定（CI 上曾偶发超时）。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.set({
+      windows: sample.windows,
+      groups: sample.groups,
+      tabs: sample.tabs,
+    });
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(() => !!document.querySelector('.leaf[data-id="t_project_1"]'), {
+    timeout: 10000,
+  });
+  const d1Leaves = await win.evaluate(() => document.querySelectorAll(".leaf").length);
+  await win.click("#btnToggleAll");
+  await win.click("#btnToggleAll");
+  await win.waitForFunction((n) => document.querySelectorAll(".leaf").length >= n, d1Leaves, {
+    timeout: 5000,
+  });
+  await win.waitForSelector('.node[data-id="g_design"] > .node-row', { state: "visible" });
   // t_project_1（学习组）拖到 g_design 分组 → 移入
   await win
     .locator('.leaf[data-id="t_project_1"]')
-    .dragTo(win.locator('.node[data-id="g_design"] .node-row'));
+    .dragTo(win.locator('.node[data-id="g_design"] > .node-row'));
   await win.waitForFunction(
     () => !!document.querySelector('.node[data-id="g_design"] .leaf[data-id="t_project_1"]'),
     undefined,
-    { timeout: 5000 }
+    { timeout: 8000 }
   );
   console.log("E2E 10/7 拖拽落点（真实鼠标拖拽，标签移入分组）通过");
 
