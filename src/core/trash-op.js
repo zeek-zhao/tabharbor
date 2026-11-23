@@ -3,7 +3,7 @@
 //        desc: {groups, tabs} }（R3：index 使恢复落回原位，而非随意追加）
 // payload 与样例数据（tabharbor-sample.json trash）保持同形；desc 仅 group/window 条目携带后代。
 
-import { findNode, descendantsOf } from "./model.js";
+import { findNode, descendantsOf, DEFAULT_WINDOW_TITLE } from "./model.js";
 
 const clone = (n) => JSON.parse(JSON.stringify(n));
 
@@ -48,7 +48,7 @@ export function trashNode(m, id, time) {
 }
 
 // 恢复落点：原父仍在则回原父；否则首个窗口的首个分组；否则（FR-024）首个窗口；
-// 连窗口都没有则新建「浏览器窗口」+「默认分组」。返回实际挂载的父 id 或 null（窗口）。
+// 连窗口都没有则新建「Window」+「默认分组」（D14 系统默认窗口标题统一英文）。返回实际挂载的父 id 或 null（窗口）。
 function resolveRestoreParent(m, entry) {
   const orig = entry.parentId ? findNode(m, entry.parentId) : null;
   if (orig && (orig.kind === "group" || orig.kind === "window")) return orig.id;
@@ -63,7 +63,7 @@ function resolveRestoreParent(m, entry) {
   const w = {
     id: `w_${Date.now().toString(36)}`,
     kind: "window",
-    title: "浏览器窗口",
+    title: DEFAULT_WINDOW_TITLE,
     collapsed: false,
   };
   m.windows.push(w);

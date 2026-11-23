@@ -64,7 +64,7 @@ const GUIDE_HTML = `
   <li><b>双击打开：</b>双击标签即在浏览器打开；行内复制图标一键复制，末尾 X 关闭网页（仅已打开显示）。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
   <li><b>右键菜单：</b>标签上仅编辑、备注、删除；分组/窗口可整组打开、重命名、关闭、展开收起切换、删除；删除项进入回收站。</li>
-  <li><b>双向拖拽：</b>标签拖到其他组；组拖到其他组（子组）或其他窗口；窗口合并到其他窗口；拖动高亮目标容器。</li>
+  <li><b>双向拖拽：</b>标签拖到其他组；组拖到其他组（子组）或其他窗口（升为独立窗口）；窗口拖到另一窗口内降级为子组；拖动高亮目标容器。</li>
   <li><b>状态颜色：</b>标签按打开高亮 / 灰显；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
   <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
@@ -439,7 +439,11 @@ export async function bootShell(root) {
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
       const winId = boundWindowId(m, id);
-      const res = await tabsOp.openTab(chrome, node, urls, { windowId: winId });
+      const res = await tabsOp.openTab(chrome, node, urls, {
+        windowId: winId,
+        topWindow: topWindowOf(m, id),
+        m,
+      });
       let dirty = false;
       if (res.created && res.tabId != null && node.tabId !== res.tabId) {
         node.tabId = res.tabId;
@@ -459,6 +463,22 @@ export async function bootShell(root) {
     } catch (err) {
       say("打开失败：" + err.message);
     }
+  };
+
+  // D16：把 openAll 返回的每组 rebound 窗口句柄回填到模型并持久化，返回是否变更。
+  const applyOpenAllRebind = async (res) => {
+    if (!res || !Array.isArray(res.groups)) return false;
+    let dirty = false;
+    for (const g of res.groups) {
+      if (!g.rebound || g.windowId == null || g.topWindowId == null) continue;
+      const top = findNode(m, g.topWindowId);
+      if (top && top.windowId !== g.windowId) {
+        top.windowId = g.windowId;
+        dirty = true;
+      }
+    }
+    if (dirty) await store.saveModel(m);
+    return dirty;
   };
 
   // ---- #31 拖拽（FR-025~032）：leaf/group/window 全层级事件委托 ----
@@ -824,8 +844,9 @@ export async function bootShell(root) {
         try {
           const urls = new Set((await chrome.tabs.query({})).map((x) => x.url).filter(Boolean));
           const n = await tabsOp.openAll(chrome, m, gid, urls);
+          await applyOpenAllRebind(n);
           await refreshOpen();
-          toast(`已打开 ${n} 个网页`);
+          toast(`已打开 ${n.created} 个网页`);
         } catch (err) {
           say("打开失败：" + err.message);
         }
@@ -890,8 +911,9 @@ export async function bootShell(root) {
         openNewModal({ kind: "note", targetId: id });
       } else if (act === "open-group" || act === "open-all") {
         const n = await tabsOp.openAll(chrome, m, id, await openUrlsNow());
+        await applyOpenAllRebind(n);
         await refreshOpen();
-        toast(`已打开 ${n} 个网页`);
+        toast(`已打开 ${n.created} 个网页`);
       } else if (act === "close-group" || act === "close-all") {
         const n = await tabsOp.closeNode(chrome, m, id);
         await refreshOpen();

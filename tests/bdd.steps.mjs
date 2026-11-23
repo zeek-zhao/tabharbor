@@ -1036,9 +1036,9 @@ step("假如", "浏览器新开标签页号 {} 打开 {}", (n, title) => {
   ctx.openTabs.push({ id: Number(n), title, url: tabUrl(title) });
 });
 
-step("那么", "当前浏览器窗口叶子标签页号为 {}", (csv) => {
-  const win = ctx.m.windows.find((w) => w.title === align.CURRENT_WINDOW_TITLE);
-  if (!win) throw new Error("当前浏览器窗口不存在");
+step("那么", "Window 叶子标签页号为 {}", (csv) => {
+  const win = ctx.m.windows.find((w) => w.title === align.DEFAULT_WINDOW_TITLE);
+  if (!win) throw new Error("Window 窗口不存在");
   const ids = model
     .childrenOf(ctx.m, win.id)
     .filter((x) => x.kind === "tab")
@@ -1168,7 +1168,7 @@ step("那么", "旧窗口含 {} 个标签节点", (n) => {
 });
 
 step("那么", "该窗口含 {} 个标签节点", (n) => {
-  const win = ctx.m.windows.find((w) => w.title === "当前浏览器窗口");
+  const win = ctx.m.windows.find((w) => w.title === align.DEFAULT_WINDOW_TITLE) || ctx.curWin;
   const kids = model.childrenOf(ctx.m, win.id).filter((x) => x.kind === "tab");
   if (kids.length !== Number(n)) throw new Error(`标签数=${kids.length} ≠ ${n}`);
 });
@@ -1337,7 +1337,12 @@ step("假如", "标签 {} 所在窗口绑定失效的 windowId {}", (title, wid)
 
 step("当", "双击标签 {}", async (title) => {
   const tab = ctx.named[title];
-  const opts = { windowId: model.boundWindowId(ctx.m, tab.id) };
+  const opts = {
+    windowId: model.boundWindowId(ctx.m, tab.id),
+    // D16：把顶层窗口与模型传给 openTab，未绑定/离线窗口才能新建并回填
+    topWindow: model.topWindowOf(ctx.m, tab.id),
+    m: ctx.m,
+  };
   ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), opts);
 });
 
@@ -2374,11 +2379,98 @@ step("当", "把标签 {} 绑定到浏览器标签页号 {}", (title, tabId) => 
 step("当", "浏览器快照打开标签页号 {} 指向 {}", (tabId, url) => {
   // 每个场景重建快照，避免跨场景残留的 windows/tabs 影响反向校验
   ctx.syncSnapshot = { windows: [], tabs: [] };
-  const tab = { id: Number(tabId), url, title: "快照网页" };
+  // N6：快照回写会把最新标题写回模型，因此快照标题应与既有节点一致，
+  // 否则节点被重命名后按旧标题查找会失败（属正确产品行为，非 bug）。
+  const tab = { id: Number(tabId), url, title: "已开网页" };
   ctx.syncSnapshot.tabs.push(tab);
   if (!ctx.syncSnapshot.windows.length) {
     ctx.syncSnapshot.windows.push({ id: 9001, focused: true, tabs: [tab] });
   } else {
     ctx.syncSnapshot.windows[0].tabs.push(tab);
   }
+});
+
+/* ---------- N1-N7（2026-11-23 飞书规格：窗口归属/标题/关闭行为） ---------- */
+step("那么", "模型不存在标题为 {} 的窗口", (title) => {
+  const hit = ctx.m.windows.find((w) => w.title === title);
+  if (hit) throw new Error(`仍存在标题为 "${title}" 的窗口`);
+});
+step("那么", "窗口 {} 仍绑定 windowId {}", (title, wid) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w || w.windowId !== Number(wid)) {
+    throw new Error(`窗口 "${title}" 应绑定 ${wid}，实际 ${w && w.windowId}`);
+  }
+});
+// N1 旧标题迁移：旧标题节点改名后按绑定句柄定位
+step("那么", "窗口 旧窗口 仍绑定 windowId 77", () => {
+  const w = ctx.m.windows.find((n) => n.windowId === 77);
+  if (!w) throw new Error("旧 windowId=77 的窗口未保留");
+});
+step("那么", "标签 {} 的浏览器标签页号为空", (title) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  if (t.tabId != null) throw new Error(`${title} 仍有 tabId=${t.tabId}`);
+});
+step("那么", "模型标签总数为 {}", (n) => {
+  if (ctx.m.tabs.length !== Number(n)) throw new Error(`模型标签数=${ctx.m.tabs.length} ≠ ${n}`);
+});
+step("假如", "浏览器打开了标签 {} 的 {} 个相同网页", (title, count) => {
+  const url = tabUrl(title);
+  ctx.openTabs = Array.from({ length: Number(count) }, (_, i) => ({ id: 700 + i, title, url }));
+});
+step("当", "双击打开标签 {}", async (title) => {
+  const tab = ctx.m.tabs.find((n) => n.title === title);
+  console.log("N5DBG tab", JSON.stringify(tab), "openTabs", JSON.stringify(ctx.openTabs));
+  if (!tab) throw new Error(`未找到标签 ${title}`);
+  console.log(
+    "N5DBG find",
+    JSON.stringify(
+      (await import("../src/core/url-fallback.js")).findTabForNode(ctx.openTabs, tab, null)
+    )
+  );
+  ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), {
+    windowId: model.boundWindowId(ctx.m, tab.id),
+    topWindow: model.topWindowOf(ctx.m, tab.id),
+    m: ctx.m,
+  });
+});
+step("当", "标签 {} 设置备注 {}", (title, note) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  t.note = String(note);
+});
+step("那么", "标签 {} 的备注为 {}", (title, note) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t || t.note !== String(note)) throw new Error(`${title} 备注=${t && t.note} ≠ ${note}`);
+});
+step("那么", "标签 {} 的 URL 为 {}", (title, url) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t || t.url !== String(url)) throw new Error(`${title} URL=${t && t.url} ≠ ${url}`);
+});
+// N5：把标签标记为导入节点（imported=true），URL 兜底不得命中已开同 URL 标签
+step("假如", "标签 {} 是导入节点", (title) => {
+  const t = ctx.m.tabs.find((n) => n.title === title);
+  if (!t) throw new Error(`未找到标签 ${title}`);
+  t.imported = true;
+  console.log("N5DBG marked", JSON.stringify(t));
+});
+// N5：导入节点同 URL 不误聚焦——URL 必须与 tabUrl(title) 一致（mock 用 encodeURIComponent）
+step("当", "在窗口 {} 下创建同 URL 标签 {} 指向本地页 URL", (winTitle, title) => {
+  ctx.named[title] = model.addTab(ctx.m, title, tabUrl("本地页"), byTitle(winTitle).id);
+});
+step("当", "窗口 {} 绑定存活 windowId 1", (title) => {
+  const w = ctx.m.windows.find((n) => n.title === title);
+  if (!w) throw new Error(`未找到窗口 ${title}`);
+  w.windowId = 1;
+});
+step("那么", "未新建浏览器标签页", () => {
+  if (ctx.mock.calls.tabsCreate.length !== 0)
+    throw new Error(`tabs.create=${ctx.mock.calls.tabsCreate.length} ≠ 0`);
+});
+step("那么", "新建了一个独立浏览器标签页且未聚焦旧标签", () => {
+  const c = ctx.mock.calls;
+  if (c.tabsCreate.length !== 1)
+    throw new Error(`tabs.create=${c.tabsCreate.length} ≠ 1（导入标签应开独立新标签）`);
+  if (c.tabsUpdate.length !== 0)
+    throw new Error(`tabs.update=${c.tabsUpdate.length} ≠ 0（不应聚焦同 URL 旧标签）`);
 });

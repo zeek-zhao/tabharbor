@@ -3,6 +3,11 @@
 // 约定：parentId 引用任意上层节点 id（tab→group、group→window 或父 group）；窗口 parentId 恒为 null。
 // L1 类型识别（N1）：顶层=窗口、L1 内=分组、标签=网页；身份/层级只依据 kind + 数组归属，
 // 绝不以 title / url 判定。统一规则见 core/levels.js。
+
+// D14（2026-11-23）：系统自动建立、未命名的模型窗口标题统一为英文 Window，
+// 不自动编号、不取网页标题/URL。放在 model.js（依赖叶子，无循环引用风险），
+// align.js / invariants.js 共用。
+export const DEFAULT_WINDOW_TITLE = "Window";
 import { isTopLevel, kindConsistent } from "./levels.js";
 
 // R1（m10454）：标签唯一标识 = 独立算法生成的哈希 ID（FNV-1a 32 位 → 36 进制 7 位），

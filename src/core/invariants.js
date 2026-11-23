@@ -13,7 +13,8 @@
 // syncBrowserSnapshot（align.js）完成。open 快照一致性校验用 opts.snapshot：
 //   [{ id, url }] —— tabId 命中优先，URL 兜底（与 computeOpenIds 同源）。
 
-import { addWindow } from "./model.js";
+import { addWindow, DEFAULT_WINDOW_TITLE } from "./model.js";
+import { isUrlFallbackEligible } from "./url-fallback.js";
 
 // D11（2026-11-23）：快照规范化不再按 http(s) 白名单过滤——
 // chrome://（含历史记录页）、about:、file://、chrome-extension:// 全部纳入。
@@ -113,10 +114,10 @@ export function validateTree(model, opts = {}) {
     const urls = new Set(snapshot.map((t) => t.url));
     // D12（2026-11-23）：导入/未绑定节点不得被 URL 兜底点亮，
     // 与 align.computeOpenIds 同源（tabId 优先、URL 兜底仅用于既往管理节点）。
-    const urlEligible = (t) => t.tabId == null && !t.imported && !t.importSource;
+
     for (const t of model.tabs || []) {
       const actuallyOpen =
-        (t.tabId != null && tabIds.has(t.tabId)) || (urlEligible(t) && urls.has(t.url));
+        (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
       if (t.open === true && !actuallyOpen) {
         dirty.push({ id: t.id, kind: "tab", problem: "open=true 但浏览器快照已无此标签" });
       }
@@ -139,7 +140,7 @@ export function validateTree(model, opts = {}) {
 function repair(model, dirty, byId, opts) {
   // 兜底 Window：优先复用已有窗口，否则新建一个
   let fallback = model.windows.find((w) => w && w.kind === "window" && w.id);
-  if (!fallback) fallback = addWindow(model, opts.fallbackTitle || "浏览器窗口");
+  if (!fallback) fallback = addWindow(model, opts.fallbackTitle || DEFAULT_WINDOW_TITLE);
 
   // kind 不一致的节点只需原地回填 kind（不改父、不换桶），不能按脏父处理挂到兜底窗口
   for (const bucket of ["windows", "groups", "tabs"]) {
@@ -193,10 +194,10 @@ function repair(model, dirty, byId, opts) {
   if (opts.snapshot) {
     const tabIds = new Set(opts.snapshot.map((t) => t.id).filter((v) => v != null));
     const urls = new Set(opts.snapshot.map((t) => t.url));
-    const urlEligible = (t) => t.tabId == null && !t.imported && !t.importSource;
+
     for (const t of model.tabs || []) {
       const actuallyOpen =
-        (t.tabId != null && tabIds.has(t.tabId)) || (urlEligible(t) && urls.has(t.url));
+        (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
       if (actuallyOpen) t.open = true;
       else if (t.open === true) t.open = false;
     }

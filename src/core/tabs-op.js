@@ -1,6 +1,7 @@
 // TH2 M1-3 · 打开/关闭/复制核心操作（FR-009/011/016/020/021，issue #19）
 // 全部走浏览器 API（tabs/windows）——树模型节点不增删，open 为派生态
-import { findNode, descendantsOf } from "./model.js";
+import { findNode, descendantsOf, topWindowOf } from "./model.js";
+import { findTabForNode } from "./url-fallback.js";
 
 // FR-011：节点（窗/组/标签）→ 全部后代标签（有序）；标签即自身
 export function collectLeaves(m, nodeId) {
@@ -30,48 +31,53 @@ export async function copyToClipboard(text, clipboardApi) {
   await clipboardApi.writeText(text);
 }
 
+// D16：把「顶层模型窗口」解析为可承载标签的真实浏览器窗口句柄。
+//   winId 有效 → 直接用；
+//   winId 失效/为空（离线窗口/纯整理数据）→ windows.create 新建真实窗口；
+//   返回 { windowId, rebound }，rebound=true 时调用方应把 windowId 回填到模型窗口节点。
+async function resolveHostWindow(chromeApi, m, topWin, winId) {
+  if (winId != null && (await windowAlive(chromeApi, winId))) {
+    return { windowId: winId, rebound: false };
+  }
+  if (typeof chromeApi.windows?.create === "function") {
+    const made = await chromeApi.windows.create({});
+    const id = made && made.id != null ? made.id : undefined;
+    // D17：即便原窗口已离线，模型窗口保留（不删），这里只回填新句柄
+    return { windowId: id, rebound: true, topWinId: topWin ? topWin.id : undefined };
+  }
+  return { windowId: undefined, rebound: false };
+}
+
 // FR-009：双击标签——已开 → 聚焦现有标签页不重复开；否则新建。
-// R1（m10454）：识别依据 = tabId（浏览器稳定 ID）优先，URL 兜底——同一链接
-// 可开多个标签页，按 URL 识别会聚焦/关闭错对象。
-// F2（m11442）：未打开时按「所属真实窗口」打开——
-//   windowId 有效 → 在該窗口内 tabs.create({windowId})；
-//   windowId 失效/为空（离线窗口） → chrome.windows.create 新建真实窗口再打开，
-//   并把新窗口句柄回传（rebound: true）由调用方回填到窗口节点。
+// R1/D12：识别依据 = tabId 精确命中优先；URL 兜底只允许本扩展既往管理的节点
+// （findTabForNode 内含 imported/importSource 排除），导入/未绑定标签不跨 URL 匹配。
+// D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
   const tabs = await chromeApi.tabs.query({});
-  let hit;
-  if (node.tabId != null) {
-    hit = tabs.find((t) => t.id === node.tabId);
-  }
-  if (!hit && openUrls.has(node.url)) {
-    hit = tabs.find((t) => t.url === node.url);
-  }
+  const hit = findTabForNode(tabs, node, null);
   if (hit) {
     await chromeApi.tabs.update(hit.id, { active: true });
     await chromeApi.windows.update(hit.windowId, { focused: true });
     return { focused: true };
   }
-  const winId = opts.windowId != null ? opts.windowId : null;
-  if (winId != null && (await windowAlive(chromeApi, winId))) {
-    const created = await chromeApi.tabs.create({ url: node.url, windowId: winId });
+  // D16：解析宿主窗口——优先显式传入，否则按顶层模型窗口的 windowId
+  const topWin = opts.topWindow || (opts.m && node && topWindowOf(opts.m, node.id));
+  const bound = opts.windowId != null ? opts.windowId : topWin ? topWin.windowId : null;
+  // 游离/导入标签（无顶层窗口）维持旧语义：在当前窗口 tabs.create，避免弹窗泛滥
+  if (topWin == null && opts.windowId == null) {
+    const created = await chromeApi.tabs.create({ url: node.url });
     return { created: true, tabId: created && created.id != null ? created.id : undefined };
   }
-  // 离线窗口 / 绑定已失效：
-  // 有明确绑定（winId != null）且已失效 → 新建真实浏览器窗口承载该网页并回填；
-  // 从未绑定任何窗口（winId == null，例如导入书签/手工整理数据）→ 在当前窗口
-  // tabs.create 打开即可，不必为单个标签弹新窗口（与既有 FR-009 语义一致）。
-  if (winId != null && typeof chromeApi.windows?.create === "function") {
-    const created = await chromeApi.windows.create({ url: node.url });
-    const first = (created && created.tabs && created.tabs[0]) || {};
-    return {
-      created: true,
-      rebound: true,
-      windowId: created && created.id != null ? created.id : undefined,
-      tabId: first.id != null ? first.id : undefined,
-    };
-  }
-  const created = await chromeApi.tabs.create({ url: node.url });
-  return { created: true, tabId: created && created.id != null ? created.id : undefined };
+  const host = await resolveHostWindow(chromeApi, opts.m, topWin, bound);
+  const created =
+    host.windowId != null
+      ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
+      : await chromeApi.tabs.create({ url: node.url });
+  return {
+    created: true,
+    tabId: created && created.id != null ? created.id : undefined,
+    ...(host.rebound ? { rebound: true, windowId: host.windowId, topWindowId: host.topWinId } : {}),
+  };
 }
 
 // 真实窗口是否仍然存在（Chrome 窗口被关闭后 get 会 reject）
@@ -85,49 +91,76 @@ async function windowAlive(chromeApi, winId) {
   }
 }
 
-// FR-021（Q-B）：打开全部——无确认直开，只开未开的
+// FR-021 / D16：打开全部——无确认直开，只开未开的；按「所属顶层模型窗口」分桶，
+// 每桶一个真实浏览器窗口（离线/未绑定则新建并回传 rebound 供调用方回填）。
+// 返回 {created, groups:[{topWindowId,windowId,rebound,tabIds}]}；为兼容旧调用方，
+// Promise 解析值同时保留数字语义（valueOf/toString → created）。
 export async function openAll(chromeApi, m, nodeId, openUrls) {
-  let created = 0;
+  const buckets = new Map(); // key = topWindow.id | "free"
   for (const t of collectLeaves(m, nodeId)) {
     if (openUrls.has(t.url)) continue;
-    await chromeApi.tabs.create({ url: t.url });
-    created += 1;
+    const top = topWindowOf(m, t.id);
+    const key = top ? top.id : "free";
+    if (!buckets.has(key)) buckets.set(key, { topWin: top, leaves: [] });
+    buckets.get(key).leaves.push(t);
   }
-  return created;
+  let created = 0;
+  const groups = [];
+  for (const [key, { topWin, leaves }] of buckets) {
+    let host = { windowId: undefined, rebound: false };
+    if (topWin) {
+      host = await resolveHostWindow(chromeApi, m, topWin, topWin.windowId);
+    }
+    const tabIds = [];
+    for (const leaf of leaves) {
+      const made =
+        host.windowId != null
+          ? await chromeApi.tabs.create({ url: leaf.url, windowId: host.windowId })
+          : await chromeApi.tabs.create({ url: leaf.url });
+      if (made && made.id != null) tabIds.push(made.id);
+      created += 1;
+    }
+    groups.push({
+      topWindowId: key === "free" ? null : key,
+      windowId: host.windowId,
+      rebound: host.rebound,
+      tabIds,
+    });
+  }
+  const result = { created, groups };
+  result.valueOf = () => created;
+  result.toString = () => String(created);
+  return result;
 }
 
-// FR-020（D8）：关闭单个标签网页——同 URL 在浏览器开了多个时，只关当前
-// 操作对应的「一个」标签页。R1：叶子已记录 tabId → 精确关那一个；
-// 无 tabId 的旧数据/导入叶子按 URL 取第一个匹配兜底。
+// FR-020（D8/D12）：关闭单个标签网页——精确 tabId 命中只关那一个；
+// 无 tabId 的旧数据/导入叶子按 URL 兜底关第一个匹配（findTabForNode），
+// 导入/未绑定节点不得跨 URL 误关别人的标签页。
 export async function closeLeaf(chromeApi, m, leafId) {
   const leaf = findNode(m, leafId);
   if (!leaf || leaf.kind !== "tab" || !leaf.url) return 0;
   const open = await chromeApi.tabs.query({});
-  let hit;
-  if (leaf.tabId != null) hit = open.find((t) => t.id === leaf.tabId);
-  if (!hit) hit = open.find((t) => t.url === leaf.url);
+  const hit = findTabForNode(open, leaf, null);
   if (!hit) return 0;
   await chromeApi.tabs.remove([hit.id]);
   return 1;
 }
 
 // FR-020：关闭节点网页——按叶子逐个关闭「一个」匹配标签页（同 URL 多开时
-// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留。
-// R1：有 tabId 的叶子直接按 tabId 精确消费，不参与 URL 池争用。
+// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留（D15）。
+// R1/D12：有 tabId 的叶子直接按 tabId 精确消费，不参与 URL 池争用；
+// 无 tabId 的叶子仅在 URL 兜底资格下按 URL 消费第一个未用标签页。
 export async function closeNode(chromeApi, m, nodeId) {
   const open = await chromeApi.tabs.query({});
   const used = new Set();
-  const byId = new Map(open.map((t) => [t.id, t]));
   const targets = [];
   for (const leaf of collectLeaves(m, nodeId)) {
-    if (leaf.tabId != null && byId.has(leaf.tabId) && !used.has(leaf.tabId)) {
-      used.add(leaf.tabId);
-      continue;
+    const hit = findTabForNode(open, leaf, used);
+    if (hit) {
+      used.add(hit.id);
+      targets.push(hit.id);
     }
-    const hit = open.find((t) => t.url === leaf.url && !used.has(t.id));
-    if (hit) used.add(hit.id);
   }
-  for (const id of used) targets.push(id);
   if (targets.length) await chromeApi.tabs.remove(targets);
-  return used.size;
+  return targets.length;
 }
