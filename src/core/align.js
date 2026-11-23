@@ -1,14 +1,12 @@
 // TH2 · M1-1 启动归类与打开态派生（FR-024/025/027/028，issue #17）
 // 纯函数：bootAlign 把浏览器已打开标签对齐到「当前浏览器窗口」节点（严格映射 Q-G）；
 // computeOpenIds 派生打开态集合（标签命中 → 向上点亮分组与窗口），不入库（SRS §3.1）。
-// R1（m10454）：浏览器标签 ↔ 模型叶子以 tabId（浏览器稳定 ID）为第一识别依据，
-// URL 仅作兜底——同一链接可开多个标签页，按 URL 识别会同步错乱。
+// D17（定稿 2026-11-23）：浏览器标签 ↔ 模型叶子绑定只信 tabId，彻底取消 URL 兜底。
 // F2（m11442）：窗口节点持有可选 windowId；pairWindows 在启动时把「所有真实浏览器窗口」
 // 与模型窗口配对（windowId 精确匹配 → 「当前浏览器窗口」优先绑聚焦窗口 → 标签重叠度 → 新建），
 // 未配对模型窗口视为离线（清掉失效 windowId，节点保留）。
 import { addWindow, addTab, childrenOf, descendantsOf, DEFAULT_WINDOW_TITLE } from "./model.js";
 import { validateTree } from "./invariants.js";
-import { isUrlFallbackEligible } from "./url-fallback.js";
 
 // D14（2026-11-23）：系统自动建立、未命名的模型窗口标题统一为英文 Window，
 // 不自动编号、不取网页标题/URL。常量定义在 model.js（无循环依赖），此处 re-export 兼容。
@@ -37,23 +35,16 @@ const isWebUrl = (u) => {
   return s.length > 0;
 };
 
-// D12：isUrlFallbackEligible 统一定义在 url-fallback.js（align/invariants/tabs-op 共用）。
-
-// 叶子是否仍对应一个打开的浏览器标签页（tabId 优先，URL 兜底）
-function stillOpen(t, openIds, openUrls) {
-  return (
-    (t.tabId != null && openIds.has(t.tabId)) || (isUrlFallbackEligible(t) && openUrls.has(t.url))
-  );
+// D17：叶子是否仍对应一个打开的浏览器标签页 —— 只信 tabId，无 URL 兜底。
+function stillOpen(t, openIds) {
+  return t.tabId != null && openIds.has(t.tabId);
 }
 
-// 在窗口的全部后代里按 tabId / URL 找已存在的叶子（避免重复补入同一网页）
+// D17：在窗口后代里按 tabId 找已存在的叶子（避免重复补入同一标签页）。
 function findRepresented(model, winId, tab, matched) {
+  if (tab.id == null) return null;
   const pool = descendantsOf(model, winId).filter((n) => n.kind === "tab");
-  return pool.find(
-    (leaf) =>
-      (tab.id != null && leaf.tabId === tab.id) ||
-      (isUrlFallbackEligible(leaf) && !matched.has(leaf.id) && leaf.url === tab.url)
-  );
+  return pool.find((leaf) => leaf.tabId === tab.id && !matched.has(leaf.id));
 }
 
 // 单个窗口的直属标签对齐（D15：关闭网页不删除模型记录）：
@@ -63,13 +54,12 @@ function findRepresented(model, winId, tab, matched) {
 // 回写——tabId 精确命中的既有叶子，同步浏览器最新标题/URL/favicon（N6，不覆盖备注）。
 function syncWindowTabs(model, win, openTabs) {
   const openIds = new Set((openTabs || []).map((t) => t.id).filter((v) => v != null));
-  const openUrls = new Set((openTabs || []).map((t) => t.url));
   const matched = new Set();
   const pool = descendantsOf(model, win.id).filter((n) => n.kind === "tab");
   // 已被 tabId 精确匹配占用的 tabId（避免同 URL 另一个打开标签被 URL 兜底抢到已绑定的叶子）
   const claimedTabIds = new Set();
   for (const t of childrenOf(model, win.id).filter((n) => n.kind === "tab")) {
-    if (!stillOpen(t, openIds, openUrls)) {
+    if (!stillOpen(t, openIds)) {
       t.open = false;
       // D15：清掉失效绑定，但保留 URL/标题/备注与父节点位置
       delete t.tabId;
@@ -88,13 +78,12 @@ function syncWindowTabs(model, win, openTabs) {
     if (t.favIconUrl) hit.favicon = t.favIconUrl;
     hit.open = true;
   }
-  // 第二遍：URL 兜底（仅本扩展既往管理的无绑定叶子，且未被精确匹配占用）
+  // 第二遍（D17）：仅按 tabId 精确命中；无 tabId 的浏览器标签被视为全新标签补入模型。
+  // 不再做 URL 兜底——同一 URL 可开多个标签，按 URL 匹配会串到错误节点。
   for (const t of openTabs || []) {
     if (t.id != null && claimedTabIds.has(t.id)) continue;
     const hit = findRepresented(model, win.id, t, matched);
     if (hit) {
-      if (t.id != null && hit.tabId == null) hit.tabId = t.id;
-      hit.open = true;
       matched.add(hit.id);
       continue;
     }
@@ -102,6 +91,7 @@ function syncWindowTabs(model, win, openTabs) {
     if (win.kind !== "window" || !model.windows.includes(win)) continue;
     const leaf = addTab(model, t.title || t.url, t.url, win.id);
     if (t.id != null) leaf.tabId = t.id;
+    leaf.open = true;
   }
   return model;
 }
@@ -196,19 +186,15 @@ export function pairWindows(model, realWindows, focusedWindowId) {
   return { paired, created };
 }
 
-// 打开态派生：返回打开节点 id 集合（标签命中 + 祖链上的分组/窗口）。
-// openTabs: [{ id, url }]——tabId 命中优先；tabId 失效（浏览器重启后旧 id 不存在）
-// 仍按 URL 兜底点亮（打开态为派生显示，R1；与 bootAlign 的严格退补语义不同）。
+// 打开态派生（D17）：返回打开节点 id 集合（tabId 精确命中 + 祖链上的分组/窗口）。
+// 只信 tabId，无 URL 兜底——同一链接多开时不会串点亮错误节点。
 export function computeOpenIds(model, openTabs) {
   const tabIds = new Set((openTabs || []).map((t) => t.id).filter((v) => v != null));
-  const urls = new Set((openTabs || []).map((t) => t.url));
   const open = new Set();
   const byId = new Map();
   for (const k of ["windows", "groups", "tabs"]) for (const n of model[k]) byId.set(n.id, n);
   for (const t of model.tabs) {
-    const hit =
-      (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
-    if (!hit) continue;
+    if (t.tabId == null || !tabIds.has(t.tabId)) continue;
     open.add(t.id);
     let cur = byId.get(t.id);
     while (cur && cur.parentId) {
@@ -266,17 +252,7 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
       // 找不到可靠归属的游离标签：不挂到任意窗口，跳过（invariants 会记录游离脏节点）
       continue;
     }
-    // URL 兜底命中既有叶子（仅本扩展既往管理、无 tabId 的节点），且限定在同一窗口内
-    const eligible = model.tabs.find(
-      (x) =>
-        isUrlFallbackEligible(x) && x.url === t.url && descendantsOf(model, ownerWin.id).includes(x)
-    );
-    if (eligible) {
-      eligible.tabId = t.id;
-      eligible.open = true;
-      usedTabIds.add(t.id);
-      continue;
-    }
+    // D17：不再按 URL 兜底命中既有叶子——同 URL 多开无法区分，一律作为新标签补入。
     // 挂到该窗口下首个分组（与 9 格矩阵「标签→窗口」一致），无分组时直挂窗口
     const firstGroup = (model.groups || []).find((g) => g.parentId === ownerWin.id);
     const leaf = addTab(model, t.title || t.url, t.url, firstGroup ? firstGroup.id : ownerWin.id);
@@ -289,10 +265,8 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
   //    N6：对 tabId 精确命中的既有叶子回写浏览器最新标题/URL/favicon（不覆盖 note）
   const byTabId = new Map(allTabs.filter((t) => t.id != null).map((t) => [t.id, t]));
   const tabIds = new Set(byTabId.keys());
-  const urls = new Set(allTabs.map((t) => t.url));
   for (const t of model.tabs) {
-    const actuallyOpen =
-      (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
+    const actuallyOpen = t.tabId != null && tabIds.has(t.tabId);
     if (actuallyOpen) {
       t.open = true;
       // N6：tabId 精确命中的叶子回写最新元数据

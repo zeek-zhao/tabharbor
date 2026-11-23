@@ -28,6 +28,8 @@ import {
   boundWindowId,
   windowIdOwner,
   topWindowOf,
+  childrenOf,
+  descendantsOf,
 } from "../core/model.js";
 import { conversionRule, kindByMembership, rejection } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
@@ -80,8 +82,7 @@ async function deriveOpenState(m) {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return empty;
     const tabs = await chrome.tabs.query({});
     // D11（2026-11-23）：全部页面参与派生（http(s)/chrome:///about:/file:///chrome-extension://）。
-    // R1（m10454）：携带浏览器 tabId，识别依据 tabId 优先、URL 兜底；
-    // D12：导入/未绑定节点由 computeOpenIds 内部排除 URL 兜底，不会被同 URL 点亮。
+    // D17（定稿 2026-11-23）：打开态只信 tabId，无 URL 兜底（computeOpenIds 已实现）。
     const webTabs = tabs.filter((t) => String(t.url || "").trim().length > 0);
     const openIds = computeOpenIds(
       m,
@@ -91,7 +92,6 @@ async function deriveOpenState(m) {
     for (const t of webTabs) {
       if (!t.favIconUrl) continue;
       if (t.id != null) favicons.set(`id:${t.id}`, t.favIconUrl);
-      favicons.set(`url:${t.url}`, t.favIconUrl);
     }
     return { openIds, favicons };
   } catch {
@@ -465,16 +465,28 @@ export async function bootShell(root) {
     }
   };
 
-  // D16：把 openAll 返回的每组 rebound 窗口句柄回填到模型并持久化，返回是否变更。
+  // D16/D18：把 openAll 返回的窗口句柄与每个叶子的新建 tabId 回填到模型并持久化。
   const applyOpenAllRebind = async (res) => {
     if (!res || !Array.isArray(res.groups)) return false;
     let dirty = false;
     for (const g of res.groups) {
-      if (!g.rebound || g.windowId == null || g.topWindowId == null) continue;
-      const top = findNode(m, g.topWindowId);
-      if (top && top.windowId !== g.windowId) {
-        top.windowId = g.windowId;
-        dirty = true;
+      if (g.rebound && g.windowId != null && g.topWindowId != null) {
+        const top = findNode(m, g.topWindowId);
+        if (top && top.windowId !== g.windowId) {
+          top.windowId = g.windowId;
+          dirty = true;
+        }
+      }
+      // D18：每个新建标签页的 tabId 回填到对应模型叶子，后续关闭/聚焦都靠它精确命中
+      const leafIds = Array.isArray(g.leafIds) ? g.leafIds : [];
+      const tabIds = Array.isArray(g.tabIds) ? g.tabIds : [];
+      for (let i = 0; i < leafIds.length; i += 1) {
+        const leaf = findNode(m, leafIds[i]);
+        if (leaf && leaf.kind === "tab" && tabIds[i] != null && leaf.tabId !== tabIds[i]) {
+          leaf.tabId = tabIds[i];
+          leaf.open = true;
+          dirty = true;
+        }
       }
     }
     if (dirty) await store.saveModel(m);
@@ -521,16 +533,87 @@ export async function bootShell(root) {
     return { id, kind, row, inner };
   };
 
+  // D14/D21（定稿 2026-11-23）：拖拽事务辅助 —— 记录受影响打开标签的 tabId，
+  // 在模型变更前抓取其 chrome 窗口归属，模型变更后用 tabs.move 同步真实浏览器标签。
+  // 任何一次 tabs.move 失败 → 回滚模型变更 + 回滚已成功的移动，返回 false 并 toast。
+  const collectOpenTabIds = (ids) => {
+    const out = [];
+    for (const id of ids) {
+      const node = findNode(m, id);
+      if (!node) continue;
+      const sub =
+        node.kind === "tab" ? [node] : descendantsOf(m, id).filter((n) => n.kind === "tab");
+      for (const leaf of sub) {
+        if (leaf.open && leaf.tabId != null) out.push(leaf.tabId);
+      }
+    }
+    return [...new Set(out)];
+  };
+
+  // 目标落点对应的真实浏览器窗口句柄（null = 离线/未绑定，D14 不移动真实 tab）。
+  const targetWindowIdOf = (targetKind, targetId, dropMeta) => {
+    if (targetKind === "root") return null; // R1 升窗：新建窗口由升窗流程另处理
+    const node = findNode(m, targetId);
+    if (!node) return null;
+    if (node.kind === "window") return node.windowId ?? null;
+    return topWindowOf(m, node.id)?.windowId ?? null;
+  };
+
+  const runDragTransaction = async (srcId, tabIdsBefore, destWindowId, mutate) => {
+    const snapshot = JSON.stringify(m);
+    const moves = []; // 已成功移动的 {tabId, windowId, index}
+    let ok = false;
+    try {
+      ok = mutate();
+      if (!ok) return false;
+      // D14：同步移动真实 tab（所有拖拽含容器内排序）。
+      if (tabIdsBefore.length && destWindowId != null) {
+        for (let i = 0; i < tabIdsBefore.length; i++) {
+          const tabId = tabIdsBefore[i];
+          const res = await chrome.tabs.move(tabId, { windowId: destWindowId, index: i });
+          moves.push({ tabId, windowId: null, res });
+        }
+      }
+      // D15（Q4）：仅删除「因本次拖拽变空」的模型窗口；手动空窗/离线空窗不动。
+      for (const win of [...m.windows]) {
+        if (childrenOf(m, win.id).length === 0 && win._emptiedByDrop) {
+          const idx = m.windows.indexOf(win);
+          if (idx >= 0) m.windows.splice(idx, 1);
+        }
+      }
+      return true;
+    } catch (e) {
+      // D21：整体回滚 —— 模型恢复快照，已移动的 tab 尽量还原到原窗口。
+      Object.keys(m).forEach((k) => delete m[k]);
+      Object.assign(m, JSON.parse(snapshot));
+      for (const mv of moves) {
+        try {
+          await chrome.tabs.move(mv.tabId, { windowId: mv.windowId, index: -1 });
+        } catch {
+          // 回滚移动失败只能尽力而为，原错误已在上层提示
+        }
+      }
+      toast(`拖拽失败，已回滚：${e && e.message ? e.message : String(e)}`);
+      return false;
+    }
+  };
+
   // 落点规则（原型 dropTo）：返回是否发生移动（已含 toast 文案）
   const applyDrop = async (srcId, srcKind, targetKind, targetId, dropMeta = {}) => {
     if (!srcId || srcId === targetId) return false;
+    // D14/D21：先收集本次拖拽涉及的打开标签 tabId + 目标真实窗口句柄，模型变更统一走事务。
+    const tabIdsBefore = collectOpenTabIds([srcId]);
+    const destWindowId = targetWindowIdOf(targetKind, targetId, dropMeta);
     // 模型为唯一事实源：srcKind 以数组归属反推为准
     srcKind = dragKindOf(srcId, srcKind);
     // P0-B：根 R1 空白区——组拖到这里升为独立窗口
     // D9（评审稿）：拒绝时模型零变更，toast 带可诊断信息
     if (targetKind === "root") {
       if (srcKind === "group") {
-        if (promoteGroupToTopWindow(m, srcId)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, null, () =>
+          promoteGroupToTopWindow(m, srcId)
+        );
+        if (moved) {
           collapsed.delete(srcId);
           toast(`「${titleOf(srcId)}」已升级为独立窗口（R1）`);
           return true;
@@ -558,14 +641,20 @@ export async function bootShell(root) {
     if (!src || !target) return false;
     if (srcKind === "leaf") {
       if (targetKind === "leaf") {
-        if (moveLeafAfter(m, srcId, targetId)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+          moveLeafAfter(m, srcId, targetId)
+        );
+        if (moved) {
           toast(`已排到「${titleOf(targetId)}」之后`);
           return true;
         }
         return false;
       }
       if (targetKind === "group") {
-        if (moveLeafInto(m, srcId, targetId)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+          moveLeafInto(m, srcId, targetId)
+        );
+        if (moved) {
           toast(`已移入「${titleOf(targetId)}」`);
           return true;
         }
@@ -575,7 +664,10 @@ export async function bootShell(root) {
       if (targetKind === "window") {
         const g0 = m.groups.find((g) => g.parentId === targetId);
         const dest = g0 ? g0.id : targetId; // 无分组时 FR-024 直挂窗口
-        if (moveLeafInto(m, srcId, dest)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+          moveLeafInto(m, srcId, dest)
+        );
+        if (moved) {
           toast(`已移入「${titleOf(targetId)}」`);
           return true;
         }
@@ -593,7 +685,10 @@ export async function bootShell(root) {
           return false;
         }
         // 插到落点窗口之后（不是一律追加到末尾），并展开自身，保证来回拖拽连续可见
-        if (turnGroupIntoWindow(m, srcId, targetId)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+          turnGroupIntoWindow(m, srcId, targetId)
+        );
+        if (moved) {
           collapsed.delete(srcId);
           toast(`「${titleOf(srcId)}」已转为独立窗口（L1）`);
           return true;
@@ -602,7 +697,10 @@ export async function bootShell(root) {
       }
       let dest = targetId;
       if (targetKind === "leaf") dest = target.parentId; // 挂到标签所在分组/窗口
-      if (moveNode(m, srcId, dest)) {
+      const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+        moveNode(m, srcId, dest)
+      );
+      if (moved) {
         toast(
           targetKind === "window" || (targetKind === "leaf" && target.parentId === dest)
             ? `整组已移入「${titleOf(dest)}」`
@@ -633,7 +731,10 @@ export async function bootShell(root) {
           return false;
         }
         // 插到落点之后（同级相邻），并展开源与目标，让转出的子组立刻可见
-        if (turnWindowIntoGroupUnder(m, srcId, destContainer, destContainer)) {
+        const moved = await runDragTransaction(srcId, tabIdsBefore, destWindowId, () =>
+          turnWindowIntoGroupUnder(m, srcId, destContainer, destContainer)
+        );
+        if (moved) {
           collapsed.delete(srcId);
           collapsed.delete(destContainer);
           const host = findNode(m, destContainer);

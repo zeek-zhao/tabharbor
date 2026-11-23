@@ -85,14 +85,10 @@ function leafRow(t, opts) {
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
   // P0（m11790）：独立圆形状态指示灯（开=绿色实心、关=灰色空心），favicon 不得顶替状态点。
-  // N3：前缀图标 = 浏览器标签页自身图标；tabId 优先、url 兜底，缺失则保留 .dot。
+  // D17（定稿 2026-11-23）：favicon 只按 tabId 精确取，彻底取消 URL 兜底。
   const statusDot = `<span class="status-dot${open ? " on" : ""}" title="${open ? "网页已打开" : "网页未打开"}"></span>`;
   const favicons = opts.favicons;
-  // D12：导入/未绑定节点不得走 URL 兜底取 favicon（同 URL 不跨点亮）
-  const favUrl =
-    favicons &&
-    ((t.tabId != null && favicons.get(`id:${t.tabId}`)) ||
-      (!t.imported && !t.importSource && favicons.get(`url:${t.url}`)));
+  const favUrl = favicons && t.tabId != null ? favicons.get(`id:${t.tabId}`) : null;
   const fav = favUrl ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />` : "";
   const prefix = statusDot + fav;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;

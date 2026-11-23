@@ -7,6 +7,39 @@ import { newId } from "./model.js";
 export const EXPORT_VERSION = 1;
 
 /**
+ * D20 / Q5：重分配 JSON 快照中重复的 id（保留重复节点，不合并不丢弃）。
+ * 先出现的 id 保持不变，后续重复项分配新的哈希 id；同步改写 parentId 引用。
+ * 返回被重分配的次数。
+ */
+export function reassignDuplicateIds(model) {
+  const all = [...(model.windows || []), ...(model.groups || []), ...(model.tabs || [])];
+  const seen = new Set();
+  const idMap = new Map();
+  let reassigned = 0;
+  for (const node of all) {
+    if (!node || node.id == null) continue;
+    if (seen.has(node.id)) {
+      const fresh = newId(node.kind === "window" ? "w" : node.kind === "group" ? "g" : "t");
+      idMap.set(node.id, fresh); // 后续引用统一指向最新分配的 id
+      node.id = fresh;
+      reassigned++;
+    } else {
+      seen.add(node.id);
+    }
+  }
+  if (reassigned) {
+    // parentId 引用改写：使用原始顺序中的最新映射（idMap 已按遍历顺序覆盖）
+    // 注意：节点自身 id 已被改写，需借助原始快照重建映射——上方 idMap 保存的是「原 id → 最新 id」。
+    for (const node of all) {
+      if (node && node.parentId != null && idMap.has(node.parentId)) {
+        node.parentId = idMap.get(node.parentId);
+      }
+    }
+  }
+  return reassigned;
+}
+
+/**
  * 导出完整模型为 JSON
  */
 export async function exportJSON(model, settings) {
@@ -109,6 +142,9 @@ export async function importJSON(data, currentModel) {
     trash: data.trash || [],
     settings: data.settings,
   };
+  // D20 / Q5（定稿 2026-11-23）：JSON 导入时重复 id 自动重分配为新哈希 id，
+  // 保留重复项（同 URL/标题）不合并不丢弃；同步改写所有 parentId 引用以保持树闭合。
+  reassignDuplicateIds(newModel);
   validateTree(newModel);
   return newModel;
 }
@@ -186,7 +222,7 @@ export async function importHTML(html, currentModel = {}) {
   const decoded = decodeHtmlEntities(html);
   const entries = [...decoded.matchAll(/<DT>\s*<(H3|A)\b([^>]*)>([\s\S]*?)<\/\1>/gi)];
   const stack = [];
-  const seen = new Set(model.tabs.map((t) => `${normalizeBookmarkUrl(t.url)}|${t.title}`));
+  // D20（定稿 2026-11-23）：重复 URL/标题的书签全部保留，不做去重/合并。
   let cursor = 0;
   for (const match of entries) {
     const before = decoded.slice(cursor, match.index);
@@ -210,9 +246,6 @@ export async function importHTML(html, currentModel = {}) {
     } else {
       const href = attrs.match(/\bHREF\s*=\s*(["'])(.*?)\1/i)?.[2];
       if (!href) continue;
-      const key = `${normalizeBookmarkUrl(href)}|${text}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
       tabIdCounter++;
       tabs.push({ id: `t${tabIdCounter}`, parentId: stack.at(-1) || null, title: text, url: href });
     }
@@ -421,17 +454,6 @@ function decodeHtmlEntities(value) {
 
 function stripTags(value) {
   return String(value).replace(/<[^>]*>/g, "");
-}
-
-function normalizeBookmarkUrl(value) {
-  try {
-    const url = new URL(value);
-    url.hash = "";
-    if (url.pathname !== "/") url.pathname = url.pathname.replace(/\/$/, "");
-    return url.href;
-  } catch {
-    return String(value || "").trim();
-  }
 }
 
 export function escapeHtml(text) {

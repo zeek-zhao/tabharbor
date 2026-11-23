@@ -220,17 +220,12 @@ export function turnWindowIntoGroupUnder(m, windowId, parentId, insertAfterId) {
     if (cur.id === w.id) return false; // 不能降到自身子树里
     cur = cur.parentId ? findNode(m, cur.parentId) : null;
   }
-  // D7：降级完成后按裁决 Q-C，把源 windowId 转给降级后所属的根窗口；
-  // 降级组清空绑定（分组不持有 windowId），标签 tabId 全程不动。
-  const transferredWindowId = w.windowId;
+  // D16（定稿 2026-11-23 / Q1）：降级一律丢弃源 windowId。
+  // 分组不持有 windowId；目标根窗口的 windowId 完全不动（即使目标没有绑定，
+  // 也保持无绑定/离线），不再像旧 D7 那样把源的 windowId 转给根窗口。
+  delete w.windowId;
   w.kind = "group";
   w.parentId = parentId; // 降为 L2 分组（父可以是窗口或分组）
-  if (transferredWindowId != null) {
-    delete w.windowId;
-    let root = parent;
-    while (root && root.parentId) root = findNode(m, root.parentId) || root;
-    if (root && root.kind === "window") root.windowId = transferredWindowId;
-  }
   m.windows.splice(m.windows.indexOf(w), 1);
   // N1 修正：插到落点之后（同级相邻），让"拖到哪儿就出现在哪儿"，来回拖拽可连续进行。
   // P0-C（m11790）：锚点可能是「窗口 id」（父节点是 Window 时，落点不是 group）。

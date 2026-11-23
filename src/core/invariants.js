@@ -14,7 +14,6 @@
 //   [{ id, url }] —— tabId 命中优先，URL 兜底（与 computeOpenIds 同源）。
 
 import { addWindow, DEFAULT_WINDOW_TITLE } from "./model.js";
-import { isUrlFallbackEligible } from "./url-fallback.js";
 
 // D11（2026-11-23）：快照规范化不再按 http(s) 白名单过滤——
 // chrome://（含历史记录页）、about:、file://、chrome-extension:// 全部纳入。
@@ -45,6 +44,22 @@ export function validateTree(model, opts = {}) {
       }
       seen.add(node.id);
       byId.set(node.id, node);
+    }
+  }
+
+  // 1b) D17（定稿 2026-11-23）：tabId 全局唯一 —— 两个不同标签节点不能绑定同一个浏览器 tabId。
+  //     open 态绑定只信 tabId，重复绑定会导致关闭/移动/聚焦串到错误节点，必须视为脏节点。
+  const boundTabIds = new Map();
+  for (const t of model.tabs || []) {
+    if (!t || t.tabId == null) continue;
+    if (boundTabIds.has(t.tabId)) {
+      dirty.push({
+        id: t.id,
+        kind: "tab",
+        problem: `tabId ${t.tabId} 与节点 ${boundTabIds.get(t.tabId)} 重复绑定`,
+      });
+    } else {
+      boundTabIds.set(t.tabId, t.id);
     }
   }
 
@@ -111,13 +126,11 @@ export function validateTree(model, opts = {}) {
   // 4) open 状态与浏览器快照一致性（仅校验，不在此处修改模型）
   if (snapshot) {
     const tabIds = new Set(snapshot.map((t) => t.id).filter((v) => v != null));
-    const urls = new Set(snapshot.map((t) => t.url));
     // D12（2026-11-23）：导入/未绑定节点不得被 URL 兜底点亮，
     // 与 align.computeOpenIds 同源（tabId 优先、URL 兜底仅用于既往管理节点）。
 
     for (const t of model.tabs || []) {
-      const actuallyOpen =
-        (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
+      const actuallyOpen = t.tabId != null && tabIds.has(t.tabId);
       if (t.open === true && !actuallyOpen) {
         dirty.push({ id: t.id, kind: "tab", problem: "open=true 但浏览器快照已无此标签" });
       }
@@ -157,7 +170,8 @@ function repair(model, dirty, byId, opts) {
         (d) =>
           d.problem !== "open=true 但浏览器快照已无此标签" &&
           !d.problem.includes("数组归属") &&
-          !d.problem.includes("根层级")
+          !d.problem.includes("根层级") &&
+          !d.problem.includes("重复绑定")
       )
       .map((d) => d.id)
   );
@@ -179,6 +193,18 @@ function repair(model, dirty, byId, opts) {
     }
   }
 
+  // a3) D17：重复 tabId —— 保留首次绑定者，其余节点清空 tabId 并置关闭态（节点保留，不删）
+  const fixedTabIds = new Set();
+  for (const t of model.tabs || []) {
+    if (!t || t.tabId == null) continue;
+    if (fixedTabIds.has(t.tabId)) {
+      delete t.tabId;
+      t.open = false;
+    } else {
+      fixedTabIds.add(t.tabId);
+    }
+  }
+
   // b) 重复 id 节点：直接从数组中移除（保留首次出现的）
   const seen = new Set();
   for (const bucket of ["windows", "groups", "tabs"]) {
@@ -193,11 +219,9 @@ function repair(model, dirty, byId, opts) {
   // c) open 状态校正（若提供快照）
   if (opts.snapshot) {
     const tabIds = new Set(opts.snapshot.map((t) => t.id).filter((v) => v != null));
-    const urls = new Set(opts.snapshot.map((t) => t.url));
 
     for (const t of model.tabs || []) {
-      const actuallyOpen =
-        (t.tabId != null && tabIds.has(t.tabId)) || (isUrlFallbackEligible(t) && urls.has(t.url));
+      const actuallyOpen = t.tabId != null && tabIds.has(t.tabId);
       if (actuallyOpen) t.open = true;
       else if (t.open === true) t.open = false;
     }

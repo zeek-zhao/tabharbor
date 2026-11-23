@@ -1,7 +1,10 @@
 // TH2 M1-3 · 打开/关闭/复制核心操作（FR-009/011/016/020/021，issue #19）
 // 全部走浏览器 API（tabs/windows）——树模型节点不增删，open 为派生态
 import { findNode, descendantsOf, topWindowOf } from "./model.js";
-import { findTabForNode } from "./url-fallback.js";
+
+// D17（定稿 2026-11-23）：浏览器标签 ↔ 模型叶子的绑定只信 tabId，彻底取消 URL 兜底。
+// 同 URL 可开多个标签页，按 URL 匹配会串到错误节点。无 tabId 的叶子不参与打开态识别，
+// 打开操作一律新建标签页并回填 tabId（D18）。
 
 // FR-011：节点（窗/组/标签）→ 全部后代标签（有序）；标签即自身
 export function collectLeaves(m, nodeId) {
@@ -48,13 +51,12 @@ async function resolveHostWindow(chromeApi, m, topWin, winId) {
   return { windowId: undefined, rebound: false };
 }
 
-// FR-009：双击标签——已开 → 聚焦现有标签页不重复开；否则新建。
-// R1/D12：识别依据 = tabId 精确命中优先；URL 兜底只允许本扩展既往管理的节点
-// （findTabForNode 内含 imported/importSource 排除），导入/未绑定标签不跨 URL 匹配。
+// FR-009：双击标签——已开（tabId 精确命中）→ 聚焦现有标签页不重复开；否则新建。
+// D17：只信 tabId，无 URL 兜底；导入/未绑定叶子无 tabId 时一律新建独立标签页（D18）。
 // D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
   const tabs = await chromeApi.tabs.query({});
-  const hit = findTabForNode(tabs, node, null);
+  const hit = node.tabId != null ? tabs.find((t) => t.id === node.tabId) : undefined;
   if (hit) {
     await chromeApi.tabs.update(hit.id, { active: true });
     await chromeApi.windows.update(hit.windowId, { focused: true });
@@ -91,14 +93,13 @@ async function windowAlive(chromeApi, winId) {
   }
 }
 
-// FR-021 / D16：打开全部——无确认直开，只开未开的；按「所属顶层模型窗口」分桶，
-// 每桶一个真实浏览器窗口（离线/未绑定则新建并回传 rebound 供调用方回填）。
-// 返回 {created, groups:[{topWindowId,windowId,rebound,tabIds}]}；为兼容旧调用方，
+// FR-021 / D18：打开全部——无确认直开，每个叶子都独立新建标签页（同 URL 不跳过），
+// 按「所属顶层模型窗口」分桶，每桶一个真实浏览器窗口（离线/未绑定则新建并回传 rebound）。
+// 返回 {created, groups:[{topWindowId,windowId,rebound,tabIds,leafIds}]}；为兼容旧调用方，
 // Promise 解析值同时保留数字语义（valueOf/toString → created）。
 export async function openAll(chromeApi, m, nodeId, openUrls) {
   const buckets = new Map(); // key = topWindow.id | "free"
   for (const t of collectLeaves(m, nodeId)) {
-    if (openUrls.has(t.url)) continue;
     const top = topWindowOf(m, t.id);
     const key = top ? top.id : "free";
     if (!buckets.has(key)) buckets.set(key, { topWin: top, leaves: [] });
@@ -112,12 +113,15 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
       host = await resolveHostWindow(chromeApi, m, topWin, topWin.windowId);
     }
     const tabIds = [];
+    const leafIds = [];
     for (const leaf of leaves) {
       const made =
         host.windowId != null
           ? await chromeApi.tabs.create({ url: leaf.url, windowId: host.windowId })
           : await chromeApi.tabs.create({ url: leaf.url });
-      if (made && made.id != null) tabIds.push(made.id);
+      const tabId = made && made.id != null ? made.id : undefined;
+      if (tabId != null) tabIds.push(tabId);
+      leafIds.push(leaf.id);
       created += 1;
     }
     groups.push({
@@ -125,6 +129,7 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
       windowId: host.windowId,
       rebound: host.rebound,
       tabIds,
+      leafIds,
     });
   }
   const result = { created, groups };
@@ -133,33 +138,27 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
   return result;
 }
 
-// FR-020（D8/D12）：关闭单个标签网页——精确 tabId 命中只关那一个；
-// 无 tabId 的旧数据/导入叶子按 URL 兜底关第一个匹配（findTabForNode），
-// 导入/未绑定节点不得跨 URL 误关别人的标签页。
+// FR-020（D17）：关闭单个标签网页——只按 tabId 精确命中；无 tabId 的叶子不关任何标签页。
 export async function closeLeaf(chromeApi, m, leafId) {
   const leaf = findNode(m, leafId);
-  if (!leaf || leaf.kind !== "tab" || !leaf.url) return 0;
+  if (!leaf || leaf.kind !== "tab" || leaf.tabId == null) return 0;
   const open = await chromeApi.tabs.query({});
-  const hit = findTabForNode(open, leaf, null);
+  const hit = open.find((t) => t.id === leaf.tabId);
   if (!hit) return 0;
   await chromeApi.tabs.remove([hit.id]);
+  leaf.open = false;
+  delete leaf.tabId;
   return 1;
 }
 
-// FR-020：关闭节点网页——按叶子逐个关闭「一个」匹配标签页（同 URL 多开时
-// 每个叶子只消费一个标签页，不重复），浏览器端关闭；模型节点保留（D15）。
-// R1/D12：有 tabId 的叶子直接按 tabId 精确消费，不参与 URL 池争用；
-// 无 tabId 的叶子仅在 URL 兜底资格下按 URL 消费第一个未用标签页。
+// FR-020（D17）：关闭节点网页——只按 tabId 精确关闭，每个叶子最多关一个标签页；
+// 无 tabId 的叶子不参与（不跨 URL 误关）。模型节点保留（D15）。
 export async function closeNode(chromeApi, m, nodeId) {
   const open = await chromeApi.tabs.query({});
-  const used = new Set();
+  const openIds = new Set(open.map((t) => t.id));
   const targets = [];
   for (const leaf of collectLeaves(m, nodeId)) {
-    const hit = findTabForNode(open, leaf, used);
-    if (hit) {
-      used.add(hit.id);
-      targets.push(hit.id);
-    }
+    if (leaf.tabId != null && openIds.has(leaf.tabId)) targets.push(leaf.tabId);
   }
   if (targets.length) await chromeApi.tabs.remove(targets);
   return targets.length;
