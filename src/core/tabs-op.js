@@ -66,7 +66,7 @@ async function resolveHostWindow(chromeApi, m, topWin, winId) {
 // O3/D24：目标标签已在新窗口建好后，安全清理 windows.create 自带的空白 seed 标签。
 // 只在 seed 明确是空白页（url 为空 / newtab / about:blank）且与该窗口现有标签不同时删除，
 // 保证窗口内始终至少保留一个标签，不会误删目标标签或关闭窗口。
-async function removeSeedTab(chromeApi, seedId, keepTabId) {
+export async function removeSeedTab(chromeApi, seedId, keepTabId) {
   if (seedId == null || seedId === keepTabId) return;
   if (typeof chromeApi.tabs?.get !== "function" || typeof chromeApi.tabs?.remove !== "function")
     return;
@@ -133,9 +133,10 @@ async function windowAlive(chromeApi, winId) {
 }
 
 // FR-021 / D18：打开全部——无确认直开；同 URL 标签各自独立新建（D18 不按 URL 跳过），
-// 但 O2（2026-11-23 UI 审计）：叶子自身 tabId 仍在浏览器存活时跳过重复打开（只聚焦、不新建）。
+// L5（2026-11-24 UI 审计）/ Q 定稿：叶子自身 tabId 仍存活时只跳过、不抢焦点；
+// 只有单标签打开（openTab）才聚焦。批量打开不打断用户当前所在标签页。
 // 按「所属顶层模型窗口」分桶，每桶一个真实浏览器窗口（离线/未绑定则新建并回传 rebound）。
-// 返回 {created, focused, skipped, groups:[{topWindowId,windowId,rebound,tabIds,leafIds}]}；
+// 返回 {created, focused(恒 0，L5 起批量打开不聚焦), skipped, groups:[{topWindowId,windowId,rebound,tabIds,leafIds}]}；
 // 为兼容旧调用方，Promise 解析值同时保留数字语义（valueOf/toString → created）。
 export async function openAll(chromeApi, m, nodeId, openUrls) {
   const liveTabs = await chromeApi.tabs.query({});
@@ -159,10 +160,8 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
     const tabIds = [];
     const leafIds = [];
     for (const leaf of leaves) {
-      // O2：叶子已绑定且该 tabId 仍存活 → 聚焦现有标签，跳过新建与回填
+      // L5/Q 定稿：叶子已绑定且该 tabId 仍存活 → 只跳过，不聚焦、不新建、不回填
       if (leaf.tabId != null && liveIds.has(leaf.tabId)) {
-        await chromeApi.tabs.update(leaf.tabId, { active: true });
-        focused += 1;
         skippedIds.push(leaf.id);
         continue;
       }

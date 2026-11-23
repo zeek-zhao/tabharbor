@@ -3,9 +3,38 @@ import { DEFAULT_SETTINGS, loadAll, saveSettings, saveModel } from "../core/stor
 import { registerAutoBackup, runAutoBackup } from "../core/import-export.js";
 import { syncBrowserSnapshot } from "../core/align.js";
 
-async function openWindow() {
-  return chrome.windows.create({
-    url: "window/window.html",
+// U3 / Q3（2026-11-24 UI 审计）：点击图标/快捷键开窗时——
+// 先找已存在的 window/window.html 实例；命中则聚焦该窗口与其内工具标签，不重复弹窗；
+// 找不到才新建。工具页 URL 用 chrome.runtime.getURL 解析，兼容完整 URL 与相对路径两种存储形态。
+const TOOL_PAGE = "window/window.html";
+
+function toolPageMatches(url) {
+  const s = String(url || "");
+  return s === TOOL_PAGE || s.endsWith("/" + TOOL_PAGE);
+}
+
+async function openWindow(chromeApi = chrome) {
+  try {
+    const wins =
+      typeof chromeApi.windows?.getAll === "function"
+        ? await chromeApi.windows.getAll({ populate: true })
+        : [];
+    for (const w of wins || []) {
+      const toolTab = (w.tabs || []).find((t) => toolPageMatches(t && t.url));
+      if (toolTab && w.id != null) {
+        // 已弹出实例：聚焦窗口 + 激活工具标签，只置前不新建
+        await chromeApi.windows.update(w.id, { focused: true });
+        if (toolTab.id != null && typeof chromeApi.tabs?.update === "function") {
+          await chromeApi.tabs.update(toolTab.id, { active: true });
+        }
+        return { focused: true, windowId: w.id };
+      }
+    }
+  } catch {
+    // 查询失败按未命中处理，走新建（保持旧行为兜底）
+  }
+  return chromeApi.windows.create({
+    url: TOOL_PAGE,
     type: "popup",
     width: 380,
     height: 720,
@@ -35,7 +64,7 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   chromeApi.action.onClicked.addListener(async (tab) => {
     const { settings } = await loadAll(chromeApi);
     if (settings.openMode === "window") {
-      await openWindow();
+      await openWindow(chromeApi);
     } else {
       await chromeApi.sidePanel.open({ windowId: tab.windowId });
     }
@@ -101,6 +130,9 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
 
   // FR-016：快捷键命令 → 存储广播，两页面订阅 cmd 键响应
   chromeApi.commands.onCommand.addListener(async (name) => {
+    // U3 / Q3（2026-11-24 UI 审计）：open-window 命令此前只广播、无实际开窗处理。
+    // 这里直接执行「聚焦已有 / 不存在才新建」，与点击图标语义一致。
+    if (name === "open-window") await openWindow(chromeApi);
     await chromeApi.storage.local.set({ cmd: { name, ts: Date.now() } });
   });
 

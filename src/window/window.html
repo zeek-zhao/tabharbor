@@ -12,27 +12,67 @@
           <span class="logo-mark"></span><span class="name">TabHarbor 书签标签工具</span>
         </div>
         <div id="win-ctrl" class="win-ctrl">
-          <button id="btnMin" class="tbtn" data-label="最小化" data-act="min">─</button>
-          <button id="btnMax" class="tbtn" data-label="最大化" data-act="max">□</button>
-          <button id="btnClose" class="tbtn" data-label="关闭" data-act="close">✕</button>
+          <button id="btnMin" class="tbtn" data-label="最小化" data-act="min">
+            ><svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          <button id="btnMax" class="tbtn" data-label="最大化" data-act="max">
+            ><svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="5" y="5" width="14" height="14" rx="1" />
+            </svg>
+          </button>
+          <button id="btnClose" class="tbtn" data-label="关闭" data-act="close">
+            ><svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
         </div>
       </div>
       <div id="searchbar" class="searchbar">
         <div class="search-box"><input id="q" type="text" placeholder="输入搜索关键词…" /></div>
         <button id="btnSettings" class="tbtn" data-label="设置" data-act="settings" title="设置">
-          ⚙
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.9 4.6a1.7 1.7 0 0 0 1.56-1.03V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.9v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"
+            />
+          </svg>
         </button>
       </div>
       <div id="quickbar" class="quickbar">
-        <button
-          id="btnAddGroup"
-          class="tbtn"
-          data-label="新建分组"
-          data-act="add-group"
-          title="新建分组"
-        >
-          🗂⁺
-        </button>
         <button
           id="btnLocate"
           class="tbtn"
@@ -40,7 +80,19 @@
           data-act="locate"
           title="定位当前标签"
         >
-          ⌖
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <circle cx="12" cy="12" r="7" />
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+          </svg>
         </button>
         <button
           id="btnToggleAll"
@@ -49,7 +101,18 @@
           data-act="toggle-all"
           title="展开 / 收起（自动切换）"
         >
-          ▾
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
         </button>
         <button
           id="btnLinks"
@@ -58,10 +121,33 @@
           data-act="links"
           title="显示链接（默认关闭）"
         >
-          🔗
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" />
+            <path d="M14 11a5 5 0 0 0-7.1-.1l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1" />
+          </svg>
         </button>
         <button id="btnTrash" class="tbtn" data-label="回收站" data-act="trash" title="回收站">
-          🗑<span id="trashBadge" class="badge" style="display: none">0</span>
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg
+          ><span id="trashBadge" class="badge" style="display: none">0</span>
         </button>
         <button
           id="btnHistory"
@@ -70,7 +156,19 @@
           data-act="history"
           title="浏览器历史"
         >
-          ◷
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
         </button>
         <button
           id="btnFullscreen"
@@ -79,7 +177,18 @@
           data-act="fullscreen"
           title="全屏抓取视图"
         >
-          ⛶
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" />
+          </svg>
         </button>
         <button
           id="btnTheme"
@@ -88,7 +197,19 @@
           data-act="theme"
           title="黑白主题切换"
         >
-          ◐
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 3a9 9 0 0 1 0 18V3Z" fill="currentColor" stroke="none" />
+          </svg>
         </button>
         <button
           id="btnPip"
@@ -97,7 +218,18 @@
           data-act="pip"
           title="置顶（窗口原位不动）"
         >
-          📌
+          ><svg
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 17v5M9 3h6l-1 6 3 3H7l3-3-1-6Z" />
+          </svg>
         </button>
       </div>
       <div id="spBody" class="sp-body"></div>

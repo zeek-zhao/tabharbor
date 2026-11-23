@@ -3,8 +3,9 @@
 // computeOpenIds 派生打开态集合（标签命中 → 向上点亮分组与窗口），不入库（SRS §3.1）。
 // D17（定稿 2026-11-23）：浏览器标签 ↔ 模型叶子绑定只信 tabId，彻底取消 URL 兜底。
 // F2（m11442）：窗口节点持有可选 windowId；pairWindows 在启动时把「所有真实浏览器窗口」
-// 与模型窗口配对（windowId 精确匹配 → 「当前浏览器窗口」优先绑聚焦窗口 → 标签重叠度 → 新建），
+// 与模型窗口配对（windowId 精确匹配 → 「当前浏览器窗口」优先绑聚焦窗口 → tabId 重叠度 → 新建），
 // 未配对模型窗口视为离线（清掉失效 windowId，节点保留）。
+// L2/D25（2026-11-24 UI 审计）：重叠度只按 tabId，不按 URL（同 URL 多开会串窗）。
 import { addWindow, addTab, childrenOf, descendantsOf, DEFAULT_WINDOW_TITLE } from "./model.js";
 import { validateTree } from "./invariants.js";
 
@@ -132,11 +133,12 @@ export function pairWindows(model, realWindows, focusedWindowId) {
   const focusReal = list.find((rw) => !rw.__win && rw.id === focusId);
   if (curNode && focusReal) bind(focusReal, curNode);
 
-  // 3) 标签重叠度（tabId 命中计 2 分、URL 命中计 1 分）——用户重排过分组也能认回原窗口
+  // 3) 标签重叠度——L2/D25（2026-11-24 UI 审计）：只按 windowId/tabId 精确配对，
+  // 删除 URL 重叠计分（同一 URL 可开多个标签，URL 计分会串窗）；配不上的模型窗口保留离线。
+  // tabId 命中计 1 分，取重叠最多者认回原窗口。
   for (const rw of list) {
     if (rw.__win) continue;
     const ids = new Set(rw.tabs.map((t) => t.id).filter((v) => v != null));
-    const urls = new Set(rw.tabs.map((t) => t.url));
     let best = null;
     let bestScore = 0;
     for (const win of model.windows) {
@@ -144,8 +146,7 @@ export function pairWindows(model, realWindows, focusedWindowId) {
       let score = 0;
       for (const leaf of descendantsOf(model, win.id)) {
         if (leaf.kind !== "tab") continue;
-        if (leaf.tabId != null && ids.has(leaf.tabId)) score += 2;
-        else if (urls.has(leaf.url)) score += 1;
+        if (leaf.tabId != null && ids.has(leaf.tabId)) score += 1;
       }
       if (score > bestScore) {
         best = win;

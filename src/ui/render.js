@@ -16,9 +16,14 @@ const XI =
 // D2：标签行内「打开」按钮（原型菜单 open 图标同款播放三角）
 const OI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
-// U3（2026-11-23 UI 审计）：窗口行「＋」——在该窗口对应的真实浏览器窗口新建标签页。
-const PLUS =
-  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+// U2（2026-11-24 UI 审计）：行内两个加号——「添加标签」用页面+加号（page-plus），
+// 「添加分组」用文件夹+加号（folder-plus）；两者语义不同、图标有区别，均 14px 紧凑 SVG。
+// 保留 PLUS 作为旧别名，兼容既有源码断言（data-act="add-tab"）与外部引用。
+const PAGE_PLUS =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 8h6M7 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M18 13v8M14 17h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const FOLDER_PLUS =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 11v6M9 14h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+const PLUS = PAGE_PLUS;
 // U5 / Q2（2026-11-23 UI 审计）：无缓存 favicon 时的通用兜底图标（按协议选形），
 // 关闭态由 CSS `.fav.off` 置灰、打开态正常着色，取代「状态点+可选图标」双前缀。
 const GENERIC_FAV = {
@@ -91,12 +96,11 @@ function containerOpen(n, opts, depth) {
     n.kind === "window" && n.windowId == null
       ? `<span class="offline-dot" title="未绑定浏览器窗口，双击其下标签会新建窗口"></span>`
       : "";
-  // U3：窗口行「＋」新建标签（在该窗口对应真实浏览器窗口新建并写入模型叶子）
-  const addTab =
-    n.kind === "window"
-      ? `<button class="add-tab-x" data-act="add-tab" title="在该窗口新建标签">${PLUS}</button>`
-      : "";
-  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}<button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
+  // U2（2026-11-24 UI 审计）：窗口行与分组行都渲染「添加标签」「添加分组」两个加号，
+  // 图标不同（page-plus / folder-plus）。窗口下建分组、分组下建子组；行为由 shell 接线。
+  const addTab = `<button class="add-tab-x row-add" data-act="add-tab" title="添加标签">${PAGE_PLUS}</button>`;
+  const addGroup = `<button class="add-group-x row-add" data-act="add-group-inline" title="${n.kind === "window" ? "新建分组" : "新建子组"}">${FOLDER_PLUS}</button>`;
+  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}${addGroup}<button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
 }
 
 // 标签叶子（U5/Q2：favicon 前缀 + 高亮/灰色状态 + title + link + note + 行内按钮）

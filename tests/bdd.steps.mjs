@@ -480,9 +480,9 @@ step("当", "把分组 {} 拖到 R1 顶层空白区（升窗）", (groupTitle) =
 });
 
 step("当", "把标签 {} 拖到 R1 顶层空白区", (tabTitle) => {
-  // P0-B：根空白区只接受分组，标签一律拒绝（与壳层 applyDrop 一致）
+  // U5（2026-11-24 UI 审计）：标签拖到根空白区升级为独立窗口（与壳层 applyDrop 一致）
   const t = freshByTitle(tabTitle);
-  ctx.dropOk = t && t.kind === "tab" ? false : false;
+  ctx.dropOk = t && t.kind === "tab" ? Boolean(model.promoteLeafToTopWindow(ctx.m, t.id)) : false;
 });
 
 /* ---------- 场景组：R4 分组与窗口互转（m10454） ---------- */
@@ -988,6 +988,14 @@ step("那么", "独立窗口已创建且地址为 {}", (url) => {
     throw new Error(`窗口参数不符：url=${c[0].url} type=${c[0].type}`);
 });
 
+// U3（2026-11-24 UI 审计）：重复点击图标只聚焦已有窗口，不再新建
+step("那么", "已弹出的工具窗口被聚焦且未重复新建", () => {
+  const c = ctx.mock.calls;
+  if (c.windowsCreate.length !== 1)
+    throw new Error(`重复点击应只 create 1 次，实际 windows.create=${c.windowsCreate.length}`);
+  if (c.winFocus.length < 1) throw new Error("已存在工具窗口应被 focused 置前");
+});
+
 step("当", "右键工具栏图标选择打开侧边栏", async () => {
   for (const fn of ctx.mock.listeners.ctxMenu.fns)
     await fn({ menuItemId: "open-side" }, { windowId: 7 });
@@ -1331,6 +1339,25 @@ step("那么", "窗口 {} 的行有新建标签按钮", (title) => {
   if (!slice.includes('data-act="add-tab"')) throw new Error(`${title} 窗口行缺少新建标签按钮`);
 });
 
+// U2（2026-11-24 UI 审计）：窗口行与分组行都渲染「添加标签」和「添加分组」两个加号。
+// row-ops 在同一 node-row 内，取该节点片段核验两个 data-act 同时存在。
+const rowSliceOf = (title) => {
+  const id = (ctx.named[title] || findAnyByTitle(title)).id;
+  const pos = ctx.html.indexOf(`data-id="${id}"`);
+  // 行内含两个 14px SVG 加号 + 复制图标，片段取长些以覆盖完整 row-ops
+  return pos < 0 ? "" : ctx.html.slice(pos, pos + 1800);
+};
+step("那么", "节点 {} 的行有添加标签加号", (title) => {
+  const slice = rowSliceOf(title);
+  if (!slice.includes('data-act="add-tab"'))
+    throw new Error(`${title} 行缺少添加标签加号（data-act=add-tab）`);
+});
+step("那么", "节点 {} 的行有添加分组加号", (title) => {
+  const slice = rowSliceOf(title);
+  if (!slice.includes('data-act="add-group-inline"'))
+    throw new Error(`${title} 行缺少添加分组加号（data-act=add-group-inline）`);
+});
+
 step("那么", "节点 {} 的行有类 {}", (title, cls) => {
   if (!tagOf(rowOf(title)).includes(cls)) throw new Error(`${title} 行缺少类 ${cls}`);
 });
@@ -1612,6 +1639,15 @@ step("当", "在 {} 下新建分组 {}", (winTitle, gTitle) => {
 step("那么", "侧边栏页快捷栏包含新建分组按钮", () => {
   if (!repoFile("src/sidebar/sidebar.html").includes('data-act="add-group"')) {
     throw new Error("侧边栏快捷栏缺新建分组按钮");
+  }
+});
+
+// U1（2026-11-24 UI 审计）：顶部全局「新建分组」按钮已从三处 quickbar 移除
+step("那么", "侧边栏页快捷栏不含新建分组按钮", () => {
+  const html = repoFile("src/sidebar/sidebar.html");
+  const bar = html.match(/<div id="quickbar"[\s\S]*?<\/div>/);
+  if (bar && /data-act="add-group"/.test(bar[0])) {
+    throw new Error("侧边栏快捷栏仍含新建分组按钮（U1 要求移除）");
   }
 });
 

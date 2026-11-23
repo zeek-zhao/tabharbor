@@ -8,7 +8,9 @@
 // 识别依据唯一：kind 字段 + 所在数组（windows / groups / tabs）的所属关系。
 // 禁止以 title（名称）或 url（链接）推断节点类型——同一链接可开多个标签，
 // 名称也可重复；名称/链接仅用于展示与复制，绝不参与身份 / 层级判定。
-// 标签身份另见 model.newId（哈希 ID）与 align（tabId 优先，URL 仅兜底）。
+// 标签身份另见 model.newId（哈希 ID）与 align（D17 起只信 tabId，无 URL 兜底）。
+// U5（2026-11-24 UI 审计）：规则层正式登记 leaf→window（标签拖到 R1 顶层空白区升级为独立窗口，
+// 由 model.promoteLeafToTopWindow 实现），与 group→window / window→group 同属层级互转规则集。
 
 export const LEVEL = Object.freeze({ window: 1, group: 2, tab: 3 });
 export const BUCKETS = Object.freeze({
@@ -43,10 +45,12 @@ export function isTopLevel(m, id) {
   return Boolean(w && w.parentId == null);
 }
 
-// 分组 ↔ 窗口互转的合法性判定（N1）：
+// 层级互转的合法性判定（N1 + U5）：
 //   group → window   : 源必须是分组（L2），转为 L1 顶层窗口；
-//   window → group   : 源必须是窗口（L1），目标必须是分组且不能位于源子树内（防自嵌套）。
-// 返回 { op, reason }；op ∈ "group→window" | "window→group" | null。
+//   window → group   : 源必须是窗口（L1），目标必须是分组且不能位于源子树内（防自嵌套）；
+//   leaf  → window   : U5（2026-11-24 UI 审计）——标签拖到 R1 顶层空白区（targetId 为空）
+//                      升级为独立窗口，由 model.promoteLeafToTopWindow 新建窗口承载标签。
+// 返回 { op, reason }；op ∈ "group→window" | "window→group" | "leaf→window" | null。
 export function conversionRule(m, srcId, targetKind, targetId) {
   const srcKind = kindByMembership(m, srcId);
   if (!srcKind || !kindConsistent(m, srcId)) {
@@ -62,6 +66,10 @@ export function conversionRule(m, srcId, targetKind, targetId) {
     if (!target) return { op: null, reason: "目标不是窗口" };
     if (isTopLevel(m, srcId)) return { op: null, reason: "分组已在 L1 顶层" };
     return { op: "group→window", reason: "" };
+  }
+  // U5：标签叶子拖到顶层空白区（无落点窗口）→ 登记为 leaf→window，升级为独立窗口
+  if (srcKind === "tab" && targetKind === "window" && targetId == null) {
+    return { op: "leaf→window", reason: "" };
   }
   if (srcKind === "window" && targetKind === "group") {
     // F4（m11442）：目标可以是分组（子分组），也可以是窗口（该窗口下的分组）——

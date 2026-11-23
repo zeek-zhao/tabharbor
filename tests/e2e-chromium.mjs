@@ -110,9 +110,10 @@ try {
   const acts = await win.evaluate(() =>
     [...document.querySelectorAll("#quickbar [data-act]")].map((b) => b.dataset.act).join(",")
   );
+  // U1（2026-11-24 UI 审计）：顶部全局「新建分组」按钮已移除，新建分组改由行内加号/右键菜单承担
   assert.equal(
     acts,
-    "add-group,locate,toggle-all,links,trash,history,fullscreen,theme,pip",
+    "locate,toggle-all,links,trash,history,fullscreen,theme,pip",
     `快捷栏顺序异常: ${acts}`
   );
 

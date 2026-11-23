@@ -176,9 +176,11 @@
   那么 标签 "MDN" 的父节点是分组 "前端"
   那么 模型的窗口、分组、标签计数分别为 "2"、"2"、"1"
 
-  场景: P0-B 标签拖到 R1 顶层空白区不被接受（非法位置）
+  场景: U5 标签拖到 R1 顶层空白区升级为独立窗口
   当 把标签 "MDN" 拖到 R1 顶层空白区
-  那么 拖拽被拒绝（防环/非法落点）
+  那么 游离页 "MDN" 的父节点是窗口
+  并且 存在窗口节点 "Window"
+  并且 模型的窗口、分组、标签计数分别为 "2"、"3"、"1"
 
   场景: P0-C 窗口降级到无子分组的窗口时插到列表前部而非末尾
   当 创建窗口 "空窗口"
@@ -196,3 +198,7 @@
   场景: D4 合并入口已移除
    那么 "src/core/model.js" 不包含 "export function mergeWindows"
    并且 "src/ui/shell.js" 不包含 "mergeWindows("
+
+  场景: U5 规则层登记 leaf→window（2026-11-24）
+   那么 "src/core/levels.js" 包含 "leaf→window"
+   并且 "src/core/model.js" 包含 "promoteLeafToTopWindow"

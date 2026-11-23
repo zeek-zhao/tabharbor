@@ -22,12 +22,14 @@
 那么 "src/window/window.html" 包含 "输入搜索关键词…"
 那么 "src/window/window.html" 包含 "btnSettings"
 
-场景: 快捷栏图标序号统一（FR-005，原型 v16 顺序）
-那么 "src/window/window.html" 的快捷栏图标序为 "add-group,locate,toggle-all,links,trash,history,fullscreen,theme,pip"
+场景: 快捷栏图标序号统一（FR-005，U1 移除顶部新建分组）
+那么 "src/window/window.html" 的快捷栏图标序为 "locate,toggle-all,links,trash,history,fullscreen,theme,pip"
+那么 "src/window/window.html" 不包含 "btnAddGroup"
 
-场景: 侧边栏快捷栏无置顶（FR-006）
-那么 "src/sidebar/sidebar.html" 的快捷栏图标序为 "add-group,locate,toggle-all,links,trash,history,fullscreen,theme"
+场景: 侧边栏快捷栏无置顶（FR-006 + U1）
+那么 "src/sidebar/sidebar.html" 的快捷栏图标序为 "locate,toggle-all,links,trash,history,fullscreen,theme"
 那么 "src/sidebar/sidebar.html" 不包含 "btnPip"
+那么 "src/sidebar/sidebar.html" 不包含 "btnAddGroup"
 
 场景: 底栏统计与快捷键指南入口（FR-007）
 那么 "src/sidebar/sidebar.html" 包含 "stats"

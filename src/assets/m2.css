@@ -242,12 +242,16 @@ body {
 .leaf.open .fav-generic.on {
   color: var(--accent);
 }
-/* U3：窗口行「＋」新建标签按钮（常显，hover 高亮） */
-.add-tab-x {
+/* U2（2026-11-24 UI 审计）：行内「添加标签」(page-plus) 与「添加分组」(folder-plus)
+   两个加号常显、紧凑 14px SVG；窄窗下不拥挤、不靠 hover 隐藏。 */
+.add-tab-x,
+.add-group-x {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 18px;
+  height: 18px;
   background: transparent;
   color: var(--fg1);
   border: none;
@@ -256,9 +260,21 @@ body {
   cursor: pointer;
   visibility: visible;
 }
-.add-tab-x:hover {
+.add-tab-x:hover,
+.add-group-x:hover {
   background: var(--bg3);
   color: var(--accent);
+}
+/* 两个加号 + 复制按钮的行内间距收紧，避免窄窗挤压标题 */
+.row-ops > .row-add + .row-add,
+.row-ops > .row-add + .copy-x {
+  margin-left: 0;
+}
+.node-row .win-name,
+.node-row .group-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .leaf .title {
   overflow: hidden;

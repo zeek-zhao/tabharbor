@@ -47,6 +47,28 @@ export function applyTheme(doc, theme) {
   doc.documentElement.setAttribute("data-theme", theme);
 }
 
+// U4（2026-11-24 UI 审计）：统一工具栏图标为线性 SVG（与主页面 HTML 一致，消除 emoji 混用）。
+const TOOL_SVG = {
+  settings:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>',
+  locate:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></svg>',
+  toggle:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>',
+  links:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1"/></svg>',
+  trash:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+  history:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  fullscreen:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>',
+  theme:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3Z" fill="currentColor" stroke="none"/></svg>',
+  close:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+};
+
 const KEYS_TABLE = [
   ["上 / 下选择标签", "↑ / ↓"],
   ["打开选中标签（也可双击）", "Enter"],
@@ -67,9 +89,10 @@ const KEYS_TABLE = [
 const GUIDE_HTML = `
 <ol>
   <li><b>双击打开：</b>双击标签即在浏览器打开；行内复制图标一键复制，末尾 X 关闭网页（仅已打开显示）。</li>
+  <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
-  <li><b>右键菜单：</b>标签上仅编辑、备注、删除；分组/窗口可整组打开、重命名、关闭、展开收起切换、删除；删除项进入回收站。</li>
-  <li><b>双向拖拽：</b>标签拖到其他组；组拖到其他组（子组）或其他窗口（升为独立窗口）；窗口拖到另一窗口内降级为子组；拖动高亮目标容器。</li>
+  <li><b>右键菜单：</b>标签上编辑、备注、复制、删除；分组/窗口可整组打开、重命名、添加标签/新建分组、关闭、删除；删除项进入回收站。</li>
+  <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>标签按打开高亮 / 灰显；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
   <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
@@ -394,11 +417,18 @@ export async function bootShell(root) {
       }
       return;
     }
-    const addTabBtn = e.target.closest(".add-tab-x");
+    const addTabBtn = e.target.closest('[data-act="add-tab"]');
     if (addTabBtn) {
       e.stopPropagation();
-      const winEl = addTabBtn.closest(".node");
-      if (winEl?.dataset.id) await addTabToWindow(winEl.dataset.id);
+      const host = addTabBtn.closest(".node");
+      if (host?.dataset.id) await addTabToContainer(host.dataset.id);
+      return;
+    }
+    const addGroupBtn = e.target.closest('[data-act="add-group-inline"]');
+    if (addGroupBtn) {
+      e.stopPropagation();
+      const host = addGroupBtn.closest(".node");
+      if (host?.dataset.id) await addGroupToContainer(host.dataset.id);
       return;
     }
     const openBtn = e.target.closest(".open-x");
@@ -485,19 +515,26 @@ export async function bootShell(root) {
     }
   };
 
-  // U3 / Q1（2026-11-23 UI 审计）：窗口行「＋」新建标签——在该窗口对应的真实浏览器窗口
-  // 新建标签页，并在模型窗口下新增一条叶子记录；离线窗口先按 D16/D24 新建真实窗口。
+  // U2 / Q1（2026-11-24 UI 审计）：行内「添加标签」——窗口行直挂窗口、分组行直挂分组。
+  // 在该容器对应的真实浏览器窗口新建标签页并写入模型叶子；离线宿主先按 D16/D24 新建真实窗口。
+  // L3（2026-11-24 UI 审计）：目标标签建好后安全清理新建窗口自带的空白 seed 标签。
   // 新标签用 about:blank 起步，标题/URL/favicon 由 service-worker 的 onUpdated 回写模型叶子。
-  const addTabToWindow = async (windowId) => {
-    const win = findNode(m, windowId);
-    if (!win || win.kind !== "window") return;
+  const addTabToContainer = async (containerId) => {
+    const container = findNode(m, containerId);
+    if (!container || (container.kind !== "window" && container.kind !== "group")) return;
     try {
-      let realWinId = win.windowId;
+      // 找到宿主顶层窗口的绑定句柄：组行时沿父链回溯到窗口
+      const topWin =
+        topWindowOf(m, containerId) || (container.kind === "window" ? container : null);
+      let realWinId = topWin ? topWin.windowId : null;
       let rebound = false;
+      let seedId = null;
       if (realWinId == null || typeof chrome.windows?.get !== "function") {
         if (typeof chrome.windows?.create === "function") {
           const made = await chrome.windows.create({});
           realWinId = made && made.id != null ? made.id : undefined;
+          seedId =
+            made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
           rebound = true;
         }
       } else {
@@ -506,6 +543,8 @@ export async function bootShell(root) {
         } catch {
           const made = await chrome.windows.create({});
           realWinId = made && made.id != null ? made.id : undefined;
+          seedId =
+            made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
           rebound = true;
         }
       }
@@ -514,14 +553,28 @@ export async function bootShell(root) {
           ? await chrome.tabs.create({ url: "about:blank", windowId: realWinId })
           : await chrome.tabs.create({ url: "about:blank" });
       const tabId = created && created.id != null ? created.id : undefined;
-      const leaf = addTab(m, "新标签", "about:blank", win.id);
+      // L3：目标标签建好后清理 seed，避免残留新标签页 / 误关窗口
+      if (seedId != null) await tabsOp.removeSeedTab(chrome, seedId, tabId);
+      const leaf = addTab(m, "新标签", "about:blank", container.id);
       if (tabId != null) leaf.tabId = tabId;
-      if (rebound && realWinId != null) win.windowId = realWinId;
+      if (rebound && realWinId != null && topWin) topWin.windowId = realWinId;
       await store.saveModel(m);
       await refreshOpen();
       toast("已新建标签（页面加载后自动回填标题与网址）");
     } catch (err) {
       say("新建标签失败：" + err.message);
+    }
+  };
+
+  // U2 / Q2（2026-11-24 UI 审计）：行内「添加分组」——先弹命名框，空名称不创建；
+  // 窗口行新建分组、分组行新建子组（与右键同语义，但入口常显在行内）。
+  const addGroupToContainer = (containerId) => {
+    const container = findNode(m, containerId);
+    if (!container || (container.kind !== "window" && container.kind !== "group")) return;
+    if (container.kind === "group") {
+      openNewModal({ kind: "group", windowId: windowIdOf(container), targetId: container.id });
+    } else {
+      openNewModal({ kind: "group", windowId: container.id });
     }
   };
 
@@ -708,9 +761,13 @@ export async function bootShell(root) {
           if (openTabId != null && typeof chrome.windows?.create === "function") {
             const made = await chrome.windows.create({});
             realWinId = made && made.id != null ? made.id : null;
+            const seedId =
+              made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
             if (realWinId != null) {
               await chrome.tabs.move(openTabId, { windowId: realWinId, index: 0 });
               newWin.windowId = realWinId;
+              // U5（2026-11-24 UI 审计）：已打开标签移入新窗口后清理默认 seed 标签
+              if (seedId != null) await tabsOp.removeSeedTab(chrome, seedId, openTabId);
             }
           }
           await store.saveModel(m);
@@ -1126,8 +1183,10 @@ export async function bootShell(root) {
         toast(`已关闭 ${n} 个网页`);
       } else if (act === "add-group") {
         openNewModal({ kind: "group", windowId: kind === "window" ? id : windowIdOf(node) });
-      } else if (act === "add-subgroup") {
-        openNewModal({ kind: "group", windowId: windowIdOf(node), targetId: id });
+      } else if (act === "add-subgroup" || act === "add-group-inline") {
+        // U2：行内「添加分组」与右键「新建子组」同语义——分组行挂子组、窗口行挂分组
+        if (node.kind === "window") addGroupToContainer(id);
+        else openNewModal({ kind: "group", windowId: windowIdOf(node), targetId: id });
       } else if (act === "fold") {
         collapsed = editOp.collapsedToggle(collapsed, id);
         await render();
@@ -1149,7 +1208,7 @@ export async function bootShell(root) {
           say("复制失败：" + err.message);
         }
       } else if (act === "new-tab" || act === "add-tab") {
-        await addTabToWindow(id);
+        await addTabToContainer(id);
       }
     } catch (err) {
       say("操作失败：" + err.message);
@@ -1168,14 +1227,9 @@ export async function bootShell(root) {
     return cur?.id || m.windows[0]?.id;
   };
 
-  // ---- #30 工具栏：新建分组 / 定位 / 展收全部 / 搜索 ----
-  root.querySelector("#btnAddGroup")?.addEventListener("click", () => {
-    if (!m.windows.length) {
-      toast("还没有窗口节点");
-      return;
-    }
-    openNewModal({ kind: "group", windowId: m.windows[0].id });
-  });
+  // ---- #30 工具栏：定位 / 展收全部 / 搜索 ----
+  // U1（2026-11-24 UI 审计）：已移除顶部全局「新建分组」按钮（三处 quickbar 同步删除），
+  // 新建分组入口保留在窗口/分组行内「添加分组」加号与右键菜单。
   root.querySelector("#btnLocate")?.addEventListener("click", async () => {
     // 定位当前标签：找第一个已打开的标签，展开其祖先并滚动到可见
     const firstOpen = m.tabs.find((t) => openIds.has(t.id));
@@ -1378,25 +1432,24 @@ export async function bootShell(root) {
     pipState.collapsed = editOp.collapsedToggle(pipState.collapsed, id);
     void renderPip();
   };
-  // U2/Q3（2026-11-23 UI 审计）：PiP 完整复刻独立标签工具窗口——
-  // 顶部工具栏（搜索 / 设置 / 新建分组 / 定位 / 展收 / 链接 / 回收站 / 历史 / 全屏 / 主题）、
-  // 同一棵树、右键菜单、键盘导航、拖拽、行内打开/关闭/复制/新建标签全部对齐主页面。
+  // U2/Q3（2026-11-23）+ U1/U4（2026-11-24 UI 审计）：PiP 完整复刻独立标签工具窗口——
+  // 顶部工具栏（搜索 / 设置 / 定位 / 展收 / 链接 / 回收站 / 历史 / 全屏 / 主题；U1 移除新建分组，
+  // U4 图标统一 SVG）、同一棵树、右键菜单、键盘导航、拖拽、行内打开/关闭/复制/加号全部对齐主页面。
   const PIP_HTML = `
     <div class="pip-wrap">
-      <div class="pip-head"><span>TabHarbor 置顶小窗</span><button class="pip-x" title="取消置顶">✕</button></div>
+      <div class="pip-head"><span>TabHarbor 置顶小窗</span><button class="pip-x" title="取消置顶">${TOOL_SVG.close}</button></div>
       <div class="searchbar">
         <div class="search-box"><input id="pipQ" type="text" placeholder="输入搜索关键词…" /></div>
-        <button id="pipSettings" class="tbtn" data-act="settings" title="设置">⚙</button>
+        <button id="pipSettings" class="tbtn" data-act="settings" title="设置">${TOOL_SVG.settings}</button>
       </div>
       <div class="quickbar">
-        <button class="tbtn" data-act="add-group" title="新建分组">🗂⁺</button>
-        <button class="tbtn" data-act="locate" title="定位当前标签">⌖</button>
-        <button class="tbtn" data-act="toggle-all" title="展开 / 收起">▾</button>
-        <button class="tbtn" data-act="links" title="显示链接">🔗</button>
-        <button class="tbtn" data-act="trash" title="回收站">🗑</button>
-        <button class="tbtn" data-act="history" title="浏览器历史">◷</button>
-        <button class="tbtn" data-act="fullscreen" title="全屏卡片视图">⛶</button>
-        <button class="tbtn" data-act="theme" title="黑白主题切换">◐</button>
+        <button class="tbtn" data-act="locate" title="定位当前标签">${TOOL_SVG.locate}</button>
+        <button class="tbtn" data-act="toggle-all" title="展开 / 收起">${TOOL_SVG.toggle}</button>
+        <button class="tbtn" data-act="links" title="显示链接">${TOOL_SVG.links}</button>
+        <button class="tbtn" data-act="trash" title="回收站">${TOOL_SVG.trash}</button>
+        <button class="tbtn" data-act="history" title="浏览器历史">${TOOL_SVG.history}</button>
+        <button class="tbtn" data-act="fullscreen" title="全屏卡片视图">${TOOL_SVG.fullscreen}</button>
+        <button class="tbtn" data-act="theme" title="黑白主题切换">${TOOL_SVG.theme}</button>
       </div>
       <div id="spBody" class="sp-body"></div>
       <div class="pip-foot"><span id="pipStats" class="stats"></span><span class="pip-hint">关闭小窗即取消置顶</span></div>
@@ -1406,7 +1459,6 @@ export async function bootShell(root) {
   const pipToolAct = (act) => {
     const map = {
       settings: "#btnSettings",
-      "add-group": "#btnAddGroup",
       locate: "#btnLocate",
       "toggle-all": "#btnToggleAll",
       links: "#btnLinks",
@@ -1461,7 +1513,13 @@ export async function bootShell(root) {
       const addTabBtn = e.target.closest('[data-act="add-tab"]');
       if (addTabBtn) {
         const node = addTabBtn.closest(".node");
-        if (node?.dataset.id) void addTabToWindow(node.dataset.id);
+        if (node?.dataset.id) void addTabToContainer(node.dataset.id);
+        return;
+      }
+      const addGroupBtn = e.target.closest('[data-act="add-group-inline"]');
+      if (addGroupBtn) {
+        const node = addGroupBtn.closest(".node");
+        if (node?.dataset.id) addGroupToContainer(node.dataset.id);
         return;
       }
       const copyX = e.target.closest(".copy-x");

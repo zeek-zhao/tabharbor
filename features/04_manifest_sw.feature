@@ -9,6 +9,10 @@
 那么 "src/manifest.json" 不包含 "scripting"
 那么 "src/manifest.json" 不包含 "bookmarks"
 
+场景: manifest 默认图标已配置（U4 2026-11-24）
+那么 "src/manifest.json" 包含 "default_icon"
+那么 "src/manifest.json" 包含 "assets/icons/icon48.png"
+
 场景: 快捷键命令四个预置键（FR-012）
 那么 "src/manifest.json" 包含 "open-side"
 那么 "src/manifest.json" 包含 "open-window"
@@ -29,6 +33,23 @@
 当 打开模式为 "window"
 当 点击工具栏图标
 那么 独立窗口已创建且地址为 "window/window.html"
+
+场景: U3 已有工具窗口时重复点击只聚焦不新建（2026-11-24）
+假如 已装配 mock chrome v2
+假如 service worker 监听已注册
+假如 浏览器打开了 "0" 个标签页
+当 打开模式为 "window"
+当 点击工具栏图标
+当 点击工具栏图标
+那么 已弹出的工具窗口被聚焦且未重复新建
+
+场景: U3 open-window 命令实际开窗/聚焦（2026-11-24）
+假如 已装配 mock chrome v2
+假如 service worker 监听已注册
+假如 浏览器打开了 "0" 个标签页
+当 按下快捷键 "open-window"
+那么 独立窗口已创建且地址为 "window/window.html"
+那么 存储命令键为 "open-window"
 
 场景: 右键工具栏图标打开侧边栏（FR-014）
 假如 已装配 mock chrome v2

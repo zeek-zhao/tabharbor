@@ -1,8 +1,8 @@
 // M1-4 右键菜单与编辑弹窗模板（issue #20，FR-010/012/014/017；#30 对齐原型 v16 文案；D7 补齐原型 SVG 图标）
 // P0（m11790）：窗口/组的「展开/收起」从右键菜单删除，改为单击本体切换；
 // 组右键补「新建子组」入口（原仅窗口下可建分组）。
-//   窗 = 打开窗内全部标签/重命名窗口/新建分组/关闭窗内已打开标签/删除整窗到回收站（5）
-//   组 = 打开整组/重命名分组/新建子组/关闭整组已打开标签/删除整组到回收站（5）
+//   窗 = 打开窗内全部标签/重命名窗口/添加标签/新建分组/关闭窗内已打开标签/删除整窗到回收站（6，L6）
+//   组 = 打开整组/重命名分组/添加标签/新建子组/关闭整组已打开标签/删除整组到回收站（6，L6）
 //   标签 = 编辑/添加备注/删除到回收站（3，编辑仅名称——Q-C）
 // D7：菜单项按原型结构 `<div class="mi">${icon}<span>${label}</span></div>`，图标集合对应原型 menuIcon。
 // 渲染层只负责模板与定位；行为由 data-act 委托给 shell 接线。
@@ -29,6 +29,8 @@ const ICON_FOR = {
   "close-group": "close",
   "close-all": "close",
   "add-group": "add",
+  "add-subgroup": "add",
+  "add-tab": "add",
   fold: "fold",
 };
 const item = (act, label, danger) =>
@@ -47,9 +49,11 @@ export function menuHtml(kind) {
     ].join("");
   }
   if (kind === "group") {
+    // L6（2026-11-24 UI 审计）：右键菜单同步补充「添加标签」入口（行内加号为主）
     return [
       item("open-group", "打开整组"),
       item("rename", "重命名分组"),
+      item("add-tab", "添加标签"),
       item("add-subgroup", "新建子组"),
       sep,
       item("close-group", "关闭整组已打开标签"),
@@ -57,10 +61,11 @@ export function menuHtml(kind) {
       item("del", "删除整组到回收站", true),
     ].join("");
   }
-  // window
+  // window —— L6：补充「添加标签」入口
   return [
     item("open-all", "打开窗内全部标签"),
     item("rename", "重命名窗口"),
+    item("add-tab", "添加标签"),
     item("add-group", "新建分组"),
     sep,
     item("close-all", "关闭窗内已打开标签"),

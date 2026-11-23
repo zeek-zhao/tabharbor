@@ -120,3 +120,7 @@
     假如 已订阅存储层模型变更
     当 保存模型快照
     那么 收到至少 "1" 次存储变更广播
+
+  场景: L2 窗口配对只按 windowId/tabId 不按 URL（D25，2026-11-24）
+    那么 "src/core/align.js" 不包含 "urls.has(leaf.url)"
+    那么 "src/core/align.js" 包含 "L2/D25"
