@@ -134,3 +134,22 @@
 那么 "src/ui/shell.js" 包含 "removeToTrash"
 那么 "src/ui/shell.js" 包含 "queryOpenTabs"
 那么 "src/core/align.js" 包含 "realignIfEmpty"
+
+  # U2/Q3（2026-11-23 UI 审计）：PiP 置顶小窗完整复刻独立标签工具窗口
+  场景: U2/Q3 置顶小窗完整复刻工具栏与交互
+    那么 "src/ui/shell.js" 包含 "PIP_HTML"
+    并且 "src/ui/shell.js" 包含 "pipToolAct"
+    并且 "src/ui/shell.js" 包含 "pipCtxMenu"
+    并且 "src/ui/shell.js" 包含 "pipToolAct"
+    并且 "src/ui/shell.js" 包含 "runMenuAct"
+    并且 "src/ui/shell.js" 包含 "orderedLeafIds"
+    并且 "src/ui/shell.js" 包含 "applyDrop"
+    并且 "src/ui/shell.js" 包含 "pipQ"
+    并且 "src/ui/shell.js" 包含 "data-act=\"add-tab\""
+    并且 "src/assets/m2.css" 包含 ".pip-head .pip-x"
+
+  # O5（2026-11-23 UI 审计）：PiP 与主页面打开态实时同步
+  场景: O5 置顶小窗与主页面实时同步打开态
+    那么 "src/ui/shell.js" 包含 "pipRefresh = () => void renderPip"
+    并且 "src/ui/shell.js" 包含 "pipRefresh()"
+    并且 "src/ui/shell.js" 包含 "pipRefresh = () => {}"

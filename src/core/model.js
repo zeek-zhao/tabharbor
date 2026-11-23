@@ -165,6 +165,18 @@ export function promoteGroupToTopWindow(m, groupId) {
   return turnGroupIntoWindow(m, groupId, null);
 }
 
+// U4（2026-11-23 UI 审计）：标签叶子拖到根 R1 空白区 → 新建顶层模型窗口，标签直挂该窗口。
+// D22：新窗口默认标题 Window（英文），标签作为其直属叶子；返回新窗口节点，供壳层
+// 回填 windowId（标签已打开时同步移动真实 tab 到新建真实窗口）。失败返回 null，模型零变更。
+// 与 promoteGroupToTopWindow 对称——组升窗沿用原 id，标签升窗则新建窗口承载标签。
+export function promoteLeafToTopWindow(m, tabId) {
+  const t = m.tabs.find((n) => n.id === tabId);
+  if (!t || t.kind !== "tab" || !kindConsistent(m, tabId)) return null;
+  const w = addWindow(m, DEFAULT_WINDOW_TITLE);
+  t.parentId = w.id;
+  return w;
+}
+
 // D4（评审稿 2026-11-22）：合并窗口能力彻底移除——窗口拖到窗口统一降级为子组，
 // 不再提供 mergeWindows / mergeWindowsAt 入口，BDD/E2E 合并用例一并清理。
 

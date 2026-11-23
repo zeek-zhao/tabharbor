@@ -461,10 +461,12 @@ try {
   await win.evaluate(() => document.querySelector("#btnTrash").click());
   await win.waitForSelector('[data-trash-act="purge"]', { timeout: 5000 });
   await win.click('[data-trash-act="purge"]');
+  // U1/Q4（2026-11-23 UI 审计）：删除后焦点落到相邻叶子是正确行为，
+  // 故彻底删除后仍可能有 .leaf.selected（相邻叶子），这里只校验回收站角标已清零、条目已消失。
   await win.waitForFunction(
     () => {
       const b = document.querySelector("#trashBadge");
-      return (!b || b.style.display === "none") && !document.querySelector(".leaf.selected");
+      return !b || b.style.display === "none";
     },
     { timeout: 5000 }
   );
@@ -758,8 +760,9 @@ try {
     const map = new Map([[`id:${t.tabId}`, "fav-e2e-token"]]);
     const html = mod.renderTree(m, { favicons: map, openIds: new Set([t.id]) });
     return (
-      // P0（m11790）：favicon 仍是独立 img.fav；无图标时回退独立状态灯 .status-dot（不再用 .dot）
-      html.includes('<img class="fav" src="fav-e2e-token"') && html.includes('class="status-dot')
+      // U5/Q2（2026-11-23 UI 审计）：favicon 成为状态主体（img.fav.on，高亮=已打开）；
+      // 仍保留独立 .status-dot 元素兼容旧断言；无图标叶子回退通用兜底图标 .fav-generic。
+      /<img class="fav on" src="fav-e2e-token"/.test(html) && html.includes('class="status-dot')
     );
   });
   assert.ok(favRenderOk, "favicon 前缀渲染/圆点回退失败（N3）");

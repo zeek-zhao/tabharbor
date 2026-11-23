@@ -1248,7 +1248,8 @@ step("假如", "标签 {} 的浏览器图标为 {}", (title, favUrl) => {
 
 step("那么", "标签 {} 的行显示浏览器图标 {}", (title, favUrl) => {
   const row = rowOf(title);
-  if (!row.includes('<img class="fav"')) {
+  // U5：favicon 类现带 on/off 状态后缀（class="fav on" / "fav off"）
+  if (!/<img class="fav(?: on| off)?"/.test(row)) {
     throw new Error(`${title} 行未渲染 favicon 图标`);
   }
   if (!row.includes(`src="${favUrl}"`)) {
@@ -1281,6 +1282,53 @@ step("那么", "已打开标签 {} 的行有关闭按钮", (title) => {
 
 step("那么", "关闭标签 {} 的行没有关闭按钮", (title) => {
   if (rowOf(title).includes('data-act="close"')) throw new Error(`${title} 关闭态不应有关闭按钮`);
+});
+
+// U6（2026-11-23 UI 审计）：打开/关闭按钮双向条件渲染
+step("那么", "未打开标签 {} 的行有打开按钮", (title) => {
+  if (!rowOf(title).includes('data-act="open"')) throw new Error(`${title} 未打开态应有打开按钮`);
+});
+step("那么", "未打开标签 {} 的行没有关闭按钮", (title) => {
+  if (rowOf(title).includes('data-act="close"')) throw new Error(`${title} 未打开态不应有关闭按钮`);
+});
+step("那么", "已打开标签 {} 的行没有打开按钮", (title) => {
+  if (rowOf(title).includes('data-act="open"')) throw new Error(`${title} 已打开态不应有打开按钮`);
+});
+step("那么", "已打开标签 {} 的行有关闭按钮", (title) => {
+  if (!rowOf(title).includes('data-act="close"')) throw new Error(`${title} 已打开态应有关闭按钮`);
+});
+
+// U5（2026-11-23 UI 审计）：favicon 主导打开/关闭状态（.on 高亮 / .off 灰色），缓存与通用兜底
+step("那么", "标签 {} 的行有高亮状态图标", (title) => {
+  const row = rowOf(title);
+  if (!/class="fav on"/.test(row) && !/class="fav fav-generic on"/.test(row))
+    throw new Error(`${title} 行缺少高亮状态图标 .fav.on：${row.slice(0, 400)}`);
+});
+step("那么", "标签 {} 的行有灰色状态图标", (title) => {
+  const row = rowOf(title);
+  if (!/class="fav off"/.test(row) && !/class="fav fav-generic off"/.test(row))
+    throw new Error(`${title} 行缺少灰色状态图标 .fav.off：${row.slice(0, 400)}`);
+});
+step("假如", "标签 {} 的模型缓存图标为 {}", (title, favUrl) => {
+  const node = freshByTitle(title);
+  node.favicon = favUrl;
+});
+step("那么", "标签 {} 的行显示缓存图标 {}", (title, favUrl) => {
+  const row = rowOf(title);
+  if (!row.includes(`src="${favUrl}"`)) throw new Error(`${title} 行未显示缓存图标 ${favUrl}`);
+});
+step("那么", "标签 {} 的行显示通用兜底图标", (title) => {
+  const row = rowOf(title);
+  if (!/class="fav fav-generic/.test(row)) throw new Error(`${title} 行缺少通用兜底图标`);
+});
+
+// U3（2026-11-23 UI 审计）：窗口行「＋」新建标签按钮（窗口行含其内层 node-row，用整树核验）
+step("那么", "窗口 {} 的行有新建标签按钮", (title) => {
+  const id = (ctx.named[title] || findAnyByTitle(title)).id;
+  // 取该窗口节点片段：从 data-id 起点到下一个窗口/叶子节点前的整段
+  const pos = ctx.html.indexOf(`data-id="${id}"`);
+  const slice = pos < 0 ? "" : ctx.html.slice(pos, pos + 1200);
+  if (!slice.includes('data-act="add-tab"')) throw new Error(`${title} 窗口行缺少新建标签按钮`);
 });
 
 step("那么", "节点 {} 的行有类 {}", (title, cls) => {

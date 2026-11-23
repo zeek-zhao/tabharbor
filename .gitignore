@@ -21,3 +21,4 @@ credentials*
 
 # Git 工作区临时
 *.orig
+.launch-browser.mjs

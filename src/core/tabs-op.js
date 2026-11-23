@@ -38,6 +38,11 @@ export async function copyToClipboard(text, clipboardApi) {
 //   winId 有效 → 直接用；
 //   winId 失效/为空（离线窗口/纯整理数据）→ windows.create 新建真实窗口；
 //   返回 { windowId, rebound }，rebound=true 时调用方应把 windowId 回填到模型窗口节点。
+// O3 / D24（2026-11-23 UI 审计）：离线开窗后移除系统默认初始标签页（Chrome 新建窗口自带
+// chrome://newtab），只保留后续 tabs.create 打开的叶子标签，避免残留默认首页 / 新标签页。
+// 注意：删除 seed 的时机必须在调用方 tabs.create 之后——真实 Chrome 中若窗口只有 seed
+// 一个标签，先删 seed 会直接关闭整个窗口，导致随后 tabs.create 落到错误窗口/标签丢失。
+// 因此这里只把 seedId 透出，由 openTab/openAll 在目标标签建好后安全清理。
 async function resolveHostWindow(chromeApi, m, topWin, winId) {
   if (winId != null && (await windowAlive(chromeApi, winId))) {
     return { windowId: winId, rebound: false };
@@ -45,10 +50,41 @@ async function resolveHostWindow(chromeApi, m, topWin, winId) {
   if (typeof chromeApi.windows?.create === "function") {
     const made = await chromeApi.windows.create({});
     const id = made && made.id != null ? made.id : undefined;
+    const seedId =
+      made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
     // D17：即便原窗口已离线，模型窗口保留（不删），这里只回填新句柄
-    return { windowId: id, rebound: true, topWinId: topWin ? topWin.id : undefined };
+    return {
+      windowId: id,
+      rebound: true,
+      topWinId: topWin ? topWin.id : undefined,
+      seedId,
+    };
   }
   return { windowId: undefined, rebound: false };
+}
+
+// O3/D24：目标标签已在新窗口建好后，安全清理 windows.create 自带的空白 seed 标签。
+// 只在 seed 明确是空白页（url 为空 / newtab / about:blank）且与该窗口现有标签不同时删除，
+// 保证窗口内始终至少保留一个标签，不会误删目标标签或关闭窗口。
+async function removeSeedTab(chromeApi, seedId, keepTabId) {
+  if (seedId == null || seedId === keepTabId) return;
+  if (typeof chromeApi.tabs?.get !== "function" || typeof chromeApi.tabs?.remove !== "function")
+    return;
+  try {
+    const seed = await chromeApi.tabs.get(seedId);
+    if (!seed) return;
+    const url = String(seed.url || "");
+    // 导航完成且已是真实页面 → 不是默认页，保留
+    if (url && !/^(chrome:\/\/newtab|about:blank)$/i.test(url)) return;
+    // 窗口内除 seed 外没有其他标签 → 说明目标标签还没建好，跳过（避免关闭窗口）
+    if (typeof chromeApi.tabs?.query === "function") {
+      const inWin = await chromeApi.tabs.query({ windowId: seed.windowId });
+      if (!inWin || inWin.length <= 1) return;
+    }
+    await chromeApi.tabs.remove(seedId);
+  } catch {
+    // 移除失败不影响开窗主流程
+  }
 }
 
 // FR-009：双击标签——已开（tabId 精确命中）→ 聚焦现有标签页不重复开；否则新建。
@@ -75,9 +111,12 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
     host.windowId != null
       ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
       : await chromeApi.tabs.create({ url: node.url });
+  const tabId = created && created.id != null ? created.id : undefined;
+  // O3/D24：目标标签建好后再清理新窗口自带的空白 seed，避免误关窗口/误删目标标签
+  if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
   return {
     created: true,
-    tabId: created && created.id != null ? created.id : undefined,
+    tabId,
     ...(host.rebound ? { rebound: true, windowId: host.windowId, topWindowId: host.topWinId } : {}),
   };
 }
@@ -93,11 +132,14 @@ async function windowAlive(chromeApi, winId) {
   }
 }
 
-// FR-021 / D18：打开全部——无确认直开，每个叶子都独立新建标签页（同 URL 不跳过），
+// FR-021 / D18：打开全部——无确认直开；同 URL 标签各自独立新建（D18 不按 URL 跳过），
+// 但 O2（2026-11-23 UI 审计）：叶子自身 tabId 仍在浏览器存活时跳过重复打开（只聚焦、不新建）。
 // 按「所属顶层模型窗口」分桶，每桶一个真实浏览器窗口（离线/未绑定则新建并回传 rebound）。
-// 返回 {created, groups:[{topWindowId,windowId,rebound,tabIds,leafIds}]}；为兼容旧调用方，
-// Promise 解析值同时保留数字语义（valueOf/toString → created）。
+// 返回 {created, focused, skipped, groups:[{topWindowId,windowId,rebound,tabIds,leafIds}]}；
+// 为兼容旧调用方，Promise 解析值同时保留数字语义（valueOf/toString → created）。
 export async function openAll(chromeApi, m, nodeId, openUrls) {
+  const liveTabs = await chromeApi.tabs.query({});
+  const liveIds = new Set(liveTabs.map((t) => t.id).filter((v) => v != null));
   const buckets = new Map(); // key = topWindow.id | "free"
   for (const t of collectLeaves(m, nodeId)) {
     const top = topWindowOf(m, t.id);
@@ -106,6 +148,8 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
     buckets.get(key).leaves.push(t);
   }
   let created = 0;
+  let focused = 0;
+  const skippedIds = [];
   const groups = [];
   for (const [key, { topWin, leaves }] of buckets) {
     let host = { windowId: undefined, rebound: false };
@@ -115,6 +159,13 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
     const tabIds = [];
     const leafIds = [];
     for (const leaf of leaves) {
+      // O2：叶子已绑定且该 tabId 仍存活 → 聚焦现有标签，跳过新建与回填
+      if (leaf.tabId != null && liveIds.has(leaf.tabId)) {
+        await chromeApi.tabs.update(leaf.tabId, { active: true });
+        focused += 1;
+        skippedIds.push(leaf.id);
+        continue;
+      }
       const made =
         host.windowId != null
           ? await chromeApi.tabs.create({ url: leaf.url, windowId: host.windowId })
@@ -124,6 +175,8 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
       leafIds.push(leaf.id);
       created += 1;
     }
+    // O3/D24：整桶叶子建完后清理新窗口自带的空白 seed（至少保留一个目标标签）
+    if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabIds[0]);
     groups.push({
       topWindowId: key === "free" ? null : key,
       windowId: host.windowId,
@@ -132,7 +185,7 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
       leafIds,
     });
   }
-  const result = { created, groups };
+  const result = { created, focused, skipped: skippedIds, groups };
   result.valueOf = () => created;
   result.toString = () => String(created);
   return result;

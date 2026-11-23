@@ -16,6 +16,23 @@ const XI =
 // D2：标签行内「打开」按钮（原型菜单 open 图标同款播放三角）
 const OI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
+// U3（2026-11-23 UI 审计）：窗口行「＋」——在该窗口对应的真实浏览器窗口新建标签页。
+const PLUS =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+// U5 / Q2（2026-11-23 UI 审计）：无缓存 favicon 时的通用兜底图标（按协议选形），
+// 关闭态由 CSS `.fav.off` 置灰、打开态正常着色，取代「状态点+可选图标」双前缀。
+const GENERIC_FAV = {
+  file: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M6 2h8l4 4v16H6V2zm8 1.5V6h2.5L14 3.5z" fill="currentColor"/></svg>',
+  internal:
+    '<svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  web: '<svg viewBox="0 0 24 24" width="14" height="14"><rect x="3" y="4" width="18" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 9h18" stroke="currentColor" stroke-width="2"/></svg>',
+};
+function genericFaviconKind(url) {
+  const s = String(url || "");
+  if (/^file:/i.test(s)) return "file";
+  if (/^(chrome|about|edge|moz-extension|chrome-extension):/i.test(s)) return "internal";
+  return "web";
+}
 
 export function renderTree(m, opts = {}) {
   const out = [];
@@ -74,25 +91,44 @@ function containerOpen(n, opts, depth) {
     n.kind === "window" && n.windowId == null
       ? `<span class="offline-dot" title="未绑定浏览器窗口，双击其下标签会新建窗口"></span>`
       : "";
-  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops"><button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
+  // U3：窗口行「＋」新建标签（在该窗口对应真实浏览器窗口新建并写入模型叶子）
+  const addTab =
+    n.kind === "window"
+      ? `<button class="add-tab-x" data-act="add-tab" title="在该窗口新建标签">${PLUS}</button>`
+      : "";
+  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}<button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
 }
 
-// 标签叶子（原型：status-dot + favicon + title + link(浅灰) + note(斜体) + copy-x + close-x 仅已开）
+// 标签叶子（U5/Q2：favicon 前缀 + 高亮/灰色状态 + title + link + note + 行内按钮）
 function leafRow(t, opts) {
   const open = opts.openIds ? opts.openIds.has(t.id) : false;
   const sel = opts.selectedId === t.id ? " selected" : "";
   const dim = open ? "" : " dimmed";
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
-  // P0（m11790）：独立圆形状态指示灯（开=绿色实心、关=灰色空心），favicon 不得顶替状态点。
-  // D17（定稿 2026-11-23）：favicon 只按 tabId 精确取，彻底取消 URL 兜底。
+  // P0（m11790）：保留独立状态点元素（BDD 兼容）；U5 起状态由 favicon .on/.off 主导呈现。
   const statusDot = `<span class="status-dot${open ? " on" : ""}" title="${open ? "网页已打开" : "网页未打开"}"></span>`;
+  // U5 / Q2：favicon 来源优先级 = 实时快照(tabId) → 模型缓存(t.favicon) → 通用兜底图标。
+  // 关闭态仍显示缓存/兜底图标，仅以灰色（.off）表达关闭；打开态高亮（.on）。
+  // D17：实时图标只按 tabId 精确取，无 URL 兜底。
   const favicons = opts.favicons;
-  const favUrl = favicons && t.tabId != null ? favicons.get(`id:${t.tabId}`) : null;
-  const fav = favUrl ? `<img class="fav" src="${escapeHtml(favUrl)}" alt="" />` : "";
+  const liveFav = favicons && t.tabId != null ? favicons.get(`id:${t.tabId}`) : null;
+  const favUrl = liveFav || t.favicon || null;
+  const stateCls = open ? "on" : "off";
+  let fav;
+  if (favUrl) {
+    fav = `<img class="fav ${stateCls}" src="${escapeHtml(favUrl)}" alt="" title="${open ? "网页已打开" : "网页未打开"}"/>`;
+  } else {
+    // O8：内部页 / 文件页 / 扩展页统一通用兜底图标，按协议选形
+    const kind = genericFaviconKind(t.url);
+    fav = `<span class="fav fav-generic ${stateCls}" title="${open ? "网页已打开" : "网页未打开"}">${GENERIC_FAV[kind]}</span>`;
+  }
   const prefix = statusDot + fav;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
-  const openBtn = `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
+  // U6（2026-11-23 UI 审计）：已打开只显示关闭按钮、未打开只显示打开按钮（双向条件渲染）
+  const openBtn = open
+    ? ""
+    : `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
   const closeBtn = open
     ? `<button class="close-x" data-act="close" title="关闭网页">${XI}</button>`
     : "";

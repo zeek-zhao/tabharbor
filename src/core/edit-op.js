@@ -65,3 +65,17 @@ export function collapsedToggle(collapsed, id) {
   else next.add(id);
   return next;
 }
+
+// U1 / Q4（2026-11-23 UI 审计）：删除后焦点落到相邻标签，不要跳到最下面。
+// 入参 orderedIds = 删除「之前」模型序的全部叶子 id；removeId = 被删节点（组/窗口时为其自身，
+// 焦点应落到删除后仍存活的相邻叶子）。规则：优先前一个；无前一个取后一个；无剩余叶子返回 null。
+// 纯函数：不修改模型，供壳层在 removeToTrash 前计算目标 selectedId（删除后 selectLeaf）。
+export function neighborLeafIdAfterRemove(orderedIds, removeId) {
+  const ids = Array.isArray(orderedIds) ? orderedIds : [];
+  const i = ids.indexOf(removeId);
+  if (i < 0) return ids.length ? ids[0] : null; // 被删节点本身不在叶子序列（删组/窗口）→ 退回首叶
+  const prev = ids[i - 1];
+  if (prev != null) return prev; // Q4：优先前一个
+  const next = ids[i + 1];
+  return next != null ? next : null; // 无前一个取后一个；无剩余则清空
+}

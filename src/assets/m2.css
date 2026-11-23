@@ -222,6 +222,44 @@ body {
 .leaf.dimmed .fav {
   opacity: 0.45;
 }
+/* U5/Q2（2026-11-23 UI 审计）：favicon 主导状态——已打开高亮、关闭灰色（含缓存/兜底图标） */
+.leaf .fav.off,
+.leaf .fav.fav-generic.off {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.leaf .fav.on,
+.leaf .fav.fav-generic.on {
+  filter: none;
+  opacity: 1;
+}
+.leaf .fav-generic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg2);
+}
+.leaf.open .fav-generic.on {
+  color: var(--accent);
+}
+/* U3：窗口行「＋」新建标签按钮（常显，hover 高亮） */
+.add-tab-x {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg1);
+  border: none;
+  border-radius: 4px;
+  padding: 2px;
+  cursor: pointer;
+  visibility: visible;
+}
+.add-tab-x:hover {
+  background: var(--bg3);
+  color: var(--accent);
+}
 .leaf .title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -727,10 +765,31 @@ body {
   font-size: 13px;
 }
 .pip-head {
-  padding: 10px 14px;
+  padding: 8px 10px 8px 14px;
   font-weight: 600;
   color: var(--fg1);
   border-bottom: 1px solid var(--line1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pip-head .pip-x {
+  border: 0;
+  background: transparent;
+  color: var(--fg2);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.pip-head .pip-x:hover {
+  background: var(--hover-bg, rgba(127, 127, 127, 0.16));
+  color: var(--fg1);
+}
+.pip-hint {
+  color: var(--fg2);
+  font-size: 11px;
 }
 .pip-wrap .sp-body {
   flex: 1 1 auto;

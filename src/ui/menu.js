@@ -21,6 +21,7 @@ const icon = (name) =>
 const ICON_FOR = {
   edit: "edit",
   note: "note",
+  copy: "copy",
   del: "del",
   "open-group": "open",
   "open-all": "open",
@@ -36,9 +37,11 @@ const sep = `<div class="sep"></div>`;
 
 export function menuHtml(kind) {
   if (kind === "leaf" || kind === "tab") {
+    // O6（2026-11-23 UI 审计）：行内有复制按钮，叶子右键菜单同步补「复制」项
     return [
       item("edit", "编辑"),
       item("note", "添加备注"),
+      item("copy", "复制"),
       sep,
       item("del", "删除到回收站", true),
     ].join("");
