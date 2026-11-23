@@ -11,7 +11,7 @@
 //
 // 注意：本模块只做「树结构」不变式，不解析浏览器快照；快照读取与挂靠在
 // syncBrowserSnapshot（align.js）完成。open 快照一致性校验用 opts.snapshot：
-//   [{ id, url }] —— tabId 命中优先，URL 兜底（与 computeOpenIds 同源）。
+//   [{ id }] —— 只按 tabId 精确命中（D17：彻底取消 URL 兜底，与 computeOpenIds 同源）。
 
 import { addWindow, DEFAULT_WINDOW_TITLE } from "./model.js";
 
@@ -126,8 +126,8 @@ export function validateTree(model, opts = {}) {
   // 4) open 状态与浏览器快照一致性（仅校验，不在此处修改模型）
   if (snapshot) {
     const tabIds = new Set(snapshot.map((t) => t.id).filter((v) => v != null));
-    // D12（2026-11-23）：导入/未绑定节点不得被 URL 兜底点亮，
-    // 与 align.computeOpenIds 同源（tabId 优先、URL 兜底仅用于既往管理节点）。
+    // D17（定稿 2026-11-23）：只按 tabId 精确匹配，彻底取消 URL 兜底，
+    // 与 align.computeOpenIds 同源——同一链接多开不会串点亮错误节点。
 
     for (const t of model.tabs || []) {
       const actuallyOpen = t.tabId != null && tabIds.has(t.tabId);

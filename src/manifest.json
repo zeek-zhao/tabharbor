@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "TabHarbor",
   "version": "0.2.0",
-  "description": "TabHarbor v2——窗口/分组/标签三层树形管理（M0 工程骨架）",
+  "description": "TabHarbor v2——窗口/分组/标签三层树形管理，支持拖拽整理、右键编辑、搜索与浏览器实时同步",
   "permissions": [
     "tabs",
     "storage",

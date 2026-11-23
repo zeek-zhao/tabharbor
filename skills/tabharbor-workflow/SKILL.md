@@ -33,7 +33,7 @@ description: TabHarbor 项目的开发工作流与固化规则——窗口/分�
 | --- | --- | --- | --- |
 | 分组（L2） | 窗口行 | 升为独立窗口（L1） | `turnGroupIntoWindow` |
 | 窗口（L1） | 分组行 | 降为该分组的子分组（L2） | `turnWindowIntoGroup` |
-| 窗口 | 窗口行 | 合并（源移除） | `mergeWindows` |
+| 窗口 | 窗口行 | 降级为该窗口下子组（D4 已移除窗口合并） | `turnWindowIntoGroupUnder` |
 | 标签 | 标签行 | 邻位排序 | `moveLeafAfter` |
 | 标签 | 分组/窗口行 | 迁移 | `moveLeafInto` |
 | 分组 | 分组行 | 改挂/子组 | `moveNode` |
@@ -82,7 +82,7 @@ description: TabHarbor 项目的开发工作流与固化规则——窗口/分�
 - **坑**：`waitForFunction` 签名是 `(fn, arg, options)`；把 `{timeout}` 放第 2 参会变成 arg，超时失效。
 - **坑**：`chrome.tabs.create` 后新标签 URL 先在 `pendingUrl`，导航提交后才落 `url` → 需监听
   `onCreated/onRemoved/onUpdated` 去抖刷新（shell 已处理）。
-- **坑**：stale `tabId`（浏览器重启后）不能让叶子永远灰暗 → `computeOpenIds` 对 URL 兜底不限制 `tabId == null`。
+- **坑**：stale `tabId`（浏览器重启后）不能让叶子永远灰暗 → `computeOpenIds` 只按 tabId 精确匹配（D17 已取消 URL 兜底），重启后由快照归集重新绑定 tabId。
 - 播种前 `chrome.storage.local.clear()`，避免 profile 残留的 tabId/trash 跨轮污染。
 - 互转 e2e：真实鼠标 `dragTo`，断言 storage 中 id 的数组归属发生切换，并校验 toast。
 - favicon e2e：在真实页面里 `import(chrome.runtime.getURL("ui/render.js"))` 调生产 `renderTree`，
@@ -100,7 +100,7 @@ description: TabHarbor 项目的开发工作流与固化规则——窗口/分�
 4. watch CI：
    - PowerShell 需前置 PATH：workspace `bin`（jq）、`C:\Program Files\GitHub CLI`、Git bin；
      再调 `D:\soft\Git\bin\bash.exe` 执行 `gh run watch --exit-status`（或 `gh run view`）。
-   - 判定：`test` 与 `e2e` 两个 job 都 success 才算通过；Node 20 的 actions deprecation warning 非阻断。
+   - 判定：`test` 与 `e2e` 两个 job 都 success 才算通过；CI 已使用 Node 22，无 Node 20 deprecation 告警。
 5. CI 失败 → 读 job 日志定位 → 本地改 → 再推 → 再 watch，直到全绿。
 6. 全绿后更新台账对应条目为「已验证」，记录 CI run URL，给用户逐项改动文件 + 测试结果 + CI 状态汇总。
 

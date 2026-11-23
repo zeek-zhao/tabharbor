@@ -1,5 +1,6 @@
 // TH2 存储层 v2（SRS §3.2 / FR-008~011）——单一数据源：模型三键 + 回收站 + 设置 + 窗口位置
-// open（已打开）为派生态，不入库，由 tabs.query 实时计算。
+// open/tabId 是打开态绑定字段：由 align.js 依 tabs.query 快照写回模型叶子，随 tabs 一起入库；
+// 真正的「是否打开」判定仍以浏览器实时快照为准（只按 tabId，D17 无 URL 兜底），落库值仅作绑定锚点。
 
 export const MODEL_KEYS = ["windows", "groups", "tabs"];
 export const ALL_KEYS = [
