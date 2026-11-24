@@ -6,7 +6,7 @@ Chrome MV3 标签管理扩展：把「真实浏览器窗口 → 分组（可嵌�
 
 ## 当前版本
 
-**0.3.0-preview.1**（manifest `0.3.0.1` / version_name `0.3 Preview 1`），预览候选分支 `release/v0.3.0-preview`。预览验收通过后合回 `main` 打正式版 `v0.3.0`。已发布基线：`main` @ `v0.2.0`。
+**v0.3.0**（manifest `0.3.0`），tag `v0.3.0`，`main` 已包含；历史基线：`v0.1.0`、`v0.2.0`。
 
 0.3 相对 v0.2.0 的主要能力：
 
@@ -40,20 +40,20 @@ Chrome MV3 标签管理扩展：把「真实浏览器窗口 → 分组（可嵌�
 
 ## 文档索引
 
-| 文档 | 内容 |
-| --- | --- |
+| 文档                                                                                 | 内容                                                                                |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
 | [docs/requirements/requirements-status.md](docs/requirements/requirements-status.md) | **当前功能状态台账**（唯一需求状态源）：功能 → 源码 → 验收 → 状态 → 测试 → 已知限制 |
-| [docs/architecture/module-map.md](docs/architecture/module-map.md) | 架构模块地图、数据流、存储键、权限、宿主模型 |
-| [docs/testing/test-matrix.md](docs/testing/test-matrix.md) | BDD / E2E / 门禁矩阵与证据口径 |
-| [docs/release/v0.3.0-preview.md](docs/release/v0.3.0-preview.md) | 0.3 预览版变更、已知限制、验收清单、正式版待办 |
-| [docs/object-model.md](docs/object-model.md) | 窗口 / 分组 / 标签定义、类型判定、拖拽互转与身份规则 |
-| [docs/operations/user-guide.md](docs/operations/user-guide.md) | 日常使用指南 |
-| [docs/operations/backup-guide.md](docs/operations/backup-guide.md) | 导入导出与加密备份指南 |
-| [docs/operations/sample-data.md](docs/operations/sample-data.md) | 样例数据与导入 / 恢复演练步骤 |
-| [docs/PRIVACY.md](docs/PRIVACY.md) | 隐私政策（权限、数据类别、Gist 传输、Token 边界） |
-| [docs/history/resolved-issues.md](docs/history/resolved-issues.md) | 已解决问题记录（现象 → 根因 → 修复 → 教训） |
-| [AGENTS.md](AGENTS.md) | AI / 开发工作入口：红线、命令、目录、提交与门禁规则 |
-| [samples/](samples/) | JSON 与 Netscape HTML 演示数据 |
+| [docs/architecture/module-map.md](docs/architecture/module-map.md)                   | 架构模块地图、数据流、存储键、权限、宿主模型                                        |
+| [docs/testing/test-matrix.md](docs/testing/test-matrix.md)                           | BDD / E2E / 门禁矩阵与证据口径                                                      |
+| [docs/release/v0.3.0.md](docs/release/v0.3.0.md)                                     | v0.3.0 正式版变更、已知限制、验收证据、遗留待办                                     |
+| [docs/object-model.md](docs/object-model.md)                                         | 窗口 / 分组 / 标签定义、类型判定、拖拽互转与身份规则                                |
+| [docs/operations/user-guide.md](docs/operations/user-guide.md)                       | 日常使用指南                                                                        |
+| [docs/operations/backup-guide.md](docs/operations/backup-guide.md)                   | 导入导出与加密备份指南                                                              |
+| [docs/operations/sample-data.md](docs/operations/sample-data.md)                     | 样例数据与导入 / 恢复演练步骤                                                       |
+| [docs/PRIVACY.md](docs/PRIVACY.md)                                                   | 隐私政策（权限、数据类别、Gist 传输、Token 边界）                                   |
+| [docs/history/resolved-issues.md](docs/history/resolved-issues.md)                   | 已解决问题记录（现象 → 根因 → 修复 → 教训）                                         |
+| [AGENTS.md](AGENTS.md)                                                               | AI / 开发工作入口：红线、命令、目录、提交与门禁规则                                 |
+| [samples/](samples/)                                                                 | JSON 与 Netscape HTML 演示数据                                                      |
 
 ## 开发
 

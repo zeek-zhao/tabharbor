@@ -6,7 +6,7 @@ description: TabHarbor 项目的开发工作流与固化规则——窗口/分�
 # TabHarbor 工作流 skill
 
 > 适用范围：`tabharbor` 仓库（Chrome MV3 标签管理扩展）。
-> 当前工作分支：`release/v0.3.0-preview`（0.3 预览候选，`0.3.0-preview.1` / manifest `0.3.0.1`）。
+> 当前已发布版本：`v0.3.0`（manifest `0.3.0`，tag `v0.3.0`）；hotfix 基于 `main` 或按需恢复 release 分支。
 > UI 事实源：`prototypes/tabharbor.html`（冻结，不参与 prettier）。
 > 功能事实源：`docs/requirements/requirements-status.md`（唯一需求状态台账）。
 
@@ -29,14 +29,14 @@ description: TabHarbor 项目的开发工作流与固化规则——窗口/分�
 
 ## 2. 拖拽互转判定规则（固化）
 
-| 源 | 目标 | 动作 | 实现 |
-| --- | --- | --- | --- |
-| 分组（非顶层） | 窗口行 | 升为独立窗口 | `turnGroupIntoWindow` |
-| 窗口 | 分组行 | 降为该分组的子分组 | `turnWindowIntoGroup` |
-| 窗口 | 窗口行 | 降级为该窗口下子组（**无窗口合并**，已废弃） | `turnWindowIntoGroupUnder` |
-| 标签 | 标签行 | 邻位排序 | `moveLeafAfter` |
-| 标签 | 分组/窗口行 | 迁移 | `moveLeafInto` |
-| 分组 | 分组行 | 改挂/子组 | `moveNode` |
+| 源             | 目标        | 动作                                         | 实现                       |
+| -------------- | ----------- | -------------------------------------------- | -------------------------- |
+| 分组（非顶层） | 窗口行      | 升为独立窗口                                 | `turnGroupIntoWindow`      |
+| 窗口           | 分组行      | 降为该分组的子分组                           | `turnWindowIntoGroup`      |
+| 窗口           | 窗口行      | 降级为该窗口下子组（**无窗口合并**，已废弃） | `turnWindowIntoGroupUnder` |
+| 标签           | 标签行      | 邻位排序                                     | `moveLeafAfter`            |
+| 标签           | 分组/窗口行 | 迁移                                         | `moveLeafInto`             |
+| 分组           | 分组行      | 改挂/子组                                    | `moveNode`                 |
 
 规则细节：
 

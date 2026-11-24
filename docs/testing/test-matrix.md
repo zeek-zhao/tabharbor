@@ -1,6 +1,6 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24（0.3 预览候选）。BDD 249 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，v0.3.0 发布态复核。BDD 249 场景 + 真机 Chromium E2E + 六项门禁。
 
 ## 1. BDD 场景分布（共 249，`npm test` = bdd-runner + 样例校验）
 
@@ -68,7 +68,7 @@
 | `npm run contrast` | 深/浅色设计态对比度 | 全部达标 |
 | `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-24）；CI `e2e` job 随 push/PR 复验 |
 
-> 以上门禁结果为 `release/v0.3.0-preview` @ `bcc1969` 基线的本地复跑记录（2026-11-24）。
+> 以上门禁结果为 v0.3.0 发布基线（`0a091eb` + 版本定稿提交）的本地复跑记录（2026-11-24）；CI `test` + `e2e` 两 job 随 push/PR 复验（run 45439539945 及后续）。
 
 CI（`.github/workflows/ci.yml`）：`test` job（语法/红线/合规/格式/提交人/contrast/BDD/打包）+ `e2e` job；push `main` 与所有 PR 触发。release（`release.yml`）：tag 触发，全量门禁 + E2E + 打包 + GitHub Release。
 

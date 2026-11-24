@@ -20,33 +20,33 @@ Chrome MV3 标签管理扩展：把「真实浏览器窗口 → 分组（可嵌�
 
 ## 3. 命令表
 
-| 命令 | 作用 |
-| --- | --- |
-| `npm test` | BDD 全量场景（features/*.feature）+ JSON/HTML 样例校验 |
-| `npm run test:e2e` | 真机 Chromium 冒烟（需 `npx playwright install chromium`） |
-| `npm run constraints` | 红线扫描（0 命中） |
-| `npm run compliance` | 开源合规（敏感信息 + LICENSE） |
-| `npm run committer` | 单一提交人 |
-| `npm run contrast` | 对比度门禁（深/浅色设计态） |
-| `npm run format / format:check` | prettier |
+| 命令                            | 作用                                                       |
+| ------------------------------- | ---------------------------------------------------------- |
+| `npm test`                      | BDD 全量场景（features/*.feature）+ JSON/HTML 样例校验     |
+| `npm run test:e2e`              | 真机 Chromium 冒烟（需 `npx playwright install chromium`） |
+| `npm run constraints`           | 红线扫描（0 命中）                                         |
+| `npm run compliance`            | 开源合规（敏感信息 + LICENSE）                             |
+| `npm run committer`             | 单一提交人                                                 |
+| `npm run contrast`              | 对比度门禁（深/浅色设计态）                                |
+| `npm run format / format:check` | prettier                                                   |
 
 ## 4. 文档索引
 
-| 文档 | 内容 |
-| --- | --- |
+| 文档                                     | 内容                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------- |
 | docs/requirements/requirements-status.md | **当前功能状态台账**（唯一需求状态源）：功能 / 模块 / 验收 / 状态 / 测试覆盖 / 限制 |
-| docs/architecture/module-map.md | 架构模块地图：模块职责、数据流、存储键、权限、宿主模型 |
-| docs/testing/test-matrix.md | BDD / E2E / 门禁矩阵与证据口径（本地 BDD、CI E2E、真机手工分层） |
-| docs/release/v0.3.0-preview.md | 0.3 预览版变更、已知限制、验收清单、正式版待办 |
-| docs/object-model.md | 窗口/分组/标签定义、类型判定、拖拽互转与身份规则 |
-| docs/operations/user-guide.md | 日常使用指南（树操作、搜索定位、快捷键、回收站、主题、PiP） |
-| docs/operations/backup-guide.md | 导入导出与加密备份指南（JSON/HTML/LinkMap、本地快照、Gist、恢复失败分类） |
-| docs/operations/sample-data.md | 样例数据用途、安全 Profile、导入/恢复演练步骤 |
-| docs/PRIVACY.md | 隐私政策（权限理由、数据类别、Gist 传输、Token 存储） |
-| docs/history/resolved-issues.md | 已解决问题记录（现象 → 根因 → 修复 → 教训） |
-| skills/tabharbor-workflow/SKILL.md | 项目工作流固化 skill（概念口径 / 互转判定 / BDD-CI 覆盖 / CI 流程） |
-| samples/datasets/ | JSON 与 Netscape HTML 演示数据 |
-| .github/project-config.json | gh-project-flow 面板配置 |
+| docs/architecture/module-map.md          | 架构模块地图：模块职责、数据流、存储键、权限、宿主模型                              |
+| docs/testing/test-matrix.md              | BDD / E2E / 门禁矩阵与证据口径（本地 BDD、CI E2E、真机手工分层）                    |
+| docs/release/v0.3.0.md                   | v0.3.0 正式版变更、已知限制、验收证据、遗留待办                                     |
+| docs/object-model.md                     | 窗口/分组/标签定义、类型判定、拖拽互转与身份规则                                    |
+| docs/operations/user-guide.md            | 日常使用指南（树操作、搜索定位、快捷键、回收站、主题、PiP）                         |
+| docs/operations/backup-guide.md          | 导入导出与加密备份指南（JSON/HTML/LinkMap、本地快照、Gist、恢复失败分类）           |
+| docs/operations/sample-data.md           | 样例数据用途、安全 Profile、导入/恢复演练步骤                                       |
+| docs/PRIVACY.md                          | 隐私政策（权限理由、数据类别、Gist 传输、Token 存储）                               |
+| docs/history/resolved-issues.md          | 已解决问题记录（现象 → 根因 → 修复 → 教训）                                         |
+| skills/tabharbor-workflow/SKILL.md       | 项目工作流固化 skill（概念口径 / 互转判定 / BDD-CI 覆盖 / CI 流程）                 |
+| samples/datasets/                        | JSON 与 Netscape HTML 演示数据                                                      |
+| .github/project-config.json              | gh-project-flow 面板配置                                                            |
 
 ## 5. 目录
 
@@ -64,5 +64,5 @@ samples/      演示数据与校验脚本
 ## 6. 版本状态
 
 - `main` @ `v0.2.0`（tag `v0.2.0`）：已发布基线。
-- `release/v0.3.0-preview` @ `0.3.0-preview.1`（manifest `0.3.0.1` / version_name `0.3 Preview 1`）：0.3 预览候选，详见 `docs/release/v0.3.0-preview.md`。
-- 预览验收通过后合回 `main` 打正式版 `v0.3.0`；旧开发分支在确认已并入 `main` 后按发布流程删除。
+- `v0.3.0`（manifest `0.3.0`）：已发布，tag `v0.3.0`，详见 `docs/release/v0.3.0.md`。
+- `release/v0.3.0-preview` 分支保留用于 hotfix 决策；已确认合并的旧开发分支已按发布流程删除。
