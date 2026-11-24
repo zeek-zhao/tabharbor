@@ -106,7 +106,9 @@ function containerOpen(n, opts, depth) {
   const addTab = `<button class="add-tab-x row-add" data-act="add-tab" title="添加标签" aria-label="在${n.kind === "window" ? "窗口" : "分组"}下添加标签">${PAGE_PLUS}</button>`;
   const addGroup = `<button class="add-group-x row-add" data-act="add-group-inline" title="${n.kind === "window" ? "新建分组" : "新建子组"}" aria-label="${n.kind === "window" ? "新建分组" : "新建子组"}">${FOLDER_PLUS}</button>`;
   const rename = `<button class="rename-x row-add" data-act="rename" title="重命名" aria-label="重命名${n.kind === "window" ? "窗口" : "分组"}">${PENCIL}</button>`;
-  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}${addGroup}${rename}<button class="copy-x" data-act="copy" title="${copyTip}" aria-label="${copyTip}">${CP}</button></span></div>`;
+  const copy = `<button class="copy-x" data-act="copy" title="${copyTip}" aria-label="${copyTip}">${CP}</button>`;
+  // U2（2026-11-24 UI 审计）：容器行顺序 = 添加标签 → 添加分组/子组 → 复制 → 重命名（最后）。
+  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}${addGroup}${copy}${rename}</span></div>`;
 }
 
 // 标签叶子（U5/Q2：favicon 前缀 + 高亮/灰色状态 + title + link + note + 行内按钮）
@@ -153,7 +155,8 @@ function leafRow(t, opts) {
     rawTitle ||
     String(t.url || "").trim() ||
     (internal ? `${internal[1].replace(/-/g, "")} 页面` : "未命名标签");
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}${renameBtn}${copyBtn}${openBtn}${closeBtn}</div>`;
+  // U2（2026-11-24 UI 审计）：叶子行顺序 = 复制 → 打开/关闭 → 重命名（最后）。
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}${renameBtn}</div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断

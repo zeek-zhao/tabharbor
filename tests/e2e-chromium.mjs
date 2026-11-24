@@ -117,34 +117,40 @@ try {
     `快捷栏顺序异常: ${acts}`
   );
 
+  // U4/Q4：右下角 GitHub 反馈 FAB 真实存在（侧边栏/独立窗口）
+  assert.ok(await win.isVisible("#btnFeedback"), "右下角 GitHub 反馈 FAB 缺失");
   await win.click("#btnSettings");
   await win.waitForSelector("#modalSetting:not([hidden])");
   const catCount = await win.evaluate(
     () => document.querySelectorAll("#modalSetting .cat-tab").length
   );
-  // L5（2026-11-24 主页审计）：新增「主页」分类，共 5 类
-  assert.equal(catCount, 5, `设置分类数异常: ${catCount}`);
+  // U3/U4（2026-11-24 UI 审计）：设置收敛为三分类（外观/备份/复制），
+  // 主页入口并入外观、反馈改为右下角 FAB。
+  assert.equal(catCount, 3, `设置分类数异常: ${catCount}`);
   const appearanceVisible = await win.evaluate(
     () => !document.querySelector('#modalSetting .cat-panel[data-panel="appearance"]').hidden
   );
   assert.ok(appearanceVisible, "外观分类面板未默认显示");
+  // 主页入口在外观面板内
+  const homeInAppearance = await win.evaluate(() => {
+    const app = document.querySelector('#modalSetting .cat-panel[data-panel="appearance"]');
+    return !!app && !!app.querySelector("#homeCfgEntry");
+  });
+  assert.ok(homeInAppearance, "主页入口未并入外观面板");
   await win.click('#modalSetting .cat-tab[data-cat="backup"]');
   const backupVisible = await win.evaluate(
     () => !document.querySelector('#modalSetting .cat-panel[data-panel="backup"]').hidden
   );
   assert.ok(backupVisible, "备份分类面板未切换显示");
-  // D6：备份面板按原型 opt-row 结构——本地子面板默认显示、GitHub 子面板默认隐藏、联动切换
-  assert.ok(await win.isVisible("#localBackupSub"), "本地备份子面板未显示（D6）");
-  assert.ok(
-    await win.isVisible('[data-setting="backup"][data-value="github"]'),
-    "备份方式 opt-row 缺失"
+  // U6（2026-11-24 UI 审计）：备份卡片配置区默认折叠，点「配置备份」才展开（先配置后确认）
+  assert.ok(!(await win.isVisible("#localBackupSub")), "本地备份配置区默认应折叠");
+  assert.ok(!(await win.isVisible("#ghBackupSub")), "GitHub 备份配置区默认应折叠");
+  await win.click('[data-backup-expand="github"]');
+  await win.waitForFunction(
+    () => !document.querySelector("#ghBackupSub").classList.contains("hidden"),
+    undefined,
+    { timeout: 5000 }
   );
-  const ghSubHidden0 = await win.evaluate(() => document.querySelector("#ghBackupSub").hidden);
-  assert.ok(ghSubHidden0, "GitHub 子面板默认应隐藏");
-  await win.click('.opt-row[data-setting="backup"][data-value="github"]');
-  await win.waitForFunction(() => !document.querySelector("#ghBackupSub").hidden, undefined, {
-    timeout: 5000,
-  });
   // M8/B5/Q3：Gist 配置字段（去 repo/branch/path，加 gistId/desc/fileName/private）
   const ghFields = await win.evaluate(() =>
     [
@@ -154,15 +160,17 @@ try {
       "#ghFileName",
       "#ghPrivate",
       "#ghBackupFreq",
+      "#ghBackupPwd",
       "#btnAuthorizeGithub",
+      "#btnBackupGithub",
     ].every((s) => !!document.querySelector(s))
   );
-  assert.ok(ghFields, "Gist 配置字段缺失（M8）");
+  assert.ok(ghFields, "Gist 配置字段/两步按钮缺失（Q3）");
   const noOldFields = await win.evaluate(
     () => !document.querySelector("#ghRepo") && !document.querySelector("#ghBranch")
   );
   assert.ok(noOldFields, "仍存在旧的仓库/分支字段");
-  // M6/B4：导入入口合并为单个（按内容嗅探），另加明文书签导出按钮（Q5）
+  // M6/B4/Q5：导入单按钮（内容嗅探）+ 独立导出 HTML
   const importBtns = await win.evaluate(
     () => document.querySelectorAll("#modalSetting [data-import]").length
   );
@@ -171,14 +179,21 @@ try {
     () => !!document.querySelector("#btnExportBookmarksHtml")
   );
   assert.ok(htmlExportBtn, "缺明文 HTML 书签导出按钮（Q5）");
-  await win.click('.opt-row[data-setting="backup"][data-value="local"]');
-  await win.waitForFunction(() => document.querySelector("#ghBackupSub").hidden, undefined, {
-    timeout: 5000,
-  });
+  await win.click('[data-backup-expand="local"]');
+  await win.waitForFunction(
+    () => !document.querySelector("#localBackupSub").classList.contains("hidden"),
+    undefined,
+    { timeout: 5000 }
+  );
+  // 展开 GitHub 后本地应自动折叠（互斥）
+  assert.ok(
+    await win.evaluate(() => document.querySelector("#ghBackupSub").classList.contains("hidden")),
+    "展开本地卡片后 GitHub 配置区应折叠"
+  );
   await win.click('[data-modal-close="modalSetting"]');
   const closed = await win.evaluate(() => document.querySelector("#modalSetting").hidden);
   assert.ok(closed, "设置弹窗未关闭");
-  console.log("E2E 4/7 设置弹窗五分类切换通过（外观/备份与恢复/主页/复制/反馈）");
+  console.log("E2E 4/7 设置弹窗三分类 / 主页入口 / 备份两步卡片切换通过");
 
   const kvCount = await win.evaluate(() => {
     document.querySelector("#btnKeys").click();

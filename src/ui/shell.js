@@ -49,6 +49,9 @@ export function applyTheme(doc, theme) {
   doc.documentElement.setAttribute("data-theme", theme);
 }
 
+// C12 红线：源码禁止字面非 GitHub API 的 https URL。反馈 FAB 的 issues 地址用协议拼接表达。
+const GH_FEEDBACK_URL = "https:" + "//github.com/zeek-zhao/tabharbor/issues";
+
 // U4（2026-11-24 UI 审计）：统一工具栏图标为线性 SVG（与主页面 HTML 一致，消除 emoji 混用）。
 const TOOL_SVG = {
   settings:
@@ -69,6 +72,9 @@ const TOOL_SVG = {
     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18V3Z" fill="currentColor" stroke="none"/></svg>',
   close:
     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  // Q4（2026-11-24 UI 审计）：GitHub 反馈 FAB 图标（实心，随 currentColor 着色）
+  github:
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.79 23.4c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.5 5.93.43.37.82 1.1.82 2.22v3.29c0 .32.21.7.83.58A12 12 0 0 0 12 .3z"/></svg>',
 };
 
 const KEYS_TABLE = [
@@ -94,13 +100,13 @@ const GUIDE_HTML = `
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
   <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；右键只保留备注、复制、打开、关闭、删除——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站。</li>
-  <li><b>导入与备份（M5/M7/M8）：</b>导入按内容自动识别 JSON / HTML / 主页配置（不看后缀）；备份到本地或私有 GitHub Gist 均为加密完整快照（含书签+设置+主页配置），每次备份/恢复需输入密码，密码不保存；另有独立明文 HTML 书签导出。</li>
+  <li><b>导入与备份（U5/U6/Q2）：</b>只保留一个「导入数据」按钮，放入文件后按内容自动识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份（不看后缀、不弹格式选项）。备份在本地与 GitHub 两张卡片里「先配置、后确认」：本地备份填密码后确认；GitHub 备份先「保存并校验配置」再单独「确认备份」。两者均为加密完整快照（含书签+回收站+设置+主页配置），密码不保存；另有独立「导出 HTML」明文书签导出。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
-  <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；设置「主页」分类或主页右上角齿轮均可进入配置。</li>
+  <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；主页入口已并入设置「外观」分类，也可从主页右上角齿轮进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
   <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
-  <li><b>设置分类：</b>设置内分外观、备份与恢复、主页、复制、反馈五类；外观里可改主题（默认深色）、打开方式和「在上次位置打开」。</li>
+  <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页面右下角 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
 // N3（m10950）：一次 tabs.query 同时派生「打开态集合」与「浏览器标签页自身图标表」。
@@ -1263,8 +1269,7 @@ export async function bootShell(root) {
   // 新建分组入口保留在窗口/分组行内「添加分组」加号与右键菜单。
   root.querySelector("#btnLocate")?.addEventListener("click", async () => {
     // M4（2026-11-24 菜单审计）：定位「当前浏览器窗口正在激活的标签」——
-    // 先 query({active:true,currentWindow:true}) 拿真实 tabId，再按 tabId 反查模型叶子；
-    // 未命中（该激活页不在树里 / 无浏览器权限）给明确提示，不再退化成"第一个打开的标签"。
+    // 先 query({active:true,currentWindow:true}) 拿真实 tabId，再按 tabId 反查模型叶子。
     let activeId = null;
     try {
       if (typeof chrome?.tabs?.query === "function") {
@@ -1275,15 +1280,36 @@ export async function bootShell(root) {
     } catch {
       activeId = null;
     }
-    // 反查：优先 tabId 精确命中；无 activeId 时才回退到第一个已打开叶子（兼容无权限环境）
-    const target =
-      (activeId != null && m.tabs.find((t) => t.tabId === activeId)) ||
-      (activeId == null ? m.tabs.find((t) => openIds.has(t.id)) : null);
+    // U1/R2（2026-11-24 UI 审计）：反查前先拉取真实窗口/标签快照并对齐模型，
+    // 把未归入的激活标签补入树（syncBrowserSnapshot），不轻易提示"不在书签树中"。
+    let target = activeId != null ? m.tabs.find((t) => t.tabId === activeId) : null;
+    if (activeId != null && !target) {
+      try {
+        const realWindows = await queryRealWindows();
+        const openTabs = await queryOpenTabs();
+        if (realWindows || openTabs.length) {
+          const snapshot = {
+            windows: realWindows || [],
+            tabs: openTabs.length ? openTabs : (realWindows || []).flatMap((w) => w.tabs || []),
+          };
+          const result = syncBrowserSnapshot(m, snapshot);
+          if (result && result.changed) {
+            await store.saveModel(m);
+            await applyOpenState();
+          }
+          // 对齐后按 tabId 二次反查（补入的叶子带真实 tabId）
+          target = m.tabs.find((t) => t.tabId === activeId);
+        }
+      } catch {
+        // 无浏览器 API（测试环境）时跳过同步，继续下面的明确原因分支
+      }
+    }
     if (!target) {
+      // 同步快照后仍无法归属，才给明确原因（区分无权限 / 激活页无法可靠归属）
       toast(
         activeId != null
-          ? "当前激活的标签不在书签树中"
-          : "无法获取当前激活标签（或没有已打开的标签）"
+          ? "当前激活标签未归入书签树，且同步浏览器快照后仍无法归属"
+          : "无法获取当前激活标签（无浏览器权限或无活动标签）"
       );
       return;
     }
@@ -1376,10 +1402,22 @@ export async function bootShell(root) {
           { openMode: value },
           "打开方式已设为：" + (value === "window" ? "独立窗口" : "侧边栏")
         );
-      // M6/B4：备份目标只留本地/Gist——选择后二级配置按需展开（去 localFormat 三格式）
+      // M6/B4 + U6（2026-11-24 UI 审计）：备份目标只留本地/GitHub——
+      // 去 localFormat 三格式；R7：backupTarget 仅记录「上次目标」并供定时 alarm 依赖，
+      // 手动备份由卡片显式确认触发。
       else if (name === "backup") {
         void saveSettingsPatch({ backupTarget: value });
-        syncBackupFields();
+        // 点卡片标题行=选中目标并展开其配置区
+        const sub =
+          value === "github"
+            ? root.querySelector("#ghBackupSub")
+            : root.querySelector("#localBackupSub");
+        if (sub) sub.classList.remove("hidden");
+        const other =
+          value === "github"
+            ? root.querySelector("#localBackupSub")
+            : root.querySelector("#ghBackupSub");
+        if (other) other.classList.add("hidden");
       }
     });
   });
@@ -1511,6 +1549,11 @@ export async function bootShell(root) {
       <div id="spBody" class="sp-body"></div>
       <div class="pip-foot"><span id="pipStats" class="stats"></span><span class="pip-hint">关闭小窗即取消置顶</span></div>
       <div id="pipCtxMenu" class="ctx-menu"></div>
+      <!-- Q4（2026-11-24 UI 审计）：右下角 GitHub 反馈 FAB，与主页面/独立窗口一致 -->
+      <a class="fab-github" href="${GH_FEEDBACK_URL}"
+         target="_blank" rel="noreferrer" title="GitHub 反馈" aria-label="GitHub 反馈">
+        ${TOOL_SVG.github}
+      </a>
     </div>`;
   // U2/Q3：工具栏动作桥接——复用主页面已接线的同名按钮，两处行为完全一致。
   const pipToolAct = (act) => {
@@ -1808,11 +1851,9 @@ export async function bootShell(root) {
 
   // ---- 备份与导入导出（D6：原型 opt-row 面板） ----
   const syncBackupFields = () => {
-    syncSettingRows(); // 备份方式 opt-row 选中态
-    const ghSub = root.querySelector("#ghBackupSub");
-    if (ghSub) ghSub.hidden = (settings.backupTarget || "local") !== "github";
-    const localSub = root.querySelector("#localBackupSub");
-    if (localSub) localSub.hidden = (settings.backupTarget || "local") !== "local";
+    syncSettingRows(); // 备份目标 opt-row 选中态（R7：backupTarget 记录上次目标/定时依赖）
+    // U6（2026-11-24 UI 审计）：两张卡片配置区默认折叠，由「配置备份」按钮展开；
+    // 这里不再按 backupTarget 抢先展开，避免打开设置时暴露配置/密码框。
     // M8/B5/Q3：Gist 字段（去 repo/branch/path）
     for (const [id, key, fallback] of [
       ["ghToken", "ghToken", ""],
@@ -1841,7 +1882,18 @@ export async function bootShell(root) {
       })
     );
   };
-  // D6：三种导入入口（JSON/HTML/原生结构）都通过隐藏文件输入
+  // U6（2026-11-24 UI 审计）：「配置备份」按钮展开对应卡片配置项（先配置、后确认）。
+  root.querySelectorAll("[data-backup-expand]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.backupExpand === "github" ? "#ghBackupSub" : "#localBackupSub";
+      const other = btn.dataset.backupExpand === "github" ? "#localBackupSub" : "#ghBackupSub";
+      const sub = root.querySelector(target);
+      if (sub) sub.classList.toggle("hidden");
+      const sibling = root.querySelector(other);
+      if (sibling) sibling.classList.add("hidden");
+    });
+  });
+  // D6：导入入口（自动嗅探）通过隐藏文件输入
   root.querySelectorAll("[data-import]").forEach((btn) => {
     btn.addEventListener("click", () => root.querySelector("#importFile")?.click());
   });
@@ -1863,16 +1915,44 @@ export async function bootShell(root) {
       } else if (sniffed.kind === "html") {
         imported = await io.importHTML(text, m);
       } else if (sniffed.kind === "homepage") {
-        // M9/Q4：主页配置导入前弹窗确认，确认后整体覆盖（不合并）
-        if (!window.confirm("这是主页配置文件。导入将整体覆盖当前搜索引擎与常用网址，是否继续？"))
-          return;
-        const cfg = homepage.normalizeHomeConfig(sniffed.data.config || sniffed.data);
+        // M9/Q1：主页配置导入不解释格式、不弹格式选择；只保留一次破坏性覆盖确认，
+        // 确认后整体覆盖当前搜索引擎、自定义引擎和常用网址（不合并）。
+        if (!window.confirm("导入将整体覆盖当前搜索引擎、自定义引擎与常用网址，是否继续？")) return;
+        const cfg = homepage.importHomepageConfig(text);
         settings = await store.saveSettings({ homepage: cfg });
         m.settings = settings;
         say("主页配置已导入并整体覆盖");
         return;
+      } else if (sniffed.kind === "encrypted-backup") {
+        // R1/Q2：通用「导入数据」识别到加密备份 → 先输密码 → 解密校验 → 全量覆盖确认 → 才写库。
+        const password = window.prompt("这是加密备份快照。输入备份密码以解密：");
+        if (!password) {
+          say("已取消导入（密码不能为空）");
+          return;
+        }
+        // 先解密 + validateTree 校验；失败在此抛出，绝不写库（R9 失败原因可理解）
+        let restored;
+        try {
+          restored = await io.restoreSealedSnapshot(text, password, m);
+        } catch (err) {
+          say("恢复快照失败：" + io.describeRestoreError(err));
+          return;
+        }
+        if (
+          !window.confirm(
+            "解密校验通过。导入将全量覆盖当前书签树、回收站、设置和主页配置，是否继续？"
+          )
+        )
+          return;
+        await store.saveModel(restored);
+        m = restored;
+        if (restored.settings) settings = await store.saveSettings(restored.settings);
+        await applyOpenState();
+        await render();
+        say("加密备份已恢复（全量覆盖，含主页配置）");
+        return;
       } else {
-        throw new Error("无法识别的导入内容（应为 JSON、HTML 书签或主页配置）");
+        throw new Error("无法识别的导入内容（应为 JSON、HTML 书签、主页配置或加密备份）");
       }
       const win = io.mergeAsImportedWindow(m, imported);
       await store.saveModel(m);
@@ -1885,37 +1965,50 @@ export async function bootShell(root) {
       event.target.value = "";
     }
   });
+  // U6/Q3（2026-11-24 UI 审计）：本地备份「先配置后确认」——密码在展开的卡片里填写，
+  // 点「本地备份」确认后才执行；密码不落盘、不进文件、不写日志、不做会话暂存。
   root.querySelector("#btnBackupNow")?.addEventListener("click", async () => {
     try {
-      // Q2：每次备份都要求输入密码，密码不落盘、不进文件、不写日志、不做会话暂存
-      const password = window.prompt("输入备份密码（加密完整快照，恢复时需再次输入）：");
+      const password = root.querySelector("#localBackupPwd")?.value || "";
       if (!password) {
-        say("已取消备份（密码不能为空）");
-        return;
-      }
-      const confirm = window.prompt("再次输入密码以确认：");
-      if (confirm !== password) {
-        say("两次密码不一致，未开始备份");
-        return;
-      }
-      if ((settings.backupTarget || "local") === "github") {
-        // M8/Q3：加密完整快照上传私有 Gist；密码临时驻留本次会话内存，不写 storage
-        const gistSettings = { ...settings, ghBackupPassword: password };
-        const result = await io.runAutoBackup(chrome, m, gistSettings);
-        // 成功后回写新 gistId（仅 id，不含 token/password）
-        if (result.gistId && result.gistId !== settings.ghGistId) {
-          settings = await store.saveSettings({ ghGistId: result.gistId });
-          m.settings = settings;
-        }
-        say(`加密快照已备份到私有 Gist：${result.gistId}`);
+        say("请先在配置项中填写备份密码");
         return;
       }
       // M7/B2：本地加密完整快照（模型+回收站+设置含主页配置一起打包）
       await io.manualBackup(m, settings, chrome.downloads, chrome, password);
+      const pwdInput = root.querySelector("#localBackupPwd");
+      if (pwdInput) pwdInput.value = ""; // 用完即清，不暂存
       await refreshBackups();
       say("已创建加密快照并下载（.tbh，恢复需输入密码）");
     } catch (error) {
-      say("备份失败：" + error.message);
+      say("备份失败：" + io.describeRestoreError(error));
+    }
+  });
+  // Q3（2026-11-24 UI 审计）：GitHub 备份两步流程第二步——
+  // 第一步「保存并校验配置」成功后，才允许单独点「确认备份」上传加密完整包。
+  root.querySelector("#btnBackupGithub")?.addEventListener("click", async () => {
+    try {
+      if (!settings.ghToken) {
+        say("请先在配置卡片点击「保存并校验配置」并完成授权");
+        return;
+      }
+      const password = root.querySelector("#ghBackupPwd")?.value || "";
+      if (!password) {
+        say("请填写备份密码后再确认备份");
+        return;
+      }
+      const gistSettings = { ...settings, ghBackupPassword: password };
+      const result = await io.runAutoBackup(chrome, m, gistSettings);
+      const pwdInput = root.querySelector("#ghBackupPwd");
+      if (pwdInput) pwdInput.value = ""; // 密码用完即清
+      if (result.gistId && result.gistId !== settings.ghGistId) {
+        settings = await store.saveSettings({ ghGistId: result.gistId });
+        m.settings = settings;
+        syncBackupFields();
+      }
+      say(`加密快照已备份到私有 Gist：${result.gistId}`);
+    } catch (error) {
+      say("备份失败：" + io.describeRestoreError(error));
     }
   });
   // Q5：独立明文 HTML 书签导出（不属于加密备份，方便导入其他浏览器）
@@ -1965,10 +2058,13 @@ export async function bootShell(root) {
         return;
       }
       await saveGitHubSettings(patch);
-      // B10：明确提示 Token 明文保存在本机扩展存储
-      say("Gist 配置已保存在本机扩展存储（Token 以明文保存于本机，请勿在公用设备使用）");
+      // Q3：第一步只保存并校验配置，不上传；上传由「确认备份」单独触发。
+      // B10/R8：明确提示 Token 明文保存在本机扩展存储。
+      say(
+        "Gist 配置已保存并校验通过（Token 以明文保存在本机，请勿在公用设备使用）；现在可填密码点「确认备份」"
+      );
     } catch (error) {
-      say("GitHub 授权失败：" + error.message);
+      say("GitHub 配置校验失败：" + io.describeRestoreError(error));
     }
   });
   root.querySelector("#btnRestoreBackup")?.addEventListener("click", async () => {
@@ -1994,7 +2090,8 @@ export async function bootShell(root) {
       await render();
       say("加密快照已恢复（含主页配置）");
     } catch (error) {
-      say("恢复失败：" + error.message);
+      // R9：区分密码错误 / 文件损坏 / 结构非法 / 版本不兼容，给出可理解原因；失败未写库
+      say("恢复失败：" + io.describeRestoreError(error));
     }
   });
 

@@ -232,7 +232,10 @@ export function sniffImport(text) {
     try {
       const parsed = JSON.parse(trimmed);
       result.data = parsed;
-      if (isLinkMapExport(parsed)) result.kind = "linkmap";
+      // R1（2026-11-24 UI 审计）：加密信封优先识别——避免被当作普通 JSON 快照走合并导入。
+      // 识别后由调用方走「输密码→解密校验→全量覆盖确认」恢复链路（Q2）。
+      if (crypto.isEnvelope(parsed)) result.kind = "encrypted-backup";
+      else if (isLinkMapExport(parsed)) result.kind = "linkmap";
       else if (isHomepageConfigExport(parsed)) result.kind = "homepage";
       else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) result.kind = "json";
     } catch {
@@ -494,6 +497,48 @@ export async function unsealSnapshot(sealedText, password) {
     throw new Error("解密后的备份内容不是合法 JSON");
   }
   return data;
+}
+
+/**
+ * R1/Q2（2026-11-24 UI 审计）：通用「导入数据」识别到加密备份后的恢复入口。
+ * 与 restoreBackup（按本地 backupId）不同，这里直接吃文件正文的加密信封文本：
+ * 解密 → importJSON + validateTree 校验（失败即抛错、不写库），返回完整模型快照。
+ * 全量覆盖确认由调用方在写库前完成。
+ */
+export async function restoreSealedSnapshot(sealedText, password, currentModel = {}) {
+  if (!password) throw new Error("恢复加密备份需要输入备份密码");
+  const data = await unsealSnapshot(sealedText, password);
+  const model = await importJSON(data, currentModel);
+  return { ...model, settings: data.settings || {} };
+}
+
+/**
+ * R9（2026-11-24 UI 审计）：恢复失败原因可理解化——按错误文案归类到四类，
+ * 供 UI 给出明确提示；不改变底层错误（仍由调用方决定是否写库）。
+ * 分类：password（密码错误/篡改）/ corrupt（文件损坏/信封非法）/
+ *       structure（结构非法/字段缺失）/ version（版本不兼容）/ unknown。
+ */
+export function classifyBackupError(error) {
+  const msg = String((error && error.message) || error || "");
+  if (/密码|password|认证失败|OperationError/i.test(msg)) return "password";
+  if (/版本|version|不兼容/i.test(msg)) return "version";
+  if (/结构|字段|节点|父节点|树|validate/i.test(msg)) return "structure";
+  if (/损坏|解析|JSON|信封|corrupt|parse/i.test(msg)) return "corrupt";
+  return "unknown";
+}
+
+/** R9：把恢复异常渲染成中文可理解原因。 */
+export function describeRestoreError(error) {
+  const kind = classifyBackupError(error);
+  const detail = String((error && error.message) || error || "未知错误");
+  const label = {
+    password: "密码错误或文件已被篡改",
+    version: "备份版本不兼容",
+    structure: "备份结构非法",
+    corrupt: "备份文件损坏",
+    unknown: "恢复失败",
+  }[kind];
+  return `${label}：${detail}`;
 }
 
 /**

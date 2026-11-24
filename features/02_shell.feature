@@ -42,14 +42,16 @@
 那么 "src/ui/render.js" 包含 "renderStats(m, openIds)"
 那么 "src/ui/render.js" 包含 "已打开"
 
-场景: 设置弹窗四分类（外观/备份与恢复/复制/反馈）
+场景: 设置弹窗三分类（外观/备份/复制；主页归入外观，反馈改右下角 FAB）
 那么 "src/window/window.html" 包含 "modalSetting"
 那么 "src/window/window.html" 包含 "data-cat=\"appearance\""
 那么 "src/window/window.html" 包含 "data-cat=\"backup\""
 那么 "src/window/window.html" 包含 "data-cat=\"copy\""
-那么 "src/window/window.html" 包含 "data-cat=\"feedback\""
+那么 "src/window/window.html" 不包含 "data-cat=\"feedback\""
+那么 "src/window/window.html" 包含 "fab-github"
 那么 "src/sidebar/sidebar.html" 包含 "modalSetting"
-那么 "src/sidebar/sidebar.html" 包含 "data-cat=\"feedback\""
+那么 "src/sidebar/sidebar.html" 不包含 "data-cat=\"feedback\""
+那么 "src/sidebar/sidebar.html" 包含 "fab-github"
 
 场景: 设置-外观含主题/打开方式单选与上次位置开关
 那么 "src/window/window.html" 包含 "data-setting=\"theme\""

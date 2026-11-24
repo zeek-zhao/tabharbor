@@ -267,7 +267,8 @@ body {
 }
 /* 两个加号 + 复制按钮的行内间距收紧，避免窄窗挤压标题 */
 .row-ops > .row-add + .row-add,
-.row-ops > .row-add + .copy-x {
+.row-ops > .row-add + .copy-x,
+.row-ops > .copy-x + .rename-x {
   margin-left: 0;
 }
 .node-row .win-name,
@@ -308,10 +309,12 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* R8（m10454）：行内图标放大加深——SVG 14px、常显复制按钮用主前景色 */
+/* R8（m10454）：行内图标放大加深——SVG 14px、常显复制按钮用主前景色
+   R3（2026-11-24 UI 审计）：.rename-x 并入统一行内图标按钮选择器，透明背景去默认白底 */
 .copy-x,
 .open-x,
-.close-x {
+.close-x,
+.rename-x {
   flex: 0 0 auto;
   display: inline-flex;
   background: transparent;
@@ -322,11 +325,14 @@ body {
   cursor: pointer;
   visibility: hidden;
 }
+/* R3（2026-11-24 UI 审计）：重命名按钮并入统一行内图标样式，常显且无默认白底 */
 /* R6：复制按钮与原型一致常显（叶子/分组/窗口行都可见） */
-.copy-x {
+.copy-x,
+.rename-x {
   visibility: visible;
 }
-.copy-x:hover {
+.copy-x:hover,
+.rename-x:hover {
   background: var(--bg3);
   color: var(--accent);
 }
@@ -565,10 +571,52 @@ body {
   font-size: 11px;
   color: var(--fg2);
 }
+/* R3/R4（2026-11-24 UI 审计）：class .hidden 与原生 [hidden] 一致的隐藏语义
+   （备份卡片 sub-block 初始折叠用 class="hidden" 控制）。 */
+.hidden {
+  display: none !important;
+}
 .sub-block {
   border-left: 2px solid var(--line1);
   padding-left: 10px;
   margin: 8px 0;
+}
+/* U6（2026-11-24 UI 审计）：备份卡片容器——标题行 + 折叠配置项，视觉分组更清晰 */
+.backup-card {
+  border: 1px solid var(--line1);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--bg2);
+}
+.backup-card > .opt-row {
+  border: none;
+  padding: 4px 0;
+}
+/* U4/R4/Q4（2026-11-24 UI 审计）：右下角 GitHub 反馈 FAB——
+   fixed 定位到视口右下角、悬浮于 footer 之上；主题自适应，深色/浅色均用强调色背景白图标。 */
+.fab-github {
+  position: fixed;
+  right: 14px;
+  bottom: 46px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  text-decoration: none;
+}
+.fab-github:hover {
+  filter: brightness(1.15);
+}
+.fab-github svg {
+  display: block;
 }
 .switch-row {
   display: flex;

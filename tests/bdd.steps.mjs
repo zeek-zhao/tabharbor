@@ -883,6 +883,13 @@ stepMatch("那么", '^"([^"]+)" 包含 (.+)$', (rel, rawNeedle) => {
     throw new Error(`${rel} 不包含 ${needle}`);
   }
 });
+// 兜底：带转义引号的 needle（如 data-cat=\"feedback\"）的「不包含」断言。
+stepMatch("那么", '^"([^"]+)" 不包含 (.+)$', (rel, rawNeedle) => {
+  const needle = rawNeedle.replace(/^"(.*)"$/, "$1").replace(/\\"/g, '"');
+  if (repoFile(rel).includes(needle)) {
+    throw new Error(`${rel} 不应包含 ${needle}`);
+  }
+});
 
 step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
   const html = repoFile(rel);
@@ -2954,11 +2961,19 @@ step("那么", "新建标签入口使用主页地址而非 about:blank", () => {
   );
   if (seg.includes('about:blank"')) throw new Error("新建标签仍含 about:blank");
 });
-step("那么", "设置弹窗含主页分类入口", () => {
+// U3（2026-11-24 UI 审计）：主页入口并入「外观」面板，移除独立主页分类/面板。
+step("那么", "设置弹窗主页入口在外观面板内且无独立主页分类", () => {
   for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
     const s = repoFile(f);
-    if (!s.includes('data-cat="home"')) throw new Error(`${f} 缺主页分类`);
-    if (!s.includes('data-panel="home"')) throw new Error(`${f} 缺主页面板`);
+    if (s.includes('data-cat="home"')) throw new Error(`${f} 仍含独立主页分类`);
+    if (s.includes('data-panel="home"')) throw new Error(`${f} 仍含独立主页面板`);
+    if (!s.includes('id="homeCfgEntry"')) throw new Error(`${f} 缺主页配置入口`);
+    // homeCfgEntry 必须位于外观面板区块内（appearance 面板起止之间）
+    const app = s.indexOf('data-panel="appearance"');
+    const appEnd = s.indexOf('data-panel="backup"');
+    const entry = s.indexOf('id="homeCfgEntry"');
+    if (!(app >= 0 && appEnd > app && entry > app && entry < appEnd))
+      throw new Error(`${f} 主页入口不在外观面板内`);
   }
 });
 
@@ -3161,4 +3176,157 @@ step("那么", "备份 UI 仅本地与 Gist 两类且去 localFormat", () => {
     if (!s.includes("ghPrivate")) throw new Error(`${f} 缺私有 Gist 开关`);
     if (!s.includes("btnExportBookmarksHtml")) throw new Error(`${f} 缺明文 HTML 导出（Q5）`);
   }
+});
+
+// ===== U1-U7 / R1-R10 / Q1-Q4（2026-11-24 UI 审计第二轮）=====
+// R1：加密信封纳入通用导入嗅探（运行时）
+step("那么", "嗅探识别加密备份信封", async () => {
+  const env = await crypto.encryptText("完整快照内容", "pass123");
+  const r = io.sniffImport(JSON.stringify(env));
+  if (r.kind !== "encrypted-backup") throw new Error(`嗅探类型=${r.kind}，应为 encrypted-backup`);
+});
+step("那么", "加密信封不会被当作普通 JSON 快照", async () => {
+  const env = await crypto.encryptText("x", "p");
+  const r = io.sniffImport(JSON.stringify(env));
+  if (r.kind === "json") throw new Error("加密信封被误判为普通 JSON");
+});
+// R9：恢复失败原因分类（运行时）
+step("那么", "恢复失败原因按四类可理解化", () => {
+  const cases = [
+    ["密码错误或认证失败", "password"],
+    ["加密信封版本不兼容", "version"],
+    ["导入数据无效：标签父节点不存在", "structure"],
+    ["备份内容损坏，无法解析加密信封", "corrupt"],
+  ];
+  for (const [msg, want] of cases) {
+    const got = io.classifyBackupError(new Error(msg));
+    if (got !== want) throw new Error(`"${msg}" 分类=${got}，应为 ${want}`);
+  }
+  if (!io.describeRestoreError(new Error("密码错误")).includes("密码错误"))
+    throw new Error("describeRestoreError 未给出可理解原因");
+});
+// R1/Q2：通用导入加密备份的解密恢复入口（运行时往返）
+step("那么", "加密快照可解密恢复且结构校验通过", async () => {
+  const full = io.buildFullSnapshot(
+    {
+      windows: [{ id: "w1", kind: "window", title: "W", collapsed: false }],
+      groups: [],
+      tabs: [],
+      trash: [],
+    },
+    { theme: "dark" }
+  );
+  const sealed = await crypto.encryptText(JSON.stringify(full), "pass123");
+  const restored = await io.restoreSealedSnapshot(JSON.stringify(sealed), "pass123", {});
+  if (!restored.windows.length) throw new Error("恢复后窗口为空");
+  if (restored.windows[0].id !== "w1") throw new Error("恢复后窗口 id 不符");
+});
+step("那么", "加密快照错密码恢复被拒绝", async () => {
+  const env = await crypto.encryptText(
+    JSON.stringify({ version: 1, windows: [], groups: [], tabs: [], settings: {}, trash: [] }),
+    "right"
+  );
+  let threw = false;
+  try {
+    await io.restoreSealedSnapshot(JSON.stringify(env), "wrong", {});
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error("错密码未被拒绝");
+});
+// U2/R3：行内按钮顺序 + 透明样式（静态）
+step("那么", "重命名按钮位于行尾且并入统一透明样式", () => {
+  const render = repoFile("src/ui/render.js");
+  const css = repoFile("src/assets/m2.css");
+  // 容器行：copy 在 rename 之前（重命名最后）
+  const cont = render.slice(
+    render.indexOf("function containerOpen"),
+    render.indexOf("function leafRow")
+  );
+  const contCopy = cont.indexOf("copy", cont.indexOf("const rename"));
+  const contRenameDef = cont.indexOf("const rename");
+  const contReturn = cont.indexOf('return `<div class="node');
+  const contRow = cont.slice(contReturn);
+  if (contRow.indexOf("${copy}") < 0 || contRow.indexOf("${rename}") < 0)
+    throw new Error("容器行缺 copy/rename 变量");
+  if (contRow.indexOf("${copy}") > contRow.indexOf("${rename}"))
+    throw new Error("容器行重命名未在复制之后");
+  // 叶子行：copyBtn/openBtn/closeBtn 都在 renameBtn 之前
+  const leaf = render.slice(render.indexOf("function leafRow"));
+  const leafRow = leaf.indexOf('return `<div class="leaf');
+  const seg = leaf.slice(leafRow);
+  const posRename = seg.indexOf("${renameBtn}");
+  for (const v of ["${copyBtn}", "${openBtn}", "${closeBtn}"]) {
+    const p = seg.indexOf(v);
+    if (p < 0 || p > posRename) throw new Error(`叶子行 ${v} 未在重命名之前`);
+  }
+  // CSS：.rename-x 并入统一选择器（透明背景）
+  const selBlock = css.slice(css.indexOf(".copy-x,"), css.indexOf(".copy-x:hover"));
+  if (!selBlock.includes(".rename-x")) throw new Error("CSS 未将 .rename-x 并入行内图标选择器");
+});
+// U3/R4：主页入口在外观（已在主页审计 step 验证）；反馈分类移除 + FAB 三端（静态）
+step("那么", "反馈改为右下角 GitHub FAB 且三端一致", () => {
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    if (s.includes('data-cat="feedback"')) throw new Error(`${f} 仍含反馈分类`);
+    if (!s.includes('id="btnFeedback"') || !s.includes("fab-github"))
+      throw new Error(`${f} 缺右下角反馈 FAB`);
+  }
+  const shell = repoFile("src/ui/shell.js");
+  const pip = shell.slice(shell.indexOf("const PIP_HTML"), shell.indexOf("pipWire ="));
+  if (!pip.includes("fab-github")) throw new Error("PiP 置顶小窗缺反馈 FAB");
+  const css = repoFile("src/assets/m2.css");
+  if (!css.includes(".fab-github")) throw new Error("FAB 样式缺失");
+});
+// U5：备份/导入导出的短文案（静态）
+step("那么", "备份面板使用审计定稿短文案且导入单按钮", () => {
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    for (const old of [
+      "备份与恢复",
+      "加密备份到本地",
+      "备份到 GitHub Gist",
+      "选择文件导入",
+      "解密并恢复所选快照",
+      "明文书签导出",
+    ]) {
+      if (s.includes(old)) throw new Error(`${f} 仍含旧文案：${old}`);
+    }
+    const dataImport = (s.match(/data-import="auto"/g) || []).length;
+    if (dataImport !== 1) throw new Error(`${f} 导入按钮数=${dataImport}，应为 1`);
+    if (!s.includes('id="btnExportBookmarksHtml"')) throw new Error(`${f} 缺独立导出 HTML`);
+  }
+});
+// U6/Q3：备份两步卡片流程（静态）
+step("那么", "本地与 GitHub 备份为先配置后确认的两步卡片", () => {
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    if (!s.includes('data-backup-expand="local"') || !s.includes('data-backup-expand="github"'))
+      throw new Error(`${f} 缺配置备份展开按钮`);
+    if (!s.includes('id="btnBackupNow"') || !s.includes('id="btnBackupGithub"'))
+      throw new Error(`${f} 缺两处确认备份按钮`);
+    if (!s.includes('id="btnAuthorizeGithub"')) throw new Error(`${f} 缺配置校验按钮`);
+  }
+  const shell = repoFile("src/ui/shell.js");
+  for (const token of ["data-backup-expand", "#btnBackupGithub", "保存并校验配置"]) {
+    if (!shell.includes(token)) throw new Error("shell 未接线：" + token);
+  }
+});
+// U1/R2：定位前同步浏览器快照（静态）
+step("那么", "定位前先同步浏览器快照再反查", () => {
+  const src = repoFile("src/ui/shell.js");
+  const anchor = src.indexOf('root.querySelector("#btnLocate")?.addEventListener');
+  const seg = src.slice(anchor, anchor + 2200);
+  if (!seg.includes("syncBrowserSnapshot")) throw new Error("定位前未同步浏览器快照");
+  if (!seg.includes("queryRealWindows") || !seg.includes("queryOpenTabs"))
+    throw new Error("定位同步未复用真实窗口/标签查询");
+});
+// R5：指南文案同步（静态）
+step("那么", "指南文案反映三分类与右下角反馈", () => {
+  const src = repoFile("src/ui/shell.js");
+  const guide = src.slice(src.indexOf("const GUIDE_HTML"), src.indexOf("// N3（m10950）"));
+  if (guide.includes("五类") || guide.includes("备份与恢复、主页、复制、反馈"))
+    throw new Error("指南仍含旧五类分类描述");
+  if (!guide.includes("右下角 GitHub") || !guide.includes("外观"))
+    throw new Error("指南未同步新分类/反馈入口");
 });
