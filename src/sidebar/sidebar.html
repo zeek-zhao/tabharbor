@@ -16,7 +16,7 @@
           data-act="close"
           title="关闭侧边栏"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -32,7 +32,7 @@
       <div id="searchbar" class="searchbar">
         <div class="search-box"><input id="q" type="text" placeholder="搜索标签…" /></div>
         <button id="btnSettings" class="tbtn" data-label="设置" data-act="settings" title="设置">
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -57,7 +57,7 @@
           data-act="locate"
           title="定位当前标签"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -78,7 +78,7 @@
           data-act="toggle-all"
           title="展开 / 收起（自动切换）"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -98,7 +98,7 @@
           data-act="links"
           title="显示链接（默认关闭）"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -113,7 +113,7 @@
           </svg>
         </button>
         <button id="btnTrash" class="tbtn" data-label="回收站" data-act="trash" title="回收站">
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -133,7 +133,7 @@
           data-act="history"
           title="浏览器历史"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -154,7 +154,7 @@
           data-act="fullscreen"
           title="全屏抓取视图"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -174,7 +174,7 @@
           data-act="theme"
           title="黑白主题切换"
         >
-          ><svg
+          <svg
             viewBox="0 0 24 24"
             width="14"
             height="14"
@@ -193,10 +193,8 @@
       <div id="footer" class="footer">
         <span id="stats" class="stats"></span>
         <span class="footer-actions"
-          ><button id="btnKeys" class="fbtn" data-label="快捷键表" title="快捷键表">⌨</button
-          ><button id="btnGuide" class="fbtn" data-label="快速上手指南" title="快速上手指南">
-            ?
-          </button></span
+          ><button id="btnKeys" class="fbtn" data-label="快捷键表" title="快捷键表"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M8 13h8"/></svg></button
+          ><button id="btnGuide" class="fbtn" data-label="快速上手指南" title="快速上手指南"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.6 2.6 0 1 1 4.2 2c-.9.7-1.7 1.2-1.7 2.6M12 17h.01"/></svg></button></span
         >
       </div>
     </div>
@@ -212,6 +210,7 @@
           <div class="cat-bar">
             <button class="cat-tab active" data-cat="appearance" type="button">外观</button>
             <button class="cat-tab" data-cat="backup" type="button">备份与恢复</button>
+            <button class="cat-tab" data-cat="home" type="button">主页</button>
             <button class="cat-tab" data-cat="copy" type="button">复制</button>
             <button class="cat-tab" data-cat="feedback" type="button">反馈</button>
           </div>
@@ -408,6 +407,15 @@
               accept=".json,.html,text/html,application/json"
               hidden
             />
+          </div>
+          <div class="cat-panel" data-panel="home" hidden>
+            <div class="sec-title">扩展内部主页</div>
+            <div class="opt-row" id="homeCfgEntry">
+              <div>
+                <div class="t">打开主页并配置</div>
+                <div class="d">设置搜索引擎、管理常用网址；新建标签默认打开此主页</div>
+              </div>
+            </div>
           </div>
           <div class="cat-panel" data-panel="copy" hidden>
             <div class="sec-title">复制内容（默认）</div>

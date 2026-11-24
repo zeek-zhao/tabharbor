@@ -122,7 +122,8 @@ try {
   const catCount = await win.evaluate(
     () => document.querySelectorAll("#modalSetting .cat-tab").length
   );
-  assert.equal(catCount, 4, `设置分类数异常: ${catCount}`);
+  // L5（2026-11-24 主页审计）：新增「主页」分类，共 5 类
+  assert.equal(catCount, 5, `设置分类数异常: ${catCount}`);
   const appearanceVisible = await win.evaluate(
     () => !document.querySelector('#modalSetting .cat-panel[data-panel="appearance"]').hidden
   );
@@ -161,7 +162,7 @@ try {
   await win.click('[data-modal-close="modalSetting"]');
   const closed = await win.evaluate(() => document.querySelector("#modalSetting").hidden);
   assert.ok(closed, "设置弹窗未关闭");
-  console.log("E2E 4/7 设置弹窗四分类切换通过（外观/备份与恢复/复制/反馈）");
+  console.log("E2E 4/7 设置弹窗五分类切换通过（外观/备份与恢复/主页/复制/反馈）");
 
   const kvCount = await win.evaluate(() => {
     document.querySelector("#btnKeys").click();
@@ -761,13 +762,13 @@ try {
     const map = new Map([[`id:${t.tabId}`, "fav-e2e-token"]]);
     const html = mod.renderTree(m, { favicons: map, openIds: new Set([t.id]) });
     return (
-      // U5/Q2（2026-11-23 UI 审计）：favicon 成为状态主体（img.fav.on，高亮=已打开）；
-      // 仍保留独立 .status-dot 元素兼容旧断言；无图标叶子回退通用兜底图标 .fav-generic。
-      /<img class="fav on" src="fav-e2e-token"/.test(html) && html.includes('class="status-dot')
+      // H1（2026-11-24）：状态只由 favicon 表达——已打开为高亮 img.fav.on；
+      // 无图标叶子回退通用兜底图标 .fav-generic；不再渲染独立状态圆点。
+      /<img class="fav on" src="fav-e2e-token"/.test(html) && !html.includes('class="status-dot')
     );
   });
-  assert.ok(favRenderOk, "favicon 前缀渲染/圆点回退失败（N3）");
-  console.log("E2E N3 标签前缀 favicon（浏览器图标 + 圆点回退）通过");
+  assert.ok(favRenderOk, "favicon 前缀渲染/兜底失败（N3/H1）");
+  console.log("E2E N3 标签前缀 favicon（浏览器图标 + 兜底、无状态圆点）通过");
 
   // —— F 轮（m11442）：windowId 绑定 / 离线标记 / 折叠悬停展开 / 类型只按 kind ——
   // F6：离线窗口（windowId=null）渲染淡色标记 .offline-dot，并带 title 提示
@@ -853,9 +854,12 @@ try {
   });
   const dropzoneExists = await win.locator("#r1Dropzone").count();
   assert.ok(dropzoneExists === 1, "P0-B 根 R1 dropzone 未创建");
-  const statusDots = await win.locator(".leaf .status-dot").count();
-  assert.ok(statusDots > 0, "P0 标签行缺独立状态指示灯 .status-dot");
-  console.log("E2E P0 dropzone + status-dot 通过");
+  // H1：状态圆点已移除，改为校验每行 favicon 状态图标存在（.fav.on / .fav.off / .fav-generic）
+  const statusFavs = await win.locator(".leaf .fav").count();
+  assert.ok(statusFavs > 0, "H1 标签行缺 favicon 状态图标");
+  const leftoverDots = await win.locator(".leaf .status-dot").count();
+  assert.ok(leftoverDots === 0, "H1 仍残留状态圆点 status-dot");
+  console.log("E2E P0 dropzone + favicon 状态图标（无圆点）通过");
 
   // P0-B 真实拖拽：把分组 g_design 拖到 #r1Dropzone → 升为独立窗口
   // 先重新播种样例并展开全部，确保 g_design 是可见的分组行（D9/互转轮可能改过状态）

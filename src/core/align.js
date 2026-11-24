@@ -30,10 +30,17 @@ export function migrateDefaultWindowTitles(model) {
 
 // D11（2026-11-23）：采集范围全部纳入——http(s) / chrome://（含历史记录页）/ about: /
 // file:// / chrome-extension:// 等一律视为可采集页面；不再用 http(s) 白名单过滤。
-// 仍排除空 URL 与纯协议占位（tabs.query 对新标签页可能给出 chrome://newtab/，按 URL 有值纳入）。
+// L3（2026-11-24 UI 审计）：排除 TabHarbor 自身扩展页（工具窗口 / 主页 / 侧边栏），
+// 否则用户打开插件工具页时会被同步成模型树里的游离标签。仍排除空 URL。
+const OWN_EXT_PAGES = [
+  /\/window\/window\.html$/i,
+  /\/home\/home\.html$/i,
+  /\/sidebar\/sidebar\.html$/i,
+];
+const isOwnExtPage = (s) => OWN_EXT_PAGES.some((re) => re.test(s));
 const isWebUrl = (u) => {
   const s = String(u || "").trim();
-  return s.length > 0;
+  return s.length > 0 && !isOwnExtPage(s);
 };
 
 // D17：叶子是否仍对应一个打开的浏览器标签页 —— 只信 tabId，无 URL 兜底。

@@ -153,7 +153,10 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
               focused: !!w.focused,
               tabs: w.tabs.map((t) => ({ id: t.id, url: t.url, title: t.title })),
             }));
-          if (!realWindows.length) return;
+          // L2（2026-11-24 UI 审计）：旧实现在无真实窗口时早退，导致浏览器标签全关后
+          // 模型的失效 open/tabId 永远不清。改为空窗口列表也照常跑反向校验
+          // （pairWindows 对空列表安全返回；syncBrowserSnapshot 的反向校验仍执行），
+          // 仅当模型确有变更时才落盘，避免空转写盘。
           const allTabs = await chromeApi.tabs.query({});
           const tabs = (allTabs || []).map((t) => ({ id: t.id, url: t.url, title: t.title }));
           const { windows, groups, tabs: modelTabs, trash, settings } = await loadAll(chromeApi);

@@ -1,12 +1,14 @@
 // TH2 共享渲染入口（FR-001：双模式复用同一渲染函数、同一数据源）
 // #30 对齐原型 v16 树标记：.node > .node-row(.tri + 名称 + .row-ops 复制) + .node-children；
-// 标签为 .leaf(.dot + .title + .link + .note + copy-x + close-x 仅已开)。
+// 标签为 .leaf(.fav + .title + .link + .note + copy-x + close-x 仅已开)。
 // 折叠（FR-013 / D5 评审稿）：折叠的窗口或分组都不渲染子树（与原型 display:none 等效，DOM 更小）。
 // 窗口折叠时其直属标签与所有子组全部隐藏，展开后恢复。
 // opts：openIds（align 派生）、linkShow、selectedId、collapsed（Set，折叠派生视图态）
 // R8（m10454）：图标放大（12→14px）并加深（颜色由 CSS --fg1 控制）
 // N3（m10950）：标签前缀显示「浏览器标签页自身图标」（favicon）。派生数据由 shell
-// 从 chrome.tabs 的 favIconUrl 传入（按 tabId 优先、url 兜底索引）；无图标时回退 .dot。
+// 从 chrome.tabs 的 favIconUrl 传入（D17：只按 tabId 精确取，无 URL 兜底）；
+// H1（2026-11-24）：打开/关闭状态只由 favicon 的 .on（彩色高亮）/.off（灰度）表达，
+// 不再并列渲染独立状态圆点；无图标时回退通用兜底图标 .fav-generic。
 const TRI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M8 5l8 7-8 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CP =
@@ -110,8 +112,6 @@ function leafRow(t, opts) {
   const dim = open ? "" : " dimmed";
   const link = t.url ? `<span class="link">${escapeHtml(shortUrl(t.url))}</span>` : "";
   const note = t.note ? `<span class="note">· ${escapeHtml(t.note)}</span>` : "";
-  // P0（m11790）：保留独立状态点元素（BDD 兼容）；U5 起状态由 favicon .on/.off 主导呈现。
-  const statusDot = `<span class="status-dot${open ? " on" : ""}" title="${open ? "网页已打开" : "网页未打开"}"></span>`;
   // U5 / Q2：favicon 来源优先级 = 实时快照(tabId) → 模型缓存(t.favicon) → 通用兜底图标。
   // 关闭态仍显示缓存/兜底图标，仅以灰色（.off）表达关闭；打开态高亮（.on）。
   // D17：实时图标只按 tabId 精确取，无 URL 兜底。
@@ -127,7 +127,8 @@ function leafRow(t, opts) {
     const kind = genericFaviconKind(t.url);
     fav = `<span class="fav fav-generic ${stateCls}" title="${open ? "网页已打开" : "网页未打开"}">${GENERIC_FAV[kind]}</span>`;
   }
-  const prefix = statusDot + fav;
+  // H1（2026-11-24）：前缀只保留 favicon，状态由 .on/.off 表达（去并列状态圆点）
+  const prefix = fav;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
   // U6（2026-11-23 UI 审计）：已打开只显示关闭按钮、未打开只显示打开按钮（双向条件渲染）
   const openBtn = open

@@ -101,10 +101,30 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
   // D16：解析宿主窗口——优先显式传入，否则按顶层模型窗口的 windowId
   const topWin = opts.topWindow || (opts.m && node && topWindowOf(opts.m, node.id));
   const bound = opts.windowId != null ? opts.windowId : topWin ? topWin.windowId : null;
-  // 游离/导入标签（无顶层窗口）维持旧语义：在当前窗口 tabs.create，避免弹窗泛滥
+  // L1（2026-11-24 UI 审计）：游离/导入标签（无顶层窗口、无显式 windowId）不再直接落在
+  // 当前浏览器窗口（旧语义会把大量游离标签堆进当前窗口），改为与前序 D16/D24 定稿对齐——
+  // 新建独立真实窗口承载，窗口内 seed 空白页在目标标签建好后安全清理。
+  // 返回 orphan + windowId 供 UI 层回填模型归属（把游离标签挂到该窗口并回填 windowId）。
   if (topWin == null && opts.windowId == null) {
-    const created = await chromeApi.tabs.create({ url: node.url });
-    return { created: true, tabId: created && created.id != null ? created.id : undefined };
+    let host = { windowId: undefined, seedId: null };
+    if (typeof chromeApi.windows?.create === "function") {
+      const made = await chromeApi.windows.create({});
+      host.windowId = made && made.id != null ? made.id : undefined;
+      host.seedId =
+        made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
+    }
+    const created =
+      host.windowId != null
+        ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
+        : await chromeApi.tabs.create({ url: node.url });
+    const tabId = created && created.id != null ? created.id : undefined;
+    if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
+    return {
+      created: true,
+      tabId,
+      orphan: true,
+      ...(host.windowId != null ? { rebound: true, windowId: host.windowId } : {}),
+    };
   }
   const host = await resolveHostWindow(chromeApi, opts.m, topWin, bound);
   const created =

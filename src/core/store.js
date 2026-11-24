@@ -2,6 +2,10 @@
 // open/tabId 是打开态绑定字段：由 align.js 依 tabs.query 快照写回模型叶子，随 tabs 一起入库；
 // 真正的「是否打开」判定仍以浏览器实时快照为准（只按 tabId，D17 无 URL 兜底），落库值仅作绑定锚点。
 
+// H3（2026-11-24 主页审计）：主页配置存于 settings.homepage，settings 已在 ALL_KEYS 中，
+// 无需新增顶层键；此处引入默认值供全新安装与迁移合并。
+import { DEFAULT_HOMEPAGE } from "./homepage.js";
+
 export const MODEL_KEYS = ["windows", "groups", "tabs"];
 export const ALL_KEYS = [
   ...MODEL_KEYS,
@@ -26,6 +30,12 @@ export const DEFAULT_SETTINGS = {
   ghToken: "",
   ghBackupFreq: "off",
   onboarded: false,
+  // H3：扩展内部主页配置（搜索引擎 / 自定义引擎 / 常用网址列表）
+  homepage: {
+    ...DEFAULT_HOMEPAGE,
+    customEngines: [],
+    sites: DEFAULT_HOMEPAGE.sites.map((s) => ({ ...s })),
+  },
 };
 
 export async function loadAll(chromeApi = globalThis.chrome) {

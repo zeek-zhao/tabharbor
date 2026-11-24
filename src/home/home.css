@@ -1,0 +1,279 @@
+/* TabHarbor 扩展内部主页样式（H2/H3/H4，2026-11-24）
+   Q4：跟随插件深/浅主题（复用 m2.css 的 token），极简工具风：居中搜索框 + 图标网格，
+   不加壁纸/时钟/天气。 */
+
+.home-body {
+  min-height: 100vh;
+  background: radial-gradient(circle at 50% 0%, var(--bg2), var(--bg1) 62%);
+  color: var(--fg1);
+}
+.home-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+.home-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 64px;
+}
+.home-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--fg2);
+}
+.home-top .tbtn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line1);
+  border-radius: 8px;
+  background: var(--bg2);
+  color: var(--fg2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.home-top .tbtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 居中搜索框 */
+.home-search {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 52px;
+}
+.home-search-box {
+  display: flex;
+  align-items: center;
+  width: min(560px, 100%);
+  height: 48px;
+  background: var(--bg2);
+  border: 1px solid var(--line1);
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.home-search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 6px 28px rgba(47, 111, 235, 0.25);
+}
+.home-engine {
+  flex: 0 0 auto;
+  height: 100%;
+  padding: 0 8px 0 14px;
+  border: none;
+  border-right: 1px solid var(--line1);
+  background: transparent;
+  color: var(--fg1);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+.home-engine option {
+  background: var(--bg2);
+  color: var(--fg1);
+}
+.home-q {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--fg1);
+  font-size: 15px;
+  outline: none;
+}
+.home-q::placeholder {
+  color: var(--fg2);
+}
+.home-go {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 100%;
+  border: none;
+  border-radius: 0 12px 12px 0;
+  background: transparent;
+  color: var(--fg2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-go:hover {
+  color: var(--accent);
+}
+
+/* 常用网址图标网格 */
+.home-sites-wrap {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.home-sites-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.home-sites-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--fg1);
+}
+.home-mini {
+  border: 1px solid var(--line1);
+  border-radius: 6px;
+  background: var(--bg2);
+  color: var(--fg2);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.home-mini:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.home-sites {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 12px;
+}
+.home-site {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--fg1);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+.home-site:hover {
+  background: var(--bg2);
+  border-color: var(--line1);
+  transform: translateY(-2px);
+}
+.home-site-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg3);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+}
+.home-site-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.home-site-title {
+  max-width: 100%;
+  font-size: 12px;
+  color: var(--fg1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 40px 16px;
+  color: var(--fg2);
+  text-align: center;
+}
+.home-empty svg {
+  color: var(--fg2);
+  opacity: 0.6;
+}
+.home-empty .t {
+  font-size: 13px;
+  color: var(--fg1);
+}
+.home-empty .d {
+  font-size: 11px;
+}
+
+/* 配置面板 */
+.home-cfg-engines,
+.home-cfg-sites {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.home-cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line1);
+  border-radius: 8px;
+  background: var(--bg2);
+}
+.home-cfg-row .grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.home-cfg-row .t {
+  font-size: 12px;
+  color: var(--fg1);
+}
+.home-cfg-row .d {
+  font-size: 11px;
+  color: var(--fg2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-cfg-row.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.home-cfg-row .mini {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.home-cfg-row .mini:hover {
+  background: var(--bg3);
+  color: var(--accent);
+}
+.home-cfg-row input.edit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+.home-hint {
+  font-size: 11px;
+  color: var(--fg2);
+  margin: 0 0 10px;
+}

@@ -5,6 +5,7 @@
 //     搜索过滤、定位、新建分组/备注/编辑弹窗、启动归类（bootAlign）
 // #31 M2 整理对齐原型 v16：拖拽落点（leaf/group/window 全层级）、回收站恢复/彻底删除、键盘导航
 import * as store from "../core/store.js";
+import * as homepage from "../core/homepage.js";
 import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as editOp from "../core/edit-op.js";
@@ -20,6 +21,7 @@ import {
   findNode,
   addTab,
   addWindow,
+  DEFAULT_WINDOW_TITLE,
   moveLeafAfter,
   moveLeafInto,
   moveNode,
@@ -93,15 +95,17 @@ const GUIDE_HTML = `
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
   <li><b>右键菜单：</b>标签上编辑、备注、复制、删除；分组/窗口可整组打开、重命名、添加标签/新建分组、关闭、删除；删除项进入回收站。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
-  <li><b>状态颜色：</b>标签按打开高亮 / 灰显；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
+  <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
+  <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；设置「主页」分类或主页右上角齿轮均可进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
   <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
-  <li><b>设置分类：</b>设置内分外观、备份与恢复、复制、反馈四类；外观里可改主题（默认深色）、打开方式和「在上次位置打开」。</li>
+  <li><b>设置分类：</b>设置内分外观、备份与恢复、主页、复制、反馈五类；外观里可改主题（默认深色）、打开方式和「在上次位置打开」。</li>
 </ol>`;
 
 // N3（m10950）：一次 tabs.query 同时派生「打开态集合」与「浏览器标签页自身图标表」。
-// 图标以 tabId（第一识别依据）与 url（兜底）双键索引，叶子渲染时按 tabId→url 顺序取。
-// 图标是派生态、不入库（与 openIds 一致）；Chrome 不提供图标时回退圆点 .dot。
+// D17（定稿）：图标表只按 tabId 精确索引（`id:${tabId}`），叶子渲染时按 tabId 取，无 URL 兜底
+// （同一链接多开会串图标）。图标是派生态、不入库；Chrome 不提供图标时回退通用兜底图标
+// .fav-generic（H1：不再用状态圆点，打开态由 .on/.off 表达）。
 async function deriveOpenState(m) {
   const empty = { openIds: new Set(), favicons: new Map() };
   try {
@@ -499,7 +503,23 @@ export async function bootShell(root) {
       }
       if (res.rebound && res.windowId != null) {
         // 回填：优先写回原来持有 windowId 的节点（窗口或由窗口降级的分组），否则写顶层窗口
-        const owner = windowIdOwner(m, id) || topWindowOf(m, id);
+        let owner = windowIdOwner(m, id) || topWindowOf(m, id);
+        // L1（2026-11-24）：游离/导入标签新建独立窗口后没有模型归属——补一条归属回填规则：
+        // 新建一个顶层窗口节点承载它，再回填 windowId，避免它继续游离于三层模型之外。
+        if (!owner && res.orphan) {
+          owner = addWindow(m, DEFAULT_WINDOW_TITLE);
+          // 把游离标签从原父节点移到新窗口（若它原本挂在某个游离分组下，则移动该顶层分组）
+          let target = node;
+          while (target.parentId) {
+            const parent = findNode(m, target.parentId);
+            if (!parent) break;
+            target = parent;
+          }
+          if (target !== owner && target.parentId !== owner.id) {
+            target.parentId = owner.id;
+            dirty = true;
+          }
+        }
         if (owner && owner.windowId !== res.windowId) {
           owner.windowId = res.windowId;
           dirty = true;
@@ -518,7 +538,8 @@ export async function bootShell(root) {
   // U2 / Q1（2026-11-24 UI 审计）：行内「添加标签」——窗口行直挂窗口、分组行直挂分组。
   // 在该容器对应的真实浏览器窗口新建标签页并写入模型叶子；离线宿主先按 D16/D24 新建真实窗口。
   // L3（2026-11-24 UI 审计）：目标标签建好后安全清理新建窗口自带的空白 seed 标签。
-  // 新标签用 about:blank 起步，标题/URL/favicon 由 service-worker 的 onUpdated 回写模型叶子。
+  // H2/L6（2026-11-24 主页审计）：新标签打开扩展内部主页（非 about:blank），模型叶子初始
+  // 标题「主页」、URL 为主页地址；页面内搜索/选站后由 onUpdated 回写真实标题与网址。
   const addTabToContainer = async (containerId) => {
     const container = findNode(m, containerId);
     if (!container || (container.kind !== "window" && container.kind !== "group")) return;
@@ -548,19 +569,21 @@ export async function bootShell(root) {
           rebound = true;
         }
       }
+      // H2/L6：新建标签默认打开扩展内部主页
+      const homeUrl = homepage.resolveHomeUrl(chrome);
       const created =
         realWinId != null
-          ? await chrome.tabs.create({ url: "about:blank", windowId: realWinId })
-          : await chrome.tabs.create({ url: "about:blank" });
+          ? await chrome.tabs.create({ url: homeUrl, windowId: realWinId })
+          : await chrome.tabs.create({ url: homeUrl });
       const tabId = created && created.id != null ? created.id : undefined;
       // L3：目标标签建好后清理 seed，避免残留新标签页 / 误关窗口
       if (seedId != null) await tabsOp.removeSeedTab(chrome, seedId, tabId);
-      const leaf = addTab(m, "新标签", "about:blank", container.id);
+      const leaf = addTab(m, homepage.HOME_TITLE, homeUrl, container.id);
       if (tabId != null) leaf.tabId = tabId;
       if (rebound && realWinId != null && topWin) topWin.windowId = realWinId;
       await store.saveModel(m);
       await refreshOpen();
-      toast("已新建标签（页面加载后自动回填标题与网址）");
+      toast("已新建标签并打开主页（搜索或选站后自动回填标题与网址）");
     } catch (err) {
       say("新建标签失败：" + err.message);
     }
@@ -1306,6 +1329,12 @@ export async function bootShell(root) {
         .querySelectorAll(".cat-panel")
         .forEach((p) => (p.hidden = p.dataset.panel !== tab.dataset.cat));
     });
+  });
+  // L5（2026-11-24 主页审计）：设置「主页」分类入口 → 新标签打开扩展内部主页并配置。
+  root.querySelector("#homeCfgEntry")?.addEventListener("click", () => {
+    const url = homepage.resolveHomeUrl(chrome);
+    if (typeof chrome?.tabs?.create === "function") void chrome.tabs.create({ url });
+    say("已打开主页，可在此设置搜索引擎与常用网址");
   });
   root.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
     row.addEventListener("click", () => {

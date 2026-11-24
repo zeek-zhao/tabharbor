@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
+import * as homepage from "../src/core/homepage.js";
 import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
 import { entryLabel } from "../src/core/trash-op.js";
@@ -1266,10 +1267,10 @@ step("那么", "标签 {} 的行显示浏览器图标 {}", (title, favUrl) => {
 });
 
 step("那么", "标签 {} 的行回退为圆点图标", (title) => {
-  // P0（m11790）：状态指示灯改为独立 .status-dot（favicon 不得顶替）；无 favicon 时仅保留状态灯
+  // H1（2026-11-24）：状态圆点已移除，无 favicon 时回退通用兜底图标（保留此 step 名兼容旧 feature）
   const row = rowOf(title);
-  if (!row.includes('class="status-dot')) {
-    throw new Error(`${title} 行缺少独立状态指示灯 .status-dot`);
+  if (!/class="fav fav-generic/.test(row)) {
+    throw new Error(`${title} 行缺少通用兜底图标（状态圆点已移除）`);
   }
 });
 
@@ -1370,12 +1371,14 @@ step("那么", "节点 {} 的行不包含 {}", (title, needle) => {
   if (rowOf(title).includes(needle)) throw new Error(`${title} 行不应包含 ${needle}`);
 });
 
-// #30 原型标记：标签独立状态指示灯 status-dot / 容器 tri 折叠箭头
-step("那么", "树视图为每个标签渲染 dot 圆点", () => {
-  // P0（m11790）：独立圆形状态指示灯（每个标签一个），favicon 不得顶替
-  const dots = (ctx.html.match(/class="status-dot/g) || []).length;
-  if (dots !== ctx.m.tabs.length)
-    throw new Error(`status-dot=${dots} ≠ 标签数 ${ctx.m.tabs.length}`);
+// H1（2026-11-24）：状态只由 favicon 表达，每个标签渲染一个 .fav（img 或通用兜底 span）
+step("那么", "树视图为每个标签渲染 favicon 状态图标", () => {
+  const favs = (ctx.html.match(/class="fav(?: fav-generic)? (?:on|off)"/g) || []).length;
+  if (favs !== ctx.m.tabs.length)
+    throw new Error(`favicon 状态图标=${favs} ≠ 标签数 ${ctx.m.tabs.length}`);
+});
+step("那么", "树视图不渲染状态圆点", () => {
+  if (/class="status-dot/.test(ctx.html)) throw new Error("树视图仍渲染状态圆点 status-dot");
 });
 
 step("那么", "树视图为容器节点渲染 tri 折叠箭头", () => {
@@ -2797,4 +2800,133 @@ step("那么", "LinkMap 导入树结构闭合且无孤儿节点", () => {
   } catch (e) {
     throw new Error("LinkMap 导入树未通过不变量校验：" + e.message);
   }
+});
+
+// ===== H2/H3/L5 扩展内部主页（2026-11-24 主页审计）=====
+step("那么", "主页路径常量为 home/home.html", () => {
+  if (homepage.HOME_PAGE_PATH !== "home/home.html")
+    throw new Error(`主页路径=${homepage.HOME_PAGE_PATH}`);
+});
+step("那么", "主页新建标签标题为主页", () => {
+  if (homepage.HOME_TITLE !== "主页") throw new Error(`主页标题=${homepage.HOME_TITLE}`);
+});
+step("那么", "内置搜索引擎包含 {} 四个默认引擎", (need) => {
+  const names = homepage.BUILTIN_ENGINES.map((e) => e.name).join(",");
+  for (const n of String(need).split(",")) {
+    if (!homepage.BUILTIN_ENGINES.some((e) => e.name === n))
+      throw new Error(`内置引擎缺 ${n}；现有 ${names}`);
+  }
+  if (homepage.BUILTIN_ENGINES.length !== 4)
+    throw new Error(`内置引擎应恰为 4 个，实际 ${homepage.BUILTIN_ENGINES.length}`);
+});
+step("那么", "默认引擎为必应且含 %s 占位", () => {
+  const bing = homepage.BUILTIN_ENGINES.find((e) => e.id === "bing");
+  if (!bing || !bing.url.includes("%s")) throw new Error("默认必应引擎缺 %s 占位");
+});
+step("那么", "引擎 {} 代入关键词 {} 得到 {}", (engineId, q, want) => {
+  const e = homepage.findEngine({ customEngines: [] }, engineId);
+  const got = homepage.engineSearchUrl(e, q);
+  if (got !== want) throw new Error(`引擎 URL=${got} ≠ ${want}`);
+});
+step("那么", "默认常用网址有 {} 个", (n) => {
+  if (homepage.DEFAULT_SITES.length !== Number(n))
+    throw new Error(`默认站点=${homepage.DEFAULT_SITES.length} ≠ ${n}`);
+});
+step("那么", "主页配置规范化去重并按 %s 过滤引擎", () => {
+  const cfg = homepage.normalizeHomeConfig({
+    engine: "custom-1",
+    customEngines: [
+      { id: "custom-1", name: "A", url: "https://a.com/?q=%s" },
+      { id: "bad", name: "B", url: "https://b.com/?q=no-placeholder" },
+    ],
+    sites: [
+      { title: "X", url: "https://x.com" },
+      { title: "X2", url: "https://x.com" },
+      { title: "Y", url: "https://y.com" },
+    ],
+  });
+  if (cfg.customEngines.length !== 1) throw new Error("无 %s 的引擎未被过滤");
+  if (cfg.sites.length !== 2) throw new Error("重复站点未被去重");
+});
+step("那么", "仓库默认设置包含 homepage 配置", () => {
+  const src = repoFile("src/core/store.js");
+  if (!src.includes("homepage:")) throw new Error("DEFAULT_SETTINGS 缺 homepage 字段");
+  if (!src.includes("import { DEFAULT_HOMEPAGE }")) throw new Error("store 未引入主页默认配置");
+});
+step("那么", "主页页面与脚本存在且接线配置入口", () => {
+  const html = repoFile("src/home/home.html");
+  const js = repoFile("src/home/home.js");
+  for (const needle of ["homeSearchForm", "homeEngine", "homeSites", "homeSettings"]) {
+    if (!html.includes(needle)) throw new Error(`home.html 缺 ${needle}`);
+  }
+  for (const needle of ["saveSettings", "engineSearchUrl", "normalizeHomeConfig"]) {
+    if (!js.includes(needle)) throw new Error(`home.js 缺 ${needle}`);
+  }
+});
+step("那么", "新建标签入口使用主页地址而非 about:blank", () => {
+  const src = repoFile("src/ui/shell.js");
+  if (!src.includes("homepage.resolveHomeUrl(chrome)"))
+    throw new Error("shell.js 新建标签未使用主页地址");
+  const seg = src.slice(
+    src.indexOf("const addTabToContainer"),
+    src.indexOf("const addGroupToContainer")
+  );
+  if (seg.includes('about:blank"')) throw new Error("新建标签仍含 about:blank");
+});
+step("那么", "设置弹窗含主页分类入口", () => {
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    if (!s.includes('data-cat="home"')) throw new Error(`${f} 缺主页分类`);
+    if (!s.includes('data-panel="home"')) throw new Error(`${f} 缺主页面板`);
+  }
+});
+
+// ===== L1/L2/L3 遗留问题（2026-11-24 主页审计）=====
+step("那么", "游离标签打开改为新建独立窗口", () => {
+  const src = repoFile("src/core/tabs-op.js");
+  const seg = src.slice(
+    src.indexOf("if (topWin == null"),
+    src.indexOf("const host = await resolveHostWindow")
+  );
+  if (!seg.includes("chromeApi.windows.create")) throw new Error("游离标签分支未新建独立窗口");
+  if (!seg.includes("orphan: true")) throw new Error("游离标签未回传 orphan 归属标记");
+  const shell = repoFile("src/ui/shell.js");
+  if (!shell.includes("res.orphan")) throw new Error("shell 未处理游离标签归属回填");
+});
+step("那么", "后台空快照不再早退", () => {
+  const src = repoFile("src/background/service-worker.js");
+  if (src.includes("if (!realWindows.length) return;")) throw new Error("后台仍对空快照早退");
+});
+step("那么", "align 排除自身扩展页同步", () => {
+  const src = repoFile("src/core/align.js");
+  if (!src.includes("OWN_EXT_PAGES")) throw new Error("align 未定义自身扩展页排除表");
+  if (!src.includes("window\\/window\\.html")) throw new Error("未排除工具窗口页");
+  if (!src.includes("home\\/home\\.html")) throw new Error("未排除主页页");
+});
+
+// L1 端到端：游离标签双击 → 新建独立窗口 + 模型归属回填
+step("假如", "一个顶层游离标签 {} 指向 {}", (title, url) => {
+  ctx.m = ctx.m || model.buildModel();
+  // addTab 要求父节点存在，直接构造游离节点（invariants 场景同款）
+  const node = { id: model.newId("t"), kind: "tab", title, url, note: "", parentId: null };
+  ctx.m.tabs.push(node);
+  ctx.named = ctx.named || {};
+  ctx.named[title] = node;
+});
+step("当", "双击打开游离标签 {}", async (title) => {
+  const tab = ctx.m.tabs.find((n) => n.title === title);
+  if (!tab) throw new Error(`未找到游离标签 ${title}`);
+  const beforeWins = ctx.mock.calls.windowsCreate.length;
+  ctx.orphanOpen = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), {
+    topWindow: null,
+    m: ctx.m,
+  });
+  ctx.orphanWinCreated = ctx.mock.calls.windowsCreate.length - beforeWins;
+});
+step("那么", "游离标签打开新建了一个独立窗口且回传归属", () => {
+  if (ctx.orphanWinCreated !== 1)
+    throw new Error(`游离开窗 windows.create=${ctx.orphanWinCreated} ≠ 1`);
+  if (!ctx.orphanOpen || ctx.orphanOpen.orphan !== true)
+    throw new Error("游离打开未回传 orphan 标记");
+  if (ctx.orphanOpen.windowId == null) throw new Error("游离打开未回传 windowId");
 });
