@@ -117,8 +117,19 @@ try {
     `快捷栏顺序异常: ${acts}`
   );
 
-  // U4/Q4：右下角 GitHub 反馈 FAB 真实存在（侧边栏/独立窗口）
-  assert.ok(await win.isVisible("#btnFeedback"), "右下角 GitHub 反馈 FAB 缺失");
+  // 2026-11-24 行内按钮审计：反馈入口在页脚 #btnGuide 右侧（侧边栏/独立窗口）
+  assert.ok(await win.isVisible("#footer #btnFeedback"), "页脚 GitHub 反馈锚点缺失");
+  const fbAfterGuide = await win.evaluate(() => {
+    const fa = document.querySelector(".footer-actions");
+    return (
+      !!fa &&
+      !!fa.querySelector("#btnGuide") &&
+      !!fa.querySelector("#btnFeedback") &&
+      [...fa.children].findIndex((c) => c.id === "btnGuide") <
+        [...fa.children].findIndex((c) => c.id === "btnFeedback")
+    );
+  });
+  assert.ok(fbAfterGuide, "反馈锚点未在指南图标右侧");
   await win.click("#btnSettings");
   await win.waitForSelector("#modalSetting:not([hidden])");
   const catCount = await win.evaluate(
@@ -309,20 +320,13 @@ try {
     { timeout: 5000 }
   );
   console.log("E2E D3 双击标签真实打开网页通过");
-  // D2：行内打开按钮（三角按钮）→ 打开该标签网页
-  // open-x 平时 visibility:hidden（hover 才显示），Playwright actionability 过不了 → 程序化点击
-  await win.evaluate(() => document.querySelector('.leaf[data-id="t_project_2"] .open-x').click());
-  await win.waitForFunction(
-    () =>
-      new Promise((r) =>
-        chrome.tabs.query({ url: "https://example.com/release-checklist" }, (ts) =>
-          r(ts.length === 1)
-        )
-      ),
-    undefined,
-    { timeout: 5000 }
+  // 2026-11-24 行内按钮审计：叶子已无「打开」按钮，双击叶子打开网页
+  assert.equal(
+    await win.evaluate(() => document.querySelectorAll(".leaf .open-x").length),
+    0,
+    "叶子仍存在已移除的 .open-x 打开按钮"
   );
-  console.log("E2E D2 行内打开按钮真实打开网页通过");
+  // 双击打开已由上方 D3 验证；此处不重复触发，避免改变 selectedId 影响后续键盘导航用例。
   // D4：显示链接开关立即生效（修复前：只存设置不重渲染，点击无反应）
   // show-link 类加在 .sp-body 容器上（CSS: .sp-body:not(.show-link) .leaf .link）
   const spBodyHas = (cls) =>
@@ -617,6 +621,50 @@ try {
   await win.click("#btnPip");
   const pipPage = await waitPipPage();
   assert.ok(pipPage, "置顶 PiP 浮窗未打开（D5）");
+  // 2026-11-24 PiP 复用审计：页脚（快捷键/指南/反馈）、弹窗、右键菜单与主页面同源
+  const pipConsistency = await pipPage.evaluate(() => ({
+    footer: !!document.querySelector("#footer .footer-actions"),
+    keys: !!document.querySelector("#footer #btnKeys"),
+    guide: !!document.querySelector("#footer #btnGuide"),
+    feedback: !!document.querySelector("#footer #btnFeedback"),
+    feedbackAfterGuide:
+      [...(document.querySelector(".footer-actions")?.children || [])].findIndex(
+        (c) => c.id === "btnGuide"
+      ) <
+      [...(document.querySelector(".footer-actions")?.children || [])].findIndex(
+        (c) => c.id === "btnFeedback"
+      ),
+    modals: [
+      "modalSetting",
+      "modalKeys",
+      "modalGuide",
+      "modalTrash",
+      "modalEdit",
+      "modalNew",
+    ].every((id) => !!document.querySelector("#" + id)),
+    ctxMenu: !!document.querySelector("#ctxMenu"),
+    noFab: !document.querySelector(".fab-github"),
+    noOldPipCtx: !document.querySelector("#pipCtxMenu"),
+  }));
+  assert.ok(
+    pipConsistency.footer && pipConsistency.keys && pipConsistency.guide,
+    "PiP 页脚缺快捷键/指南"
+  );
+  assert.ok(
+    pipConsistency.feedback && pipConsistency.feedbackAfterGuide,
+    "PiP 页脚反馈锚点缺失或不在指南右侧"
+  );
+  assert.ok(pipConsistency.modals, "PiP 弹窗未与独立窗口一致");
+  assert.ok(pipConsistency.ctxMenu, "PiP 右键菜单容器缺失");
+  assert.ok(pipConsistency.noFab && pipConsistency.noOldPipCtx, "PiP 仍有旧 FAB/旧 pipCtxMenu");
+  // 指南弹窗内容已填充（共享 GUIDE_HTML）
+  await pipPage.click("#btnGuide");
+  assert.ok(await pipPage.isVisible("#modalGuide"), "PiP 指南弹窗未打开");
+  const guideHasFeedback = await pipPage.evaluate(() =>
+    document.querySelector("#guideBody")?.textContent.includes("图标右侧的 GitHub")
+  );
+  assert.ok(guideHasFeedback, "PiP 指南文案未同步页脚反馈入口");
+  await pipPage.click('#modalGuide [data-modal-close="modalGuide"]');
   // R7：PiP 与主页面同构——渲染同一棵树（.leaf），交互一致
   const pipLeaves = await pipPage.locator(".leaf").count();
   assert.ok(pipLeaves > 0, "置顶 PiP 浮窗未渲染树节点（R7）");
@@ -633,13 +681,13 @@ try {
     openLeaf.url
   );
   assert.ok(realTab, `PiP 已打开叶子 ${openLeaf.id} 无对应浏览器标签页（R7）`);
-  // 点击叶子 → 选中（pipSelect 与主页面一致）
+  // 点击叶子 → 选中（共享控制器 selectLocal 与主页面一致）
   await pipPage.locator(".leaf.open").first().click();
   assert.ok(
     await pipPage.locator(".leaf.open.selected").first().isVisible(),
     "PiP 叶子点击未选中（R7）"
   );
-  // 行内关闭 → 该网页标签页被关闭且 PiP 同步去亮（close-x hover 门控，evaluate 点击）
+  // 行内关闭 → 该网页标签页被关闭且 PiP 同步去亮（close-x 常显，无需 hover）
   const targetedLeafId = openLeaf.id;
   await pipPage.evaluate(
     (id) => document.querySelector(`.leaf[data-id="${id}"] .close-x`)?.click(),

@@ -178,10 +178,6 @@ body {
   margin-left: auto;
   visibility: visible;
 }
-.leaf:hover .open-x,
-.leaf:hover .close-x {
-  visibility: visible;
-}
 /* D5：置顶激活态（原型 btnPinW .active 高亮） */
 .tbtn.active {
   color: var(--accent);
@@ -310,9 +306,9 @@ body {
   text-overflow: ellipsis;
 }
 /* R8（m10454）：行内图标放大加深——SVG 14px、常显复制按钮用主前景色
-   R3（2026-11-24 UI 审计）：.rename-x 并入统一行内图标按钮选择器，透明背景去默认白底 */
+   R3（2026-11-24 UI 审计）：.rename-x 并入统一行内图标按钮选择器，透明背景去默认白底
+   2026-11-24 行内按钮审计：移除叶子打开按钮（双击/Enter 负责打开），保留 .close-x 常显。 */
 .copy-x,
-.open-x,
 .close-x,
 .rename-x {
   flex: 0 0 auto;
@@ -323,12 +319,6 @@ body {
   border-radius: 4px;
   padding: 2px;
   cursor: pointer;
-  visibility: hidden;
-}
-/* R3（2026-11-24 UI 审计）：重命名按钮并入统一行内图标样式，常显且无默认白底 */
-/* R6：复制按钮与原型一致常显（叶子/分组/窗口行都可见） */
-.copy-x,
-.rename-x {
   visibility: visible;
 }
 .copy-x:hover,
@@ -336,10 +326,7 @@ body {
   background: var(--bg3);
   color: var(--accent);
 }
-.open-x:hover {
-  background: var(--bg3);
-  color: var(--accent);
-}
+/* 2026-11-24 行内按钮审计：关闭按钮常显（仅已打开叶子渲染），hover 用警告色，无悬停门控 */
 .close-x:hover {
   background: var(--bg3);
   color: var(--warn);
@@ -592,31 +579,10 @@ body {
   border: none;
   padding: 4px 0;
 }
-/* U4/R4/Q4（2026-11-24 UI 审计）：右下角 GitHub 反馈 FAB——
-   fixed 定位到视口右下角、悬浮于 footer 之上；主题自适应，深色/浅色均用强调色背景白图标。 */
-.fab-github {
-  position: fixed;
-  right: 14px;
-  bottom: 46px;
-  z-index: 20;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: #ffffff;
-  border: none;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+/* 2026-11-24 行内按钮审计：反馈入口从右下角 FAB 迁到页脚 #btnGuide 右侧，
+   复用 .fbtn 透明小图标样式（与快捷键/指南同尺寸同 hover），不再有 fixed 悬浮按钮。 */
+.feedback-link {
   text-decoration: none;
-}
-.fab-github:hover {
-  filter: brightness(1.15);
-}
-.fab-github svg {
-  display: block;
 }
 .switch-row {
   display: flex;

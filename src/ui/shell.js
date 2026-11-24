@@ -77,6 +77,49 @@ const TOOL_SVG = {
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 .3a12 12 0 0 0-3.79 23.4c.6.11.82-.26.82-.58v-2.03c-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.5 5.93.43.37.82 1.1.82 2.22v3.29c0 .32.21.7.83.58A12 12 0 0 0 12 .3z"/></svg>',
 };
 
+// 2026-11-24 PiP 复用审计（第一步：共享视图骨架）——
+// PiP 窗口无法被顶层导航到 window.html（Chrome Document PiP「cannot be navigated」），
+// 因此直接克隆宿主文档已渲染的骨架 DOM（#side + 弹窗 + 菜单 + toast）注入 PiP 空白文档。
+// 骨架唯一来源 = 当前独立窗口自身，页脚（快捷键/指南/反馈）、快捷栏、弹窗、右键菜单、toast
+// 与主页面天然一致，不再手写 PIP_HTML；无网络请求（C11 出站红线）。
+// mode 只控制少量差异：PiP 用紧凑标题栏 + 取消置顶按钮、隐藏「置顶」按钮、清空动态树。
+function buildShellSkeleton(mode = "pip") {
+  const holder = document.createElement("div");
+  const side = document.querySelector("#side");
+  if (side) holder.appendChild(side.cloneNode(true));
+  for (const sel of [
+    "#modalSetting",
+    "#modalTrash",
+    "#modalKeys",
+    "#modalGuide",
+    "#modalEdit",
+    "#modalNew",
+    "#ctxMenu",
+    "#toast",
+  ]) {
+    const el = document.querySelector(sel);
+    if (el) holder.appendChild(el.cloneNode(true));
+  }
+  if (mode === "pip") {
+    holder.querySelector("#btnPip")?.remove();
+    // 清空动态渲染的树（由控制器 renderView 重填），避免克隆旧快照
+    const body = holder.querySelector("#spBody");
+    if (body) body.innerHTML = "";
+    const tb = holder.querySelector("#titlebar");
+    if (tb) {
+      const head = document.createElement("div");
+      head.className = "pip-head";
+      head.innerHTML =
+        "<span>TabHarbor 置顶小窗</span>" +
+        '<button class="pip-x" id="btnPipClose" title="取消置顶" aria-label="取消置顶">' +
+        TOOL_SVG.close +
+        "</button>";
+      tb.replaceWith(head);
+    }
+  }
+  return holder.innerHTML;
+}
+
 const KEYS_TABLE = [
   ["上 / 下选择标签", "↑ / ↓"],
   ["打开选中标签（也可双击）", "Enter"],
@@ -96,7 +139,7 @@ const KEYS_TABLE = [
 
 const GUIDE_HTML = `
 <ol>
-  <li><b>双击打开：</b>双击标签即在浏览器打开；行内复制图标一键复制，末尾 X 关闭网页（仅已打开显示）。</li>
+  <li><b>双击打开：</b>双击标签即在浏览器打开（无行内「打开」按钮）；行内复制图标一键复制，末尾 X 关闭网页（仅已打开叶子显示、常显不悬停）。</li>
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
   <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；右键只保留备注、复制、打开、关闭、删除——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站。</li>
@@ -106,7 +149,7 @@ const GUIDE_HTML = `
   <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；主页入口已并入设置「外观」分类，也可从主页右上角齿轮进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
   <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
-  <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页面右下角 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
+  <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页脚「快速上手指南」图标右侧的 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
 // N3（m10950）：一次 tabs.query 同时派生「打开态集合」与「浏览器标签页自身图标表」。
@@ -210,12 +253,14 @@ export async function bootShell(root) {
   let collapsed = new Set();
   let selectedId = null;
   let searchQ = "";
-  // R7：置顶小窗派生视图态（与主页面同源打开态/图标，见 refreshOpen）
+  // R7 / 2026-11-24 PiP 复用：PiP 控制器视图态（selected/collapsed/searchQ 各自持有；
+  // openIds/favicons 由 refreshOpen→applyOpenState 从共享派生态同步）。
   const pipState = {
     openIds: new Set(),
     favicons: new Map(),
     collapsed: new Set(),
     selectedId: null,
+    searchQ: "",
   };
   const applyOpenState = async () => {
     const st = await deriveOpenState(m);
@@ -248,8 +293,8 @@ export async function bootShell(root) {
     badge.style.display = n ? "inline-block" : "none";
     badge.textContent = String(n);
   };
-  // O5：视图同步钩子——PiP 渲染函数定义后注入；PiP 未打开时为空操作。
-  // 用持有者避免 refreshOpen（引导期即调用）引用尚在 TDZ 的 renderPip。
+  // O5：视图同步钩子——PiP 控制器创建后注入其 render；PiP 未打开时为空操作。
+  // 用持有者避免 refreshOpen（引导期即调用）引用尚在 TDZ 的 pipCtl。
   let pipRefresh = () => {};
   const refreshOpen = async () => {
     await applyOpenState();
@@ -320,13 +365,13 @@ export async function bootShell(root) {
   }
   await render();
 
-  // ---- 通用弹窗 ----
-  const openModal = (id) => {
-    const el = root.querySelector(`#${id}`);
+  // ---- 通用弹窗（2026-11-24 PiP 复用：doc 可指定宿主文档，主页面默认 document）----
+  const openModal = (id, doc = document) => {
+    const el = doc.querySelector(`#${id}`);
     if (el) el.hidden = false;
   };
-  const closeModal = (id) => {
-    const el = root.querySelector(`#${id}`);
+  const closeModal = (id, doc = document) => {
+    const el = doc.querySelector(`#${id}`);
     if (el) el.hidden = true;
   };
   root.querySelectorAll(".mask").forEach((mask) => {
@@ -449,13 +494,8 @@ export async function bootShell(root) {
       if (host?.dataset.id) await addGroupToContainer(host.dataset.id);
       return;
     }
-    const openBtn = e.target.closest(".open-x");
-    if (openBtn) {
-      e.stopPropagation();
-      const leaf = openBtn.closest(".leaf");
-      if (leaf?.dataset.id) await openLeafById(leaf.dataset.id);
-      return;
-    }
+    // 2026-11-24 行内按钮审计：已移除叶子「打开」按钮（.open-x）；
+    // 打开网页统一由双击叶子 / Enter / 右键批量动作触发，openLeafById 核心动作保留。
     const closeBtn = e.target.closest(".close-x");
     if (closeBtn) {
       e.stopPropagation();
@@ -1491,284 +1531,324 @@ export async function bootShell(root) {
   // R7（m10454）：置顶页面与独立标签工具页面保持一致——复用 renderTree 渲染
   // 同一棵树（打开态/选中/折叠/复制/打开/关闭交互一致），不再是迷你列表。
   let pipWin = null;
+  let pipCtl = null;
   const pipBtn = root.querySelector("#btnPip");
   const pipBody = () =>
     pipWin && !pipWin.closed ? pipWin.document.querySelector("#spBody") : null;
-  const renderPip = async () => {
-    const pipBodyEl = pipBody();
-    if (!pipBodyEl) return;
-    const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
-    pipBodyEl.innerHTML = view.windows.length
-      ? renderTree(view, {
-          openIds: pipState.openIds,
-          favicons: pipState.favicons,
-          linkShow: !!settings.linkShow,
-          selectedId: pipState.selectedId,
-          collapsed: pipState.collapsed,
-        })
-      : renderEmpty();
-    const stats = pipWin.document.querySelector("#pipStats");
-    if (stats) stats.innerHTML = renderStats(m, pipState.openIds);
-    pipBodyEl.classList.toggle("show-link", !!settings.linkShow);
-  };
-  // O5：PiP 打开后注入刷新钩子——主页面 refreshOpen 时一并刷新浮窗，保证两处打开态实时同步。
-  pipRefresh = () => void renderPip();
-  // PiP 与主页面一致的行内/双击交互（打开/复制/关闭/折叠/选中）
-  const pipLeafById = (id) => findNode(m, id);
-  const pipSelect = (id) => {
-    pipState.selectedId = id;
-    const el = pipBody()?.querySelector(`.leaf[data-id="${id}"]`);
-    pipBody()
-      ?.querySelectorAll(".leaf.selected")
-      .forEach((x) => x.classList.remove("selected"));
-    if (el) el.classList.add("selected");
-  };
-  const pipToggle = (id) => {
-    pipState.collapsed = editOp.collapsedToggle(pipState.collapsed, id);
-    void renderPip();
-  };
-  // U2/Q3（2026-11-23）+ U1/U4（2026-11-24 UI 审计）：PiP 完整复刻独立标签工具窗口——
-  // 顶部工具栏（搜索 / 设置 / 定位 / 展收 / 链接 / 回收站 / 历史 / 全屏 / 主题；U1 移除新建分组，
-  // U4 图标统一 SVG）、同一棵树、右键菜单、键盘导航、拖拽、行内打开/关闭/复制/加号全部对齐主页面。
-  const PIP_HTML = `
-    <div class="pip-wrap">
-      <div class="pip-head"><span>TabHarbor 置顶小窗</span><button class="pip-x" title="取消置顶">${TOOL_SVG.close}</button></div>
-      <div class="searchbar">
-        <div class="search-box"><input id="pipQ" type="text" placeholder="输入搜索关键词…" /></div>
-        <button id="pipSettings" class="tbtn" data-act="settings" title="设置">${TOOL_SVG.settings}</button>
-      </div>
-      <div class="quickbar">
-        <button class="tbtn" data-act="locate" title="定位当前标签">${TOOL_SVG.locate}</button>
-        <button class="tbtn" data-act="toggle-all" title="展开 / 收起">${TOOL_SVG.toggle}</button>
-        <button class="tbtn" data-act="links" title="显示链接">${TOOL_SVG.links}</button>
-        <button class="tbtn" data-act="trash" title="回收站">${TOOL_SVG.trash}</button>
-        <button class="tbtn" data-act="history" title="浏览器历史">${TOOL_SVG.history}</button>
-        <button class="tbtn" data-act="fullscreen" title="全屏卡片视图">${TOOL_SVG.fullscreen}</button>
-        <button class="tbtn" data-act="theme" title="黑白主题切换">${TOOL_SVG.theme}</button>
-      </div>
-      <div id="spBody" class="sp-body"></div>
-      <div class="pip-foot"><span id="pipStats" class="stats"></span><span class="pip-hint">关闭小窗即取消置顶</span></div>
-      <div id="pipCtxMenu" class="ctx-menu"></div>
-      <!-- Q4（2026-11-24 UI 审计）：右下角 GitHub 反馈 FAB，与主页面/独立窗口一致 -->
-      <a class="fab-github" href="${GH_FEEDBACK_URL}"
-         target="_blank" rel="noreferrer" title="GitHub 反馈" aria-label="GitHub 反馈">
-        ${TOOL_SVG.github}
-      </a>
-    </div>`;
-  // U2/Q3：工具栏动作桥接——复用主页面已接线的同名按钮，两处行为完全一致。
-  const pipToolAct = (act) => {
-    const map = {
-      settings: "#btnSettings",
-      locate: "#btnLocate",
-      "toggle-all": "#btnToggleAll",
-      links: "#btnLinks",
-      trash: "#btnTrash",
-      history: "#btnHistory",
-      fullscreen: "#btnFullscreen",
-      theme: "#btnTheme",
-    };
-    const sel = map[act];
-    if (sel) root.querySelector(sel)?.click();
-  };
-  const pipWire = () => {
-    const doc = pipWin.document;
-    const pBody = doc.querySelector("#spBody");
-    const pCtx = doc.querySelector("#pipCtxMenu");
-    let pCtxTarget = null;
-    const pHideCtx = () => pCtx?.classList.remove("show");
 
-    // 取消置顶 + 工具栏
-    doc.querySelector(".pip-x")?.addEventListener("click", () => pipWin?.close());
-    doc.querySelectorAll(".quickbar [data-act], .searchbar [data-act]").forEach((btn) => {
-      btn.addEventListener("click", () => pipToolAct(btn.dataset.act));
+  // ============================================================================
+  // 2026-11-24 PiP 复用审计（第二步）：共享控制器工厂 createShellController(host, opts)
+  // ----------------------------------------------------------------------------
+  // 主页面 = bootShell 自身持有的控制器；PiP = 用本工厂在 pipWin.document 上实例化第二个控制器。
+  // 两者调用【同一批核心动作闭包】（openLeafById / copyNode / runMenuAct / addTabToContainer /
+  // addGroupToContainer / applyDrop / resolveDrop / store.saveModel / refreshOpen ...），
+  // 视图态（选中 / 折叠 / 搜索）各自持有，模型与设置通过共享闭包 + chrome.storage 同步。
+  // 已取消 pipToolAct「点击主页面按钮」桥接：PiP 工具栏直接执行动作，弹窗在 PiP 文档内打开。
+  // ============================================================================
+  const fillStaticPanels = (doc) => {
+    const kl = doc.querySelector("#keysList");
+    if (kl && !kl.childElementCount) {
+      kl.innerHTML = KEYS_TABLE.map(
+        ([label, kbd]) => `<div class="kv"><span>${label}</span><kbd>${kbd}</kbd></div>`
+      ).join("");
+    }
+    const gb = doc.querySelector("#guideBody");
+    if (gb && !gb.childElementCount) gb.innerHTML = GUIDE_HTML;
+  };
+
+  const createShellController = (host, opts = {}) => {
+    const doc = host.doc;
+    const body = host.body;
+    const ctxMenu = host.ctxMenu;
+    const view = host.view; // { collapsed:Set, selectedId, searchQ }
+    const q = (sel) => doc.querySelector(sel);
+
+    // 该宿主的树渲染（共享 renderTree + 共享派生态 openIds/favicons）
+    const renderView = async () => {
+      if (!body) return;
+      const vp = view.searchQ ? editOp.searchFilter(m, view.searchQ) : m;
+      body.innerHTML = vp.windows.length
+        ? renderTree(vp, {
+            openIds,
+            favicons,
+            linkShow: !!settings.linkShow,
+            selectedId: view.selectedId,
+            collapsed: view.collapsed,
+          })
+        : renderEmpty();
+      body.classList.toggle("show-link", !!settings.linkShow);
+      const stats = q("#stats");
+      if (stats) stats.innerHTML = renderStats(m, openIds);
+      const badge = q("#trashBadge");
+      if (badge) {
+        const n = (m.trash || []).length;
+        badge.style.display = n ? "inline-block" : "none";
+        badge.textContent = String(n);
+      }
+      fillStaticPanels(doc);
+    };
+    if (opts.onReady) opts.onReady(renderView);
+
+    // 就地选中，不整树重渲染（保留双击/第二次点击）
+    const selectLocal = (id) => {
+      view.selectedId = id;
+      body?.querySelectorAll(".leaf.selected").forEach((x) => x.classList.remove("selected"));
+      body?.querySelector(`.leaf[data-id="${id}"]`)?.classList.add("selected");
+    };
+    const toggleLocal = (id) => {
+      view.collapsed = editOp.collapsedToggle(view.collapsed, id);
+      void renderView();
+    };
+
+    // 工具栏动作：直接执行共享动作，不点击主页面按钮（消除 pipToolAct 桥接）
+    const runTool = async (act) => {
+      if (act === "settings") {
+        fillStaticPanels(doc);
+        openModal("modalSetting", doc);
+      } else if (act === "keys") {
+        fillStaticPanels(doc);
+        openModal("modalKeys", doc);
+      } else if (act === "guide") {
+        fillStaticPanels(doc);
+        openModal("modalGuide", doc);
+      } else if (act === "trash") {
+        openModal("modalTrash", doc);
+      } else if (act === "locate") {
+        root.querySelector("#btnLocate")?.click();
+      } else if (act === "toggle-all") {
+        const all = [...m.windows.map((w) => w.id), ...m.groups.map((g) => g.id)];
+        view.collapsed = view.collapsed.size >= all.length ? new Set() : new Set(all);
+        await renderView();
+        toast(view.collapsed.size ? "已全部收起" : "已全部展开");
+      } else if (act === "links") {
+        await saveSettingsPatch({ linkShow: !settings.linkShow });
+        await refreshOpen();
+        toast(settings.linkShow ? "已显示链接" : "已隐藏链接");
+      } else if (act === "theme") {
+        await toggleTheme();
+        await refreshOpen();
+      } else if (act === "history") {
+        try {
+          await chrome.tabs.create({ url: "chrome://history/" });
+          toast("已打开浏览器历史");
+        } catch (err) {
+          say("打开历史失败：" + err.message);
+        }
+      } else if (act === "fullscreen") {
+        toast("全屏卡片视图待实现");
+      }
+    };
+
+    // 弹窗关闭 / 遮罩（PiP 文档内自洽）
+    doc.querySelectorAll("[data-modal-close]").forEach((btn) => {
+      btn.addEventListener("click", () => closeModal(btn.dataset.modalClose, doc));
     });
-    // 搜索：与主页面双向同步
-    const pQ = doc.querySelector("#pipQ");
-    if (pQ) {
-      pQ.value = searchQ;
-      pQ.addEventListener("input", async () => {
-        searchQ = pQ.value;
-        const mainQ = root.querySelector("#q");
-        if (mainQ) mainQ.value = searchQ;
-        await render();
-        await renderPip();
+    doc.querySelectorAll(".mask").forEach((mask) => {
+      mask.addEventListener("click", (e) => {
+        if (e.target === mask) mask.hidden = true;
+      });
+    });
+
+    // 工具栏 / 搜索栏按钮
+    doc.querySelectorAll(".quickbar [data-act], .searchbar [data-act]").forEach((btn) => {
+      btn.addEventListener("click", () => void runTool(btn.dataset.act));
+    });
+    q("#btnKeys")?.addEventListener("click", () => void runTool("keys"));
+    q("#btnGuide")?.addEventListener("click", () => void runTool("guide"));
+    const sQ = q("#q");
+    if (sQ) {
+      sQ.addEventListener("input", async () => {
+        view.searchQ = sQ.value;
+        await renderView();
       });
     }
 
-    // 行内交互：折叠 / 打开 / 新建标签 / 复制 / 关闭 / 选中
-    doc.body.addEventListener("click", (e) => {
+    // 树交互：点击（折叠 / 复制 / 关闭 / 重命名 / 行内加号 / 选中）
+    body?.addEventListener("click", async (e) => {
       const tri = e.target.closest(".node-row .tri");
       if (tri) {
         const node = tri.closest(".node");
-        if (node) pipToggle(node.dataset.id);
+        if (node) toggleLocal(node.dataset.id);
         return;
       }
-      if (pCtx && !e.target.closest("#pipCtxMenu")) pHideCtx();
-      const openX = e.target.closest(".leaf .open-x");
-      if (openX) {
-        const leaf = openX.closest(".leaf");
-        if (leaf?.dataset.id) void openLeafById(leaf.dataset.id);
-        return;
-      }
-      const renameBtn = e.target.closest('[data-act="rename"]');
-      if (renameBtn) {
-        const host = renameBtn.closest(".node, .leaf");
-        if (host?.dataset.id) void runMenuAct("rename", host.dataset.id, host.dataset.kind);
-        return;
-      }
-      const addTabBtn = e.target.closest('[data-act="add-tab"]');
-      if (addTabBtn) {
-        const node = addTabBtn.closest(".node");
-        if (node?.dataset.id) void addTabToContainer(node.dataset.id);
-        return;
-      }
-      const addGroupBtn = e.target.closest('[data-act="add-group-inline"]');
-      if (addGroupBtn) {
-        const node = addGroupBtn.closest(".node");
-        if (node?.dataset.id) addGroupToContainer(node.dataset.id);
-        return;
-      }
+      if (ctxMenu && !e.target.closest(".ctx-menu")) ctxMenu.classList.remove("show");
       const copyX = e.target.closest(".copy-x");
       if (copyX) {
         const holder = copyX.closest(".leaf, .node-row");
         if (holder?.dataset.id) {
-          void copyNode(holder.dataset.id).catch((err) => toast("复制失败：" + err.message));
+          try {
+            await copyNode(holder.dataset.id);
+          } catch (err) {
+            say("复制失败：" + err.message);
+          }
         }
         return;
       }
-      const closeX = e.target.closest(".leaf .close-x");
+      const rename = e.target.closest('[data-act="rename"]');
+      if (rename) {
+        const holder = rename.closest(".node, .leaf");
+        if (holder?.dataset.id) openEditModal(holder.dataset.id);
+        return;
+      }
+      const addTab = e.target.closest('[data-act="add-tab"]');
+      if (addTab) {
+        const node = addTab.closest(".node");
+        if (node?.dataset.id) await addTabToContainer(node.dataset.id);
+        return;
+      }
+      const addGroup = e.target.closest('[data-act="add-group-inline"]');
+      if (addGroup) {
+        const node = addGroup.closest(".node");
+        if (node?.dataset.id) addGroupToContainer(node.dataset.id);
+        return;
+      }
+      const closeX = e.target.closest(".close-x");
       if (closeX) {
         const leaf = closeX.closest(".leaf");
         if (leaf?.dataset.id) {
-          void (async () => {
-            const n = await tabsOp.closeLeaf(chrome, m, leaf.dataset.id);
-            await refreshOpen();
-            void renderPip();
-            toast(n ? "已关闭网页" : "网页未在浏览器打开");
-          })();
+          const n = await tabsOp.closeLeaf(chrome, m, leaf.dataset.id);
+          await refreshOpen();
+          toast(n ? "已关闭网页" : "网页未在浏览器打开");
         }
         return;
       }
       const leaf = e.target.closest(".leaf");
-      if (leaf?.dataset.id) pipSelect(leaf.dataset.id);
+      if (leaf?.dataset.id) selectLocal(leaf.dataset.id);
     });
-    doc.body.addEventListener("dblclick", (e) => {
+    body?.addEventListener("dblclick", (e) => {
       const leaf = e.target.closest(".leaf");
       if (leaf?.dataset.id) void openLeafById(leaf.dataset.id);
     });
 
-    // 右键菜单：复用主页面 runMenuAct，行为一致
-    doc.body.addEventListener("contextmenu", (e) => {
+    // 右键菜单：共享 menuHtml 模板 + runMenuAct 动作
+    let ctxTarget = null;
+    body?.addEventListener("contextmenu", (e) => {
       const el = e.target.closest(".node, .leaf");
-      if (!el || !pCtx) return;
+      if (!el || !ctxMenu) return;
       e.preventDefault();
-      pCtxTarget = { id: el.dataset.id, kind: el.dataset.kind };
-      pCtx.innerHTML = menuHtml(pCtxTarget.kind === "leaf" ? "leaf" : pCtxTarget.kind);
-      pCtx.style.left = `${e.clientX}px`;
-      pCtx.style.top = `${e.clientY}px`;
-      pCtx.classList.add("show");
+      ctxTarget = { id: el.dataset.id, kind: el.dataset.kind };
+      ctxMenu.innerHTML = menuHtml(ctxTarget.kind === "leaf" ? "leaf" : ctxTarget.kind);
+      ctxMenu.style.left = `${e.clientX}px`;
+      ctxMenu.style.top = `${e.clientY}px`;
+      ctxMenu.classList.add("show");
     });
-    pCtx?.addEventListener("click", async (e) => {
+    ctxMenu?.addEventListener("click", async (e) => {
       const btn = e.target.closest(".mi[data-act]");
-      if (!btn || !pCtxTarget) return;
-      pHideCtx();
-      await runMenuAct(btn.dataset.act, pCtxTarget.id, pCtxTarget.kind);
-      await renderPip();
+      if (!btn || !ctxTarget) return;
+      ctxMenu.classList.remove("show");
+      const { id, kind } = ctxTarget;
+      if (btn.dataset.act === "fold") toggleLocal(id);
+      else await runMenuAct(btn.dataset.act, id, kind);
+      await renderView();
     });
 
-    // 键盘：p 关闭 / Delete 删除 / Enter 打开 / Ctrl+C 复制 / ↑↓ 导航 / Esc 关菜单
-    doc.body.addEventListener("keydown", async (e) => {
+    // 键盘：Enter 打开 / Delete 删除 / Ctrl+C 复制 / Esc 关菜单 / ↑↓ 导航
+    doc.addEventListener("keydown", async (e) => {
       if (e.key === "Escape") {
-        pHideCtx();
+        ctxMenu?.classList.remove("show");
         return;
       }
-      if (e.key === "p" && !e.ctrlKey && !e.metaKey) {
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (opts.isPip && e.key === "p" && !e.ctrlKey && !e.metaKey) {
         pipWin?.close();
         return;
       }
-      const id = pipState.selectedId;
-      if (e.key === "Delete" && id) {
-        e.preventDefault();
-        const nextFocus = editOp.neighborLeafIdAfterRemove(orderedLeafIds(), id);
-        await runMenuAct("del", id, "leaf");
-        if (nextFocus != null && findNode(m, nextFocus)) pipSelect(nextFocus);
-        await renderPip();
-      } else if (e.key === "Enter" && id) {
-        e.preventDefault();
-        void openLeafById(id);
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && id) {
-        void copyNode(id).catch((err) => toast("复制失败：" + err.message));
-      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const id = view.selectedId;
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const ids = orderedLeafIds();
         const i = ids.indexOf(id);
         const next = e.key === "ArrowDown" ? Math.min(i + 1, ids.length - 1) : Math.max(i - 1, 0);
         if (ids[next]) {
-          pipSelect(ids[next]);
-          pBody
+          selectLocal(ids[next]);
+          body
             ?.querySelector(`.leaf[data-id="${ids[next]}"]`)
             ?.scrollIntoView({ block: "nearest" });
+        }
+      } else if (e.key === "Enter" && id) {
+        e.preventDefault();
+        void openLeafById(id);
+      } else if (e.key === "Delete" && id) {
+        e.preventDefault();
+        await runMenuAct("del", id, "leaf");
+        await renderView();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && id) {
+        try {
+          await copyNode(id);
+        } catch (err) {
+          say("复制失败：" + err.message);
         }
       }
     });
 
-    // 拖拽：复用主页面共享的 dragSrc / resolveDrop / applyDrop，落点规则完全一致
-    const pClear = () => {
-      pBody?.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
-      pBody?.querySelectorAll(".dragging").forEach((x) => x.classList.remove("dragging"));
+    // 拖拽：共享 resolveDrop / applyDrop 核心动作
+    let dSrc = null;
+    let dOver = null;
+    const clearMarks = () => {
+      body?.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+      body?.querySelectorAll(".dragging").forEach((x) => x.classList.remove("dragging"));
     };
-    pBody?.addEventListener("dragstart", (e) => {
+    body?.addEventListener("dragstart", (e) => {
       const hit = resolveDrop(e.target);
       if (!hit) return;
       e.stopPropagation();
-      dragSrc = { id: hit.id, kind: hit.kind };
-      const el = e.target.closest(".leaf, .node");
-      if (el) el.classList.add("dragging");
+      dSrc = { id: hit.id, kind: hit.kind };
+      e.target.closest(".leaf, .node")?.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
       try {
-        e.dataTransfer.setData("text/plain", dragSrc.id);
+        e.dataTransfer.setData("text/plain", dSrc.id);
       } catch {
         /* 环境禁止 setData */
       }
     });
-    pBody?.addEventListener("dragend", () => {
-      pClear();
-      dragSrc = null;
-      dragOver = null;
+    body?.addEventListener("dragend", () => {
+      clearMarks();
+      dSrc = null;
+      dOver = null;
     });
-    pBody?.addEventListener("dragover", (e) => {
-      if (!dragSrc) return;
+    body?.addEventListener("dragover", (e) => {
+      if (!dSrc) return;
       const hit = resolveDrop(e.target);
       if (!hit) {
-        dragOver = null;
-        pClear();
+        dOver = null;
+        clearMarks();
         return;
       }
       e.preventDefault();
       e.stopPropagation();
       e.dataTransfer.dropEffect = "move";
-      dragOver = hit;
-      pBody.querySelectorAll(".dragover").forEach((x) => x.classList.remove("dragover"));
+      dOver = hit;
+      clearMarks();
       hit.row?.classList.add("dragover");
     });
-    pBody?.addEventListener("drop", async (e) => {
-      if (!dragSrc) return;
+    body?.addEventListener("drop", async (e) => {
+      if (!dSrc) return;
       e.preventDefault();
       e.stopPropagation();
-      const src = dragSrc;
-      const hit = dragOver || resolveDrop(e.target);
-      pClear();
-      dragSrc = null;
-      dragOver = null;
+      const src = dSrc;
+      const hit = dOver || resolveDrop(e.target);
+      clearMarks();
+      dSrc = null;
+      dOver = null;
       if (!hit) return;
       const moved = await applyDrop(src.id, src.kind, hit.kind, hit.id, hit);
       if (moved) {
         await store.saveModel(m);
         await refreshOpen();
-        await renderPip();
       }
     });
+
+    void renderView();
+    return { render: renderView };
   };
+  // O5：PiP 打开后注入刷新钩子——refreshOpen 时一并刷新浮窗，保证两处打开态实时同步。
+  pipRefresh = () => {
+    if (pipCtl) void pipCtl.render();
+  };
+  // 2026-11-24 PiP 复用审计：PiP 骨架由 buildShellSkeleton('pip') 从独立窗口 HTML 生成，
+  // 事件由 createShellController 统一绑定（与主页面共用核心动作），彻底移除手写 PIP_HTML、
+  // pipToolAct 桥接与 pipWire 重复绑定。
   pipBtn?.addEventListener("click", async () => {
     if (pipWin && !pipWin.closed) {
       pipWin.close(); // 取消置顶：pagehide 统一清理状态与高亮
@@ -1787,12 +1867,24 @@ export async function bootShell(root) {
         pipWin.document.head.appendChild(el.cloneNode(true));
       }
       applyTheme(pipWin.document, themeOf(settings));
-      // U2/Q3：完整复刻独立标签工具窗口（工具栏 + 树 + 底部统计 + 右键菜单容器）
-      pipWin.document.body.innerHTML = PIP_HTML;
-      pipWire();
-      await renderPip();
+      // 共享骨架：页脚（快捷键/指南/反馈）、快捷栏、弹窗、右键菜单与主页面同源
+      pipWin.document.body.innerHTML = await buildShellSkeleton("pip");
+      // 取消置顶按钮（仅 PiP 模式差异）
+      pipWin.document
+        .querySelector("#btnPipClose")
+        ?.addEventListener("click", () => pipWin?.close());
+      pipCtl = createShellController(
+        {
+          doc: pipWin.document,
+          body: pipWin.document.querySelector("#spBody"),
+          ctxMenu: pipWin.document.querySelector("#ctxMenu"),
+          view: pipState,
+        },
+        { isPip: true }
+      );
       pipWin.addEventListener("pagehide", () => {
         pipWin = null;
+        pipCtl = null;
         pipState.selectedId = null;
         pipRefresh = () => {};
         pipBtn?.classList.remove("active");
@@ -2103,11 +2195,8 @@ export async function bootShell(root) {
     clearTimeout(tabsTimer);
     // 批量事件去抖；置顶 PiP 浮窗打开时同步刷新迷你列表（D5）
     tabsTimer = setTimeout(() => {
-      // 先同步主页面打开态（refreshOpen 内同步 pipState.openIds），再渲染置顶小窗（R7 同源）
-      void (async () => {
-        await refreshOpen();
-        await renderPip();
-      })();
+      // refreshOpen 内 applyOpenState 同步共享派生态，并通过 pipRefresh 一并刷新 PiP 控制器（同源）
+      void refreshOpen();
     }, 150);
   };
   if (typeof chrome !== "undefined" && chrome.tabs?.onCreated) {

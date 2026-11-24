@@ -1347,12 +1347,18 @@ step("那么", "关闭标签 {} 的行没有关闭按钮", (title) => {
   if (rowOf(title).includes('data-act="close"')) throw new Error(`${title} 关闭态不应有关闭按钮`);
 });
 
-// U6（2026-11-23 UI 审计）：打开/关闭按钮双向条件渲染
+// 2026-11-24 行内按钮审计：叶子已无「打开」按钮（双击/Enter 负责打开）。
+// 保留 step 名兼容历史 feature，语义改为「未打开标签无打开按钮」。
 step("那么", "未打开标签 {} 的行有打开按钮", (title) => {
-  if (!rowOf(title).includes('data-act="open"')) throw new Error(`${title} 未打开态应有打开按钮`);
+  if (rowOf(title).includes('data-act="open"'))
+    throw new Error(`${title} 不应有打开按钮（已移除）`);
 });
 step("那么", "未打开标签 {} 的行没有关闭按钮", (title) => {
   if (rowOf(title).includes('data-act="close"')) throw new Error(`${title} 未打开态不应有关闭按钮`);
+});
+step("那么", "未打开标签 {} 的行没有打开按钮", (title) => {
+  if (rowOf(title).includes('data-act="open"'))
+    throw new Error(`${title} 不应有打开按钮（已移除）`);
 });
 step("那么", "已打开标签 {} 的行没有打开按钮", (title) => {
   if (rowOf(title).includes('data-act="open"')) throw new Error(`${title} 已打开态不应有打开按钮`);
@@ -3234,49 +3240,64 @@ step("那么", "加密快照错密码恢复被拒绝", async () => {
   }
   if (!threw) throw new Error("错密码未被拒绝");
 });
-// U2/R3：行内按钮顺序 + 透明样式（静态）
+// 2026-11-24 行内按钮审计：精确顺序 + 无打开按钮 + 容器无批量图标 + 透明样式（静态）
 step("那么", "重命名按钮位于行尾且并入统一透明样式", () => {
   const render = repoFile("src/ui/render.js");
   const css = repoFile("src/assets/m2.css");
-  // 容器行：copy 在 rename 之前（重命名最后）
+  if (render.includes("open-x") || render.includes('data-act="open"'))
+    throw new Error("render.js 仍含叶子打开按钮");
+  if (render.includes("const OI")) throw new Error("render.js 仍含 OI 打开三角常量");
+  // 容器行从左到右精确 = addTab → addGroup → copy → rename（重命名最右）
   const cont = render.slice(
     render.indexOf("function containerOpen"),
     render.indexOf("function leafRow")
   );
-  const contCopy = cont.indexOf("copy", cont.indexOf("const rename"));
-  const contRenameDef = cont.indexOf("const rename");
   const contReturn = cont.indexOf('return `<div class="node');
   const contRow = cont.slice(contReturn);
-  if (contRow.indexOf("${copy}") < 0 || contRow.indexOf("${rename}") < 0)
-    throw new Error("容器行缺 copy/rename 变量");
-  if (contRow.indexOf("${copy}") > contRow.indexOf("${rename}"))
-    throw new Error("容器行重命名未在复制之后");
-  // 叶子行：copyBtn/openBtn/closeBtn 都在 renameBtn 之前
+  for (const v of ["${addTab}", "${addGroup}", "${copy}", "${rename}"]) {
+    if (!contRow.includes(v)) throw new Error(`容器行缺 ${v}`);
+  }
+  const cPos = ["${addTab}", "${addGroup}", "${copy}", "${rename}"].map((v) => contRow.indexOf(v));
+  if (!(cPos[0] < cPos[1] && cPos[1] < cPos[2] && cPos[2] < cPos[3]))
+    throw new Error("容器行顺序应为 add-tab → add-group → copy → rename");
+  if (contRow.includes("open-all") || contRow.includes("close-all"))
+    throw new Error("容器行不应有打开全部/关闭全部图标");
+  // 叶子行包入 .row-ops，从左到右精确 = closeBtn → copyBtn → renameBtn（重命名最右）
   const leaf = render.slice(render.indexOf("function leafRow"));
   const leafRow = leaf.indexOf('return `<div class="leaf');
   const seg = leaf.slice(leafRow);
-  const posRename = seg.indexOf("${renameBtn}");
-  for (const v of ["${copyBtn}", "${openBtn}", "${closeBtn}"]) {
-    const p = seg.indexOf(v);
-    if (p < 0 || p > posRename) throw new Error(`叶子行 ${v} 未在重命名之前`);
+  if (!seg.includes('class="row-ops"')) throw new Error("叶子操作未包入 .row-ops");
+  for (const v of ["${closeBtn}", "${copyBtn}", "${renameBtn}"]) {
+    if (!seg.includes(v)) throw new Error(`叶子行缺 ${v}`);
   }
-  // CSS：.rename-x 并入统一选择器（透明背景）
+  const lPos = ["${closeBtn}", "${copyBtn}", "${renameBtn}"].map((v) => seg.indexOf(v));
+  if (!(lPos[0] < lPos[1] && lPos[1] < lPos[2]))
+    throw new Error("叶子行顺序应为 close → copy → rename");
+  // CSS：.rename-x / .close-x 并入统一常显选择器；无悬停门控
   const selBlock = css.slice(css.indexOf(".copy-x,"), css.indexOf(".copy-x:hover"));
-  if (!selBlock.includes(".rename-x")) throw new Error("CSS 未将 .rename-x 并入行内图标选择器");
+  if (!selBlock.includes(".rename-x") || !selBlock.includes(".close-x"))
+    throw new Error("CSS 未将 .rename-x/.close-x 并入行内图标选择器");
+  if (css.includes(".leaf:hover .close-x") || css.includes(".leaf:hover .open-x"))
+    throw new Error("CSS 仍有叶子按钮悬停门控");
 });
-// U3/R4：主页入口在外观（已在主页审计 step 验证）；反馈分类移除 + FAB 三端（静态）
+// 2026-11-24 行内按钮审计：反馈入口从右下角 FAB 迁到页脚指南右侧（静态）
 step("那么", "反馈改为右下角 GitHub FAB 且三端一致", () => {
   for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
     const s = repoFile(f);
     if (s.includes('data-cat="feedback"')) throw new Error(`${f} 仍含反馈分类`);
-    if (!s.includes('id="btnFeedback"') || !s.includes("fab-github"))
-      throw new Error(`${f} 缺右下角反馈 FAB`);
+    if (s.includes("fab-github")) throw new Error(`${f} 仍含右下角 FAB`);
+    if (!s.includes('id="btnFeedback"') || !s.includes("feedback-link"))
+      throw new Error(`${f} 缺页脚反馈锚点`);
+    // btnFeedback 必须紧跟 #btnGuide（同一 footer-actions 内、Guide 之后）
+    const fa = s.slice(
+      s.indexOf('class="footer-actions"'),
+      s.indexOf("</span>", s.indexOf('class="footer-actions"'))
+    );
+    if (fa.indexOf("btnGuide") < 0 || fa.indexOf("btnFeedback") <= fa.indexOf("btnGuide"))
+      throw new Error(`${f} 反馈锚点未在指南图标右侧`);
   }
-  const shell = repoFile("src/ui/shell.js");
-  const pip = shell.slice(shell.indexOf("const PIP_HTML"), shell.indexOf("pipWire ="));
-  if (!pip.includes("fab-github")) throw new Error("PiP 置顶小窗缺反馈 FAB");
   const css = repoFile("src/assets/m2.css");
-  if (!css.includes(".fab-github")) throw new Error("FAB 样式缺失");
+  if (css.includes(".fab-github")) throw new Error("FAB 样式未清除");
 });
 // U5：备份/导入导出的短文案（静态）
 step("那么", "备份面板使用审计定稿短文案且导入单按钮", () => {
@@ -3327,6 +3348,8 @@ step("那么", "指南文案反映三分类与右下角反馈", () => {
   const guide = src.slice(src.indexOf("const GUIDE_HTML"), src.indexOf("// N3（m10950）"));
   if (guide.includes("五类") || guide.includes("备份与恢复、主页、复制、反馈"))
     throw new Error("指南仍含旧五类分类描述");
-  if (!guide.includes("右下角 GitHub") || !guide.includes("外观"))
-    throw new Error("指南未同步新分类/反馈入口");
+  if (guide.includes("右下角 GitHub") || guide.includes("页面右下角"))
+    throw new Error("指南仍写右下角 FAB 反馈入口");
+  if (!guide.includes("指南") || !guide.includes("右侧的 GitHub") || !guide.includes("外观"))
+    throw new Error("指南未同步新分类/页脚反馈入口");
 });

@@ -42,16 +42,18 @@
 那么 "src/ui/render.js" 包含 "renderStats(m, openIds)"
 那么 "src/ui/render.js" 包含 "已打开"
 
-场景: 设置弹窗三分类（外观/备份/复制；主页归入外观，反馈改右下角 FAB）
+场景: 设置弹窗三分类（外观/备份/复制；主页归入外观，反馈改页脚指南右侧）
 那么 "src/window/window.html" 包含 "modalSetting"
 那么 "src/window/window.html" 包含 "data-cat=\"appearance\""
 那么 "src/window/window.html" 包含 "data-cat=\"backup\""
 那么 "src/window/window.html" 包含 "data-cat=\"copy\""
 那么 "src/window/window.html" 不包含 "data-cat=\"feedback\""
-那么 "src/window/window.html" 包含 "fab-github"
+那么 "src/window/window.html" 包含 "btnFeedback"
+那么 "src/window/window.html" 包含 "feedback-link"
 那么 "src/sidebar/sidebar.html" 包含 "modalSetting"
 那么 "src/sidebar/sidebar.html" 不包含 "data-cat=\"feedback\""
-那么 "src/sidebar/sidebar.html" 包含 "fab-github"
+那么 "src/sidebar/sidebar.html" 包含 "btnFeedback"
+那么 "src/sidebar/sidebar.html" 包含 "feedback-link"
 
 场景: 设置-外观含主题/打开方式单选与上次位置开关
 那么 "src/window/window.html" 包含 "data-setting=\"theme\""
@@ -104,10 +106,10 @@
 那么 "src/window/window.html" 包含 "btnPip"
 那么 "src/sidebar/sidebar.html" 不包含 "btnPip"
 
-场景: D2 标签行内打开/关闭按钮齐备
-那么 "src/ui/render.js" 包含 "open-x"
+场景: 标签行内关闭按钮（无打开按钮，双击/Enter 负责打开）
+那么 "src/ui/render.js" 不包含 "open-x"
 那么 "src/ui/render.js" 包含 "close-x"
-那么 "src/assets/m2.css" 包含 ".open-x"
+那么 "src/assets/m2.css" 不包含 ".open-x"
 那么 "src/ui/shell.js" 包含 "closeLeaf"
 
 场景: D6 备份面板按原型 opt-row 结构（备份方式/本地格式/子面板切换/三种导入入口）
@@ -139,24 +141,24 @@
 那么 "src/ui/shell.js" 包含 "queryOpenTabs"
 那么 "src/core/align.js" 包含 "realignIfEmpty"
 
-  # U2/Q3（2026-11-23 UI 审计）：PiP 置顶小窗完整复刻独立标签工具窗口
-  场景: U2/Q3 置顶小窗完整复刻工具栏与交互
-    那么 "src/ui/shell.js" 包含 "PIP_HTML"
-    并且 "src/ui/shell.js" 包含 "pipToolAct"
-    并且 "src/ui/shell.js" 包含 "pipCtxMenu"
-    并且 "src/ui/shell.js" 包含 "pipToolAct"
+  # 2026-11-24 PiP 复用审计：共享骨架工厂 + 共享控制器（消除手写 PIP_HTML 与 pipToolAct 桥接）
+  场景: PiP 复用独立窗口骨架与共享控制器
+    那么 "src/ui/shell.js" 包含 "buildShellSkeleton"
+    并且 "src/ui/shell.js" 包含 "createShellController"
+    并且 "src/ui/shell.js" 不包含 "const PIP_HTML"
+    并且 "src/ui/shell.js" 不包含 "const pipToolAct"
+    并且 "src/ui/shell.js" 不包含 "const pipWire"
     并且 "src/ui/shell.js" 包含 "runMenuAct"
     并且 "src/ui/shell.js" 包含 "orderedLeafIds"
     并且 "src/ui/shell.js" 包含 "applyDrop"
-    并且 "src/ui/shell.js" 包含 "pipQ"
-    并且 "src/ui/shell.js" 包含 "data-act=\"add-tab\""
+    并且 "src/ui/shell.js" 包含 "#side"
     并且 "src/assets/m2.css" 包含 ".pip-head .pip-x"
 
   # O5（2026-11-23 UI 审计）：PiP 与主页面打开态实时同步
   场景: O5 置顶小窗与主页面实时同步打开态
-    那么 "src/ui/shell.js" 包含 "pipRefresh = () => void renderPip"
+    那么 "src/ui/shell.js" 包含 "pipRefresh = () => {"
     并且 "src/ui/shell.js" 包含 "pipRefresh()"
-    并且 "src/ui/shell.js" 包含 "pipRefresh = () => {}"
+    并且 "src/ui/shell.js" 包含 "pipCtl.render"
 
   # LinkMap 导出格式导入（2026-11-24）：M5/B3 改为内容嗅探，不按后缀
   场景: LinkMap 导入入口自动识别
