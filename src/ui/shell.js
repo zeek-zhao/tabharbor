@@ -105,6 +105,12 @@ function buildShellSkeleton(mode = "pip") {
     // 清空动态渲染的树（由控制器 renderView 重填），避免克隆旧快照
     const body = holder.querySelector("#spBody");
     if (body) body.innerHTML = "";
+    // 合并审计 9.3：每次打开 PiP 都重置克隆带入的残留态——
+    // 弹窗隐藏、密码框/令牌框清空、文件选择器清空，避免带入主页面未保存输入。
+    holder.querySelectorAll(".mask").forEach((m) => (m.hidden = true));
+    holder.querySelectorAll('input[type="password"]').forEach((i) => (i.value = ""));
+    const file = holder.querySelector("#importFile");
+    if (file) file.value = "";
     const tb = holder.querySelector("#titlebar");
     if (tb) {
       const head = document.createElement("div");
@@ -142,7 +148,7 @@ const GUIDE_HTML = `
   <li><b>双击打开：</b>双击标签即在浏览器打开（无行内「打开」按钮）；行内复制图标一键复制，末尾 X 关闭网页（仅已打开叶子显示、常显不悬停）。</li>
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
-  <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；右键只保留备注、复制、打开、关闭、删除——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站。</li>
+  <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；标签右键只保留「删除到回收站」，复制走行内复制按钮——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站。</li>
   <li><b>导入与备份（U5/U6/Q2）：</b>只保留一个「导入数据」按钮，放入文件后按内容自动识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份（不看后缀、不弹格式选项）。备份在本地与 GitHub 两张卡片里「先配置、后确认」：本地备份填密码后确认；GitHub 备份先「保存并校验配置」再单独「确认备份」。两者均为加密完整快照（含书签+回收站+设置+主页配置），密码不保存；另有独立「导出 HTML」明文书签导出。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
@@ -161,17 +167,22 @@ async function deriveOpenState(m) {
   try {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return empty;
     const tabs = await chrome.tabs.query({});
-    // D11（2026-11-23）：全部页面参与派生（http(s)/chrome:///about:/file:///chrome-extension://）。
-    // D17（定稿 2026-11-23）：打开态只信 tabId，无 URL 兜底（computeOpenIds 已实现）。
-    const webTabs = tabs.filter((t) => String(t.url || "").trim().length > 0);
+    // 合并审计 P0-3（2026-11-24）：拆分「存活集合」与「展示集合」。
+    // 打开态只信 tabId，与 URL 无关——Chrome 标签在导航提交前 url 为空、目标在 pendingUrl，
+    // 若先按 url 非空过滤会把存活 tabId 排除，导致「先亮后灰」误判（违背 D17 tabId-only）。
+    // liveTabs：所有 tabId 非空的标签，用于 computeOpenIds，不按 url/pendingUrl 过滤。
+    const liveTabs = tabs.filter((t) => t != null && t.id != null);
     const openIds = computeOpenIds(
       m,
-      webTabs.map((t) => ({ id: t.id, url: t.url }))
+      liveTabs.map((t) => ({ id: t.id }))
     );
     const favicons = new Map();
-    for (const t of webTabs) {
-      if (!t.favIconUrl) continue;
-      if (t.id != null) favicons.set(`id:${t.id}`, t.favIconUrl);
+    for (const t of liveTabs) {
+      // 展示 URL 优先 t.url，为空回退 t.pendingUrl；仅用于决定「是否值得取图标」，
+      // 不用于点亮叶子（pendingUrl 不参与任何绑定/点亮）。favicon 缺失走通用兜底图标。
+      const shownUrl = String(t.url || t.pendingUrl || "");
+      if (!shownUrl.trim()) continue;
+      if (t.favIconUrl) favicons.set(`id:${t.id}`, t.favIconUrl);
     }
     return { openIds, favicons };
   } catch {
@@ -232,18 +243,35 @@ export async function bootShell(root) {
   };
   ensureDropzone();
   const { renderTree, renderEmpty, renderStats } = await import("./render.js");
-  const status = root.querySelector("#dataStatus");
-  const toastEl = root.querySelector("#toast");
-  let toastTimer = null;
+
+  // ===== 合并审计 P1-2（2026-11-24）：宿主上下文（主页面 / PiP 各一份）=====
+  // 状态栏、toast、弹窗输入框、右键菜单都按宿主文档隔离；核心数据动作共享闭包，
+  // 只把「宿主 DOM 读写」下沉到 host。say/toast 广播到所有存活宿主，
+  // 因此无论从哪个宿主触发操作，两个宿主都看到一致反馈（PiP 内不再看不到结果）。
+  let pipHost = null; // PiP 打开时赋值（见下方 pipBtn 逻辑）
+  const mainHost = {
+    doc: document,
+    root,
+    body,
+    status: root.querySelector("#dataStatus"),
+    toastEl: root.querySelector("#toast"),
+    ctxMenu: root.querySelector("#ctxMenu"),
+    toastTimer: 0,
+    view: null, // 主页面视图态用 bootShell 闭包变量（collapsed/selectedId/searchQ）
+  };
+  const allHosts = () => [mainHost, pipHost].filter(Boolean);
   const toast = (text) => {
-    if (!toastEl) return;
-    toastEl.textContent = text;
-    toastEl.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1600);
+    for (const h of allHosts()) {
+      const el = h.toastEl;
+      if (!el) continue;
+      el.textContent = text;
+      el.classList.add("show");
+      clearTimeout(h.toastTimer);
+      h.toastTimer = setTimeout(() => el.classList.remove("show"), 1600);
+    }
   };
   const say = (text) => {
-    if (status) status.textContent = text;
+    for (const h of allHosts()) if (h.status) h.status.textContent = text;
     toast(text);
   };
 
@@ -383,68 +411,74 @@ export async function bootShell(root) {
     btn.addEventListener("click", () => closeModal(btn.dataset.modalClose));
   });
 
-  // ---- #30 编辑 / 新建 / 备注弹窗（modalEdit / modalNew） ----
-  let editTargetId = null;
-  let newMode = null; // { kind: "group"|"note", windowId?, targetId? }
-  const openEditModal = (id) => {
+  // ---- #30 编辑 / 新建 / 备注弹窗（宿主化：每个 host 持有自己的目标态与输入框）----
+  // 合并审计 P0-1/P1-2：openEditModal/openNewModal 从传入宿主读取输入框、填充值、聚焦；
+  // 保存按钮与 Enter 事件绑定到该宿主文档，保存后 refreshOpen 同步所有宿主。
+  const openEditModal = (id, host = mainHost) => {
     const n = findNode(m, id);
     if (!n) return;
-    editTargetId = id;
-    const input = root.querySelector("#editInput");
+    host.editTargetId = id;
+    const input = host.root.querySelector("#editInput");
     if (input) input.value = n.title || "";
-    openModal("modalEdit");
+    openModal("modalEdit", host.doc);
     if (input) input.focus();
   };
-  root.querySelector("#btnEditSave")?.addEventListener("click", async () => {
-    const input = root.querySelector("#editInput");
-    const title = (input?.value || "").trim();
-    if (!editTargetId || !title) return;
-    editOp.renameNode(m, editTargetId, title);
-    await store.saveModel(m);
-    closeModal("modalEdit");
-    await render();
-    say("已重命名");
-  });
-  root.querySelector("#editInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") root.querySelector("#btnEditSave")?.click();
-  });
-  const openNewModal = (mode) => {
-    newMode = mode;
-    const titleEl = root.querySelector("#newTitle");
-    const input = root.querySelector("#newInput");
+  const openNewModal = (mode, host = mainHost) => {
+    host.newMode = mode; // { kind: "group"|"note", windowId?, targetId? }
+    const titleEl = host.root.querySelector("#newTitle");
+    const input = host.root.querySelector("#newInput");
     if (titleEl) titleEl.textContent = mode.kind === "group" ? "新建分组" : "添加备注";
     if (input) input.value = mode.kind === "note" ? findNode(m, mode.targetId)?.note || "" : "";
-    openModal("modalNew");
+    openModal("modalNew", host.doc);
     if (input) input.focus();
   };
-  root.querySelector("#btnNewSave")?.addEventListener("click", async () => {
-    const input = root.querySelector("#newInput");
-    const text = (input?.value || "").trim();
-    if (!newMode) return;
-    if (newMode.kind === "group") {
-      if (!text) return;
-      if (newMode.targetId) {
-        // P0：组右键「新建子组」——挂到该分组下
-        editOp.createGroupUnder(m, newMode.targetId, text);
+  // 把编辑/新建弹窗的保存按钮与 Enter 绑定到指定宿主（主页面与 PiP 共用）。
+  const bindEditNewModals = (host) => {
+    const r = host.root;
+    r.querySelector("#btnEditSave")?.addEventListener("click", async () => {
+      const input = r.querySelector("#editInput");
+      const title = (input?.value || "").trim();
+      if (!host.editTargetId || !title) return;
+      editOp.renameNode(m, host.editTargetId, title);
+      await store.saveModel(m);
+      closeModal("modalEdit", host.doc);
+      await refreshOpen();
+      say("已重命名");
+    });
+    r.querySelector("#editInput")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") r.querySelector("#btnEditSave")?.click();
+    });
+    r.querySelector("#btnNewSave")?.addEventListener("click", async () => {
+      const input = r.querySelector("#newInput");
+      const text = (input?.value || "").trim();
+      const mode = host.newMode;
+      if (!mode) return;
+      if (mode.kind === "group") {
+        if (!text) return;
+        if (mode.targetId) {
+          // P0：组右键「新建子组」——挂到该分组下
+          editOp.createGroupUnder(m, mode.targetId, text);
+        } else {
+          editOp.createGroupAt(m, mode.windowId, text);
+        }
+        await store.saveModel(m);
+        closeModal("modalNew", host.doc);
+        await refreshOpen();
+        say("已新建分组");
       } else {
-        editOp.createGroupAt(m, newMode.windowId, text);
+        editOp.setNote(m, mode.targetId, text);
+        await store.saveModel(m);
+        closeModal("modalNew", host.doc);
+        await refreshOpen();
+        say("备注已保存");
       }
-      await store.saveModel(m);
-      closeModal("modalNew");
-      await render();
-      say("已新建分组");
-    } else {
-      editOp.setNote(m, newMode.targetId, text);
-      await store.saveModel(m);
-      closeModal("modalNew");
-      await render();
-      say("备注已保存");
-    }
-    newMode = null;
-  });
-  root.querySelector("#newInput")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") root.querySelector("#btnNewSave")?.click();
-  });
+      host.newMode = null;
+    });
+    r.querySelector("#newInput")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") r.querySelector("#btnNewSave")?.click();
+    });
+  };
+  bindEditNewModals(mainHost);
 
   // ---- #30 复制（范围按对象自动判定，默认参数直出） ----
   const copyNode = async (id) => {
@@ -645,13 +679,16 @@ export async function bootShell(root) {
 
   // U2 / Q2（2026-11-24 UI 审计）：行内「添加分组」——先弹命名框，空名称不创建；
   // 窗口行新建分组、分组行新建子组（与右键同语义，但入口常显在行内）。
-  const addGroupToContainer = (containerId) => {
+  const addGroupToContainer = (containerId, host = mainHost) => {
     const container = findNode(m, containerId);
     if (!container || (container.kind !== "window" && container.kind !== "group")) return;
     if (container.kind === "group") {
-      openNewModal({ kind: "group", windowId: windowIdOf(container), targetId: container.id });
+      openNewModal(
+        { kind: "group", windowId: windowIdOf(container), targetId: container.id },
+        host
+      );
     } else {
-      openNewModal({ kind: "group", windowId: container.id });
+      openNewModal({ kind: "group", windowId: container.id }, host);
     }
   };
 
@@ -1241,14 +1278,14 @@ export async function bootShell(root) {
       return new Set();
     }
   };
-  const runMenuAct = async (act, id, kind) => {
+  const runMenuAct = async (act, id, kind, host = mainHost) => {
     const node = findNode(m, id);
     if (!node) return;
     try {
       if (act === "edit" || act === "rename") {
-        openEditModal(id);
+        openEditModal(id, host);
       } else if (act === "note") {
-        openNewModal({ kind: "note", targetId: id });
+        openNewModal({ kind: "note", targetId: id }, host);
       } else if (act === "open-group" || act === "open-all") {
         const n = await tabsOp.openAll(chrome, m, id, await openUrlsNow());
         await applyOpenAllRebind(n);
@@ -1259,11 +1296,11 @@ export async function bootShell(root) {
         await refreshOpen();
         toast(`已关闭 ${n} 个网页`);
       } else if (act === "add-group") {
-        openNewModal({ kind: "group", windowId: kind === "window" ? id : windowIdOf(node) });
+        openNewModal({ kind: "group", windowId: kind === "window" ? id : windowIdOf(node) }, host);
       } else if (act === "add-subgroup" || act === "add-group-inline") {
         // U2：行内「添加分组」与右键「新建子组」同语义——分组行挂子组、窗口行挂分组
-        if (node.kind === "window") addGroupToContainer(id);
-        else openNewModal({ kind: "group", windowId: windowIdOf(node), targetId: id });
+        if (node.kind === "window") addGroupToContainer(id, host);
+        else openNewModal({ kind: "group", windowId: windowIdOf(node), targetId: id }, host);
       } else if (act === "fold") {
         collapsed = editOp.collapsedToggle(collapsed, id);
         await render();
@@ -1307,23 +1344,34 @@ export async function bootShell(root) {
   // ---- #30 工具栏：定位 / 展收全部 / 搜索 ----
   // U1（2026-11-24 UI 审计）：已移除顶部全局「新建分组」按钮（三处 quickbar 同步删除），
   // 新建分组入口保留在窗口/分组行内「添加分组」加号与右键菜单。
-  root.querySelector("#btnLocate")?.addEventListener("click", async () => {
-    // M4（2026-11-24 菜单审计）：定位「当前浏览器窗口正在激活的标签」——
-    // 先 query({active:true,currentWindow:true}) 拿真实 tabId，再按 tabId 反查模型叶子。
-    let activeId = null;
+  // 合并审计 P1-1 / 任务三：TabHarbor 自身工具页（与 align.js OWN_EXT_PAGES 同口径）。
+  // 纯路径片段匹配，不是出站 URL（不触发 C12 红线）。
+  const OWN_PAGE_RE = /\/(window\/window|home\/home|sidebar\/sidebar)\.html$/i;
+  // 定位当前激活标签——主页面与 PiP 共用同一套逻辑（G3：tabId-only，禁止 URL/标题兜底）。
+  // host 缺省为主页面；isPip 宿主使用自己的 view/body/渲染，结果通过 toast 广播到两端。
+  const locateActiveTab = async (host = mainHost) => {
+    let activeTab = null;
     try {
       if (typeof chrome?.tabs?.query === "function") {
         const actives = await chrome.tabs.query({ active: true, currentWindow: true });
-        const activeTab = actives && actives[0];
-        if (activeTab && activeTab.id != null) activeId = activeTab.id;
+        activeTab = actives && actives[0];
       }
     } catch {
-      activeId = null;
+      activeTab = null;
     }
-    // U1/R2（2026-11-24 UI 审计）：反查前先拉取真实窗口/标签快照并对齐模型，
-    // 把未归入的激活标签补入树（syncBrowserSnapshot），不轻易提示"不在书签树中"。
-    let target = activeId != null ? m.tabs.find((t) => t.tabId === activeId) : null;
-    if (activeId != null && !target) {
+    const activeId = activeTab && activeTab.id != null ? activeTab.id : null;
+    // Q1：激活页是 TabHarbor 内部页时给明确提示，不走通用「未归入书签树」。
+    if (activeTab && OWN_PAGE_RE.test(String(activeTab.url || activeTab.pendingUrl || ""))) {
+      toast("当前激活的是 TabHarbor 内部页，不在书签树中");
+      return;
+    }
+    if (activeId == null) {
+      toast("无法获取当前激活标签（无浏览器权限或无活动标签）");
+      return;
+    }
+    // tabId-only 反查；未命中先同步真实窗口/标签快照（含未配对窗口配对）再二次反查。
+    let target = m.tabs.find((t) => t.tabId === activeId);
+    if (!target) {
       try {
         const realWindows = await queryRealWindows();
         const openTabs = await queryOpenTabs();
@@ -1337,7 +1385,6 @@ export async function bootShell(root) {
             await store.saveModel(m);
             await applyOpenState();
           }
-          // 对齐后按 tabId 二次反查（补入的叶子带真实 tabId）
           target = m.tabs.find((t) => t.tabId === activeId);
         }
       } catch {
@@ -1345,24 +1392,29 @@ export async function bootShell(root) {
       }
     }
     if (!target) {
-      // 同步快照后仍无法归属，才给明确原因（区分无权限 / 激活页无法可靠归属）
-      toast(
-        activeId != null
-          ? "当前激活标签未归入书签树，且同步浏览器快照后仍无法归属"
-          : "无法获取当前激活标签（无浏览器权限或无活动标签）"
-      );
+      toast("当前激活标签未归入书签树，且同步浏览器快照后仍无法归属");
       return;
     }
-    selectedId = target.id;
+    // 命中后：按宿主写入选中态、展开祖链、渲染并滚动到可视区。
+    const viewCollapsed = host.view ? host.view.collapsed : collapsed;
+    const viewBody = host.view ? host.body : body;
+    host.view ? (host.view.selectedId = target.id) : (selectedId = target.id);
     let cur = findNode(m, target.parentId);
     while (cur) {
-      collapsed.delete(cur.id);
+      viewCollapsed.delete(cur.id);
       cur = cur.parentId ? findNode(m, cur.parentId) : null;
     }
-    await render();
-    const el = body.querySelector(`.leaf[data-id="${target.id}"]`);
+    if (host.view) {
+      if (host.render) await host.render();
+    } else {
+      await render();
+    }
+    const el = viewBody?.querySelector(`.leaf[data-id="${target.id}"]`);
     if (el) el.scrollIntoView({ block: "center" });
     toast("已定位当前激活标签");
+  };
+  root.querySelector("#btnLocate")?.addEventListener("click", async () => {
+    await locateActiveTab(mainHost);
   });
   root.querySelector("#btnToggleAll")?.addEventListener("click", async () => {
     // 展开收起全部（切换）：全展开 ↔ 全折叠
@@ -1385,102 +1437,108 @@ export async function bootShell(root) {
     startup: "openMode",
     backup: "backupTarget",
   };
-  const syncSettingRows = () => {
-    root.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
+  const syncSettingRows = (host = mainHost) => {
+    const r = host.root;
+    r.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
       const name = row.dataset.setting;
       const current = name === "theme" ? themeOf(settings) : settings[SETTING_KEY[name] || name];
       row.classList.toggle("selected", row.dataset.value === current);
     });
-    root.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
+    r.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
       const key = row.dataset.defcopy === "content" ? "copyContent" : "copyFormat";
       row.classList.toggle(
         "selected",
         row.dataset.value === (settings[key] || (key === "copyContent" ? "both" : "md"))
       );
     });
-    const lastPos = root.querySelector("#lastPosSwitch");
+    const lastPos = r.querySelector("#lastPosSwitch");
     if (lastPos) lastPos.classList.toggle("on", settings.restoreLast !== false);
   };
   const saveSettingsPatch = async (patch, okText) => {
     settings = await store.saveSettings(patch);
     m.settings = settings;
-    if (patch.theme) applyTheme(document, themeOf(settings));
-    syncSettingRows();
+    // P1-2：主题变更后同步到所有宿主文档（主页面 + PiP），使两端即时一致。
+    if (patch.theme) for (const h of allHosts()) applyTheme(h.doc, themeOf(settings));
+    for (const h of allHosts()) syncSettingRows(h);
     if (okText) say(okText);
   };
-  root.querySelector("#btnSettings")?.addEventListener("click", async () => {
-    syncSettingRows();
-    openModal("modalSetting");
-    syncBackupFields();
-    await refreshBackups();
-  });
-  root.querySelectorAll(".cat-tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      root.querySelectorAll(".cat-tab").forEach((t) => t.classList.toggle("active", t === tab));
-      root
-        .querySelectorAll(".cat-panel")
-        .forEach((p) => (p.hidden = p.dataset.panel !== tab.dataset.cat));
+  // 设置弹窗内部控件——宿主化，主页面与 PiP 共用同一套绑定（P0-1）。
+  const bindSettingPanelControls = (host) => {
+    const r = host.root;
+    r.querySelector("#btnSettings")?.addEventListener("click", async () => {
+      syncSettingRows(host);
+      openModal("modalSetting", host.doc);
+      syncBackupFields(host);
+      await refreshBackups(host);
     });
-  });
-  // L5（2026-11-24 主页审计）：设置「主页」分类入口 → 新标签打开扩展内部主页并配置。
-  root.querySelector("#homeCfgEntry")?.addEventListener("click", () => {
-    const url = homepage.resolveHomeUrl(chrome);
-    if (typeof chrome?.tabs?.create === "function") void chrome.tabs.create({ url });
-    say("已打开主页，可在此设置搜索引擎与常用网址");
-  });
-  root.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
-    row.addEventListener("click", () => {
-      const name = row.dataset.setting;
-      const value = row.dataset.value;
-      if (name === "theme")
-        void saveSettingsPatch(
-          { theme: value },
-          value === "dark" ? "已切换为深色主题" : "已切换为浅色主题"
+    r.querySelectorAll(".cat-tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        r.querySelectorAll(".cat-tab").forEach((t) => t.classList.toggle("active", t === tab));
+        r.querySelectorAll(".cat-panel").forEach(
+          (p) => (p.hidden = p.dataset.panel !== tab.dataset.cat)
         );
-      else if (name === "startup")
-        void saveSettingsPatch(
-          { openMode: value },
-          "打开方式已设为：" + (value === "window" ? "独立窗口" : "侧边栏")
-        );
-      // M6/B4 + U6（2026-11-24 UI 审计）：备份目标只留本地/GitHub——
-      // 去 localFormat 三格式；R7：backupTarget 仅记录「上次目标」并供定时 alarm 依赖，
-      // 手动备份由卡片显式确认触发。
-      else if (name === "backup") {
-        void saveSettingsPatch({ backupTarget: value });
-        // 点卡片标题行=选中目标并展开其配置区
-        const sub =
-          value === "github"
-            ? root.querySelector("#ghBackupSub")
-            : root.querySelector("#localBackupSub");
-        if (sub) sub.classList.remove("hidden");
-        const other =
-          value === "github"
-            ? root.querySelector("#localBackupSub")
-            : root.querySelector("#ghBackupSub");
-        if (other) other.classList.add("hidden");
-      }
+      });
     });
-  });
-  root.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
-    row.addEventListener("click", () => {
-      const key = row.dataset.defcopy === "content" ? "copyContent" : "copyFormat";
-      void saveSettingsPatch({ [key]: row.dataset.value });
+    // L5（2026-11-24 主页审计）：设置「主页」分类入口 → 新标签打开扩展内部主页并配置。
+    r.querySelector("#homeCfgEntry")?.addEventListener("click", () => {
+      const url = homepage.resolveHomeUrl(chrome);
+      if (typeof chrome?.tabs?.create === "function") void chrome.tabs.create({ url });
+      say("已打开主页，可在此设置搜索引擎与常用网址");
     });
-  });
-  root.querySelector("#lastPosSwitch")?.addEventListener("click", () => {
-    const next = settings.restoreLast === false;
-    void saveSettingsPatch(
-      { restoreLast: next },
-      next ? "已启用：在上次位置打开窗口" : "已关闭：每次居中打开窗口"
-    );
-  });
-  // M8/Q3：私有 Gist 开关（switch-row，即时保存）
-  root.querySelector("#ghPrivate")?.addEventListener("click", (e) => {
-    const btn = e.currentTarget;
-    const next = !btn.classList.contains("on");
-    btn.classList.toggle("on", next);
-    void saveSettingsPatch({ ghPrivate: next }, next ? "已设为私有 Gist" : "已设为公开 Gist");
-  });
+    r.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const name = row.dataset.setting;
+        const value = row.dataset.value;
+        if (name === "theme")
+          void saveSettingsPatch(
+            { theme: value },
+            value === "dark" ? "已切换为深色主题" : "已切换为浅色主题"
+          );
+        else if (name === "startup")
+          void saveSettingsPatch(
+            { openMode: value },
+            "打开方式已设为：" + (value === "window" ? "独立窗口" : "侧边栏")
+          );
+        // M6/B4 + U6（2026-11-24 UI 审计）：备份目标只留本地/GitHub——
+        // 去 localFormat 三格式；R7：backupTarget 仅记录「上次目标」并供定时 alarm 依赖，
+        // 手动备份由卡片显式确认触发。
+        else if (name === "backup") {
+          void saveSettingsPatch({ backupTarget: value });
+          const sub =
+            value === "github"
+              ? r.querySelector("#ghBackupSub")
+              : r.querySelector("#localBackupSub");
+          if (sub) sub.classList.remove("hidden");
+          const other =
+            value === "github"
+              ? r.querySelector("#localBackupSub")
+              : r.querySelector("#ghBackupSub");
+          if (other) other.classList.add("hidden");
+        }
+      });
+    });
+    r.querySelectorAll(".opt-row[data-defcopy]").forEach((row) => {
+      row.addEventListener("click", () => {
+        const key = row.dataset.defcopy === "content" ? "copyContent" : "copyFormat";
+        void saveSettingsPatch({ [key]: row.dataset.value });
+      });
+    });
+    r.querySelector("#lastPosSwitch")?.addEventListener("click", () => {
+      const next = settings.restoreLast === false;
+      void saveSettingsPatch(
+        { restoreLast: next },
+        next ? "已启用：在上次位置打开窗口" : "已关闭：每次居中打开窗口"
+      );
+    });
+    // M8/Q3：私有 Gist 开关（switch-row，即时保存）
+    r.querySelector("#ghPrivate")?.addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      const next = !btn.classList.contains("on");
+      btn.classList.toggle("on", next);
+      void saveSettingsPatch({ ghPrivate: next }, next ? "已设为私有 Gist" : "已设为公开 Gist");
+    });
+  };
+  bindSettingPanelControls(mainHost);
 
   // ---- 快捷键 / 指南弹窗 ----
   const keysList = root.querySelector("#keysList");
@@ -1504,8 +1562,8 @@ export async function bootShell(root) {
   };
   root.querySelector("#btnTheme")?.addEventListener("click", () => void toggleTheme());
   root.querySelector("#btnTrash")?.addEventListener("click", () => {
-    renderTrashList();
-    openModal("modalTrash");
+    renderTrashList(mainHost);
+    openModal("modalTrash", document);
   });
   root.querySelector("#btnLinks")?.addEventListener("click", async () => {
     // D4 修复：切换后立即重渲染 + toast 反馈（之前只存设置不渲染，视觉无反应）
@@ -1561,6 +1619,11 @@ export async function bootShell(root) {
     const body = host.body;
     const ctxMenu = host.ctxMenu;
     const view = host.view; // { collapsed:Set, selectedId, searchQ }
+    // 合并审计 P0-1：补齐完整宿主上下文——共享动作函数（弹窗/设置/备份/回收站/定位）
+    // 一律从 host 读取输入框与写入状态，禁止闭包主页面 root。
+    host.root = doc;
+    host.status = doc.querySelector("#dataStatus");
+    host.toastEl = doc.querySelector("#toast");
     const q = (sel) => doc.querySelector(sel);
 
     // 该宿主的树渲染（共享 renderTree + 共享派生态 openIds/favicons）
@@ -1587,6 +1650,18 @@ export async function bootShell(root) {
       }
       fillStaticPanels(doc);
     };
+    host.render = renderView; // 供 locateActiveTab(host) 在 PiP 宿主内刷新选中/滚动
+    // 合并审计 P0-1：PiP 弹窗/面板复用主页面同一套宿主化绑定，
+    // 使设置分类、外观/复制选项、开关、回收站、编辑/新建、备份/导入导出在 PiP 内全部可用。
+    bindEditNewModals(host);
+    bindSettingPanelControls(host);
+    bindBackupControls(host);
+    bindTrashControls(host);
+    if (opts.isPip) {
+      syncSettingRows(host);
+      syncBackupFields(host);
+      renderTrashList(host);
+    }
     if (opts.onReady) opts.onReady(renderView);
 
     // 就地选中，不整树重渲染（保留双击/第二次点击）
@@ -1614,7 +1689,8 @@ export async function bootShell(root) {
       } else if (act === "trash") {
         openModal("modalTrash", doc);
       } else if (act === "locate") {
-        root.querySelector("#btnLocate")?.click();
+        // 合并审计任务三：PiP 直接走共享 locateActiveTab，不再桥接点击主页面按钮。
+        await locateActiveTab(host);
       } else if (act === "toggle-all") {
         const all = [...m.windows.map((w) => w.id), ...m.groups.map((g) => g.id)];
         view.collapsed = view.collapsed.size >= all.length ? new Set() : new Set(all);
@@ -1687,7 +1763,7 @@ export async function bootShell(root) {
       const rename = e.target.closest('[data-act="rename"]');
       if (rename) {
         const holder = rename.closest(".node, .leaf");
-        if (holder?.dataset.id) openEditModal(holder.dataset.id);
+        if (holder?.dataset.id) openEditModal(holder.dataset.id, host);
         return;
       }
       const addTab = e.target.closest('[data-act="add-tab"]');
@@ -1699,7 +1775,7 @@ export async function bootShell(root) {
       const addGroup = e.target.closest('[data-act="add-group-inline"]');
       if (addGroup) {
         const node = addGroup.closest(".node");
-        if (node?.dataset.id) addGroupToContainer(node.dataset.id);
+        if (node?.dataset.id) addGroupToContainer(node.dataset.id, host);
         return;
       }
       const closeX = e.target.closest(".close-x");
@@ -1738,7 +1814,7 @@ export async function bootShell(root) {
       ctxMenu.classList.remove("show");
       const { id, kind } = ctxTarget;
       if (btn.dataset.act === "fold") toggleLocal(id);
-      else await runMenuAct(btn.dataset.act, id, kind);
+      else await runMenuAct(btn.dataset.act, id, kind, host);
       await renderView();
     });
 
@@ -1771,7 +1847,7 @@ export async function bootShell(root) {
         void openLeafById(id);
       } else if (e.key === "Delete" && id) {
         e.preventDefault();
-        await runMenuAct("del", id, "leaf");
+        await runMenuAct("del", id, "leaf", host);
         await renderView();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && id) {
         try {
@@ -1873,18 +1949,23 @@ export async function bootShell(root) {
       pipWin.document
         .querySelector("#btnPipClose")
         ?.addEventListener("click", () => pipWin?.close());
-      pipCtl = createShellController(
-        {
-          doc: pipWin.document,
-          body: pipWin.document.querySelector("#spBody"),
-          ctxMenu: pipWin.document.querySelector("#ctxMenu"),
-          view: pipState,
-        },
-        { isPip: true }
-      );
+      // 合并审计 P1-2：PiP 宿主上下文登记到 allHosts，say/toast/主题/设置行广播覆盖它。
+      pipHost = {
+        doc: pipWin.document,
+        root: pipWin.document,
+        body: pipWin.document.querySelector("#spBody"),
+        ctxMenu: pipWin.document.querySelector("#ctxMenu"),
+        view: pipState,
+        status: pipWin.document.querySelector("#dataStatus"),
+        toastEl: pipWin.document.querySelector("#toast"),
+        toastTimer: 0,
+        isPip: true,
+      };
+      pipCtl = createShellController(pipHost, { isPip: true });
       pipWin.addEventListener("pagehide", () => {
         pipWin = null;
         pipCtl = null;
+        pipHost = null;
         pipState.selectedId = null;
         pipRefresh = () => {};
         pipBtn?.classList.remove("active");
@@ -1901,9 +1982,9 @@ export async function bootShell(root) {
     .querySelector("#btnFullscreen")
     ?.addEventListener("click", () => toast("全屏卡片视图待实现"));
 
-  // 回收站列表（#31 接线：恢复 / 彻底删除）
-  const renderTrashList = () => {
-    const box = root.querySelector("#trashList");
+  // 回收站列表（#31 接线：恢复 / 彻底删除）——宿主化，主页面与 PiP 共用。
+  const renderTrashList = (host = mainHost) => {
+    const box = host.root.querySelector("#trashList");
     if (!box) return;
     const trash = m.trash || [];
     if (!trash.length) {
@@ -1920,30 +2001,33 @@ export async function bootShell(root) {
       })
       .join("");
   };
-  root.querySelector("#trashList")?.addEventListener("click", async (e) => {
-    const btn = e.target.closest("[data-trash-act]");
-    if (!btn) return;
-    const i = Number(btn.dataset.i);
-    if (btn.dataset.trashAct === "restore") {
-      const entry = trashOp.restoreEntry(m, i);
-      if (!entry) return;
-      await store.saveModel(m);
-      renderTrashList();
-      await refreshOpen();
-      toast("已恢复");
-    } else {
-      const entry = trashOp.purgeEntry(m, i);
-      if (!entry) return;
-      await store.saveModel(m);
-      renderTrashList();
-      await render();
-      toast("已彻底删除");
-    }
-  });
+  // 回收站列表的恢复 / 彻底删除——宿主化，主页面与 PiP 共用。
+  const bindTrashControls = (host) => {
+    host.root.querySelector("#trashList")?.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-trash-act]");
+      if (!btn) return;
+      const i = Number(btn.dataset.i);
+      if (btn.dataset.trashAct === "restore") {
+        const entry = trashOp.restoreEntry(m, i);
+        if (!entry) return;
+        await store.saveModel(m);
+        for (const h of allHosts()) renderTrashList(h);
+        await refreshOpen();
+        toast("已恢复");
+      } else {
+        const entry = trashOp.purgeEntry(m, i);
+        if (!entry) return;
+        await store.saveModel(m);
+        for (const h of allHosts()) renderTrashList(h);
+        await render();
+        toast("已彻底删除");
+      }
+    });
+  };
 
   // ---- 备份与导入导出（D6：原型 opt-row 面板） ----
-  const syncBackupFields = () => {
-    syncSettingRows(); // 备份目标 opt-row 选中态（R7：backupTarget 记录上次目标/定时依赖）
+  const syncBackupFields = (host = mainHost) => {
+    syncSettingRows(host); // 备份目标 opt-row 选中态（R7：backupTarget 记录上次目标/定时依赖）
     // U6（2026-11-24 UI 审计）：两张卡片配置区默认折叠，由「配置备份」按钮展开；
     // 这里不再按 backupTarget 抢先展开，避免打开设置时暴露配置/密码框。
     // M8/B5/Q3：Gist 字段（去 repo/branch/path）
@@ -1953,21 +2037,21 @@ export async function bootShell(root) {
       ["ghDesc", "ghDesc", "TabHarbor encrypted backup"],
       ["ghFileName", "ghFileName", "tabharbor-backup.tbh"],
     ]) {
-      const field = root.querySelector(`#${id}`);
-      if (field && document.activeElement !== field) field.value = settings[key] || fallback;
+      const field = host.root.querySelector(`#${id}`);
+      if (field && host.doc.activeElement !== field) field.value = settings[key] || fallback;
     }
-    const frequency = root.querySelector("#ghBackupFreq");
+    const frequency = host.root.querySelector("#ghBackupFreq");
     if (frequency) frequency.value = settings.ghBackupFreq || "off";
-    const priv = root.querySelector("#ghPrivate");
+    const priv = host.root.querySelector("#ghPrivate");
     if (priv) priv.classList.toggle("on", settings.ghPrivate !== false);
   };
-  const refreshBackups = async () => {
-    const list = root.querySelector("#backupList");
+  const refreshBackups = async (host = mainHost) => {
+    const list = host.root.querySelector("#backupList");
     if (!list) return;
     const backups = await io.getBackupList(chrome);
     list.replaceChildren(
       ...backups.map((item) => {
-        const option = document.createElement("option");
+        const option = host.doc.createElement("option");
         option.value = item.id;
         option.textContent = `${item.ts} · ${item.count} 条 · ${item.filename}`;
         return option;
@@ -1975,217 +2059,224 @@ export async function bootShell(root) {
     );
   };
   // U6（2026-11-24 UI 审计）：「配置备份」按钮展开对应卡片配置项（先配置、后确认）。
-  root.querySelectorAll("[data-backup-expand]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const target = btn.dataset.backupExpand === "github" ? "#ghBackupSub" : "#localBackupSub";
-      const other = btn.dataset.backupExpand === "github" ? "#localBackupSub" : "#ghBackupSub";
-      const sub = root.querySelector(target);
-      if (sub) sub.classList.toggle("hidden");
-      const sibling = root.querySelector(other);
-      if (sibling) sibling.classList.add("hidden");
+  // 备份与导入导出控件——宿主化，主页面与 PiP 共用同一套绑定（P0-1）。
+  const bindBackupControls = (host) => {
+    const r = host.root;
+    r.querySelectorAll("[data-backup-expand]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.backupExpand === "github" ? "#ghBackupSub" : "#localBackupSub";
+        const other = btn.dataset.backupExpand === "github" ? "#localBackupSub" : "#ghBackupSub";
+        const sub = r.querySelector(target);
+        if (sub) sub.classList.toggle("hidden");
+        const sibling = r.querySelector(other);
+        if (sibling) sibling.classList.add("hidden");
+      });
     });
-  });
-  // D6：导入入口（自动嗅探）通过隐藏文件输入
-  root.querySelectorAll("[data-import]").forEach((btn) => {
-    btn.addEventListener("click", () => root.querySelector("#importFile")?.click());
-  });
-  root.querySelector("#importFile")?.addEventListener("change", async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      // R2（m10454）：导入不做全量替换——解析后的内容合并为单个「导入书签」
-      // 新窗口（含内部层级），当前树数据/设置/回收站全部保留；导入的窗口
-      // 可整体拖出内容/拖入分组/删除，与普通窗口一致。
-      // B3（2026-11-24）：按内容嗅探格式，不按文件后缀——误命名文件也能正确识别。
-      let imported;
-      const text = await file.text();
-      const sniffed = io.sniffImport(text);
-      if (sniffed.kind === "linkmap") {
-        imported = await io.importLinkMap(sniffed.data);
-      } else if (sniffed.kind === "json") {
-        imported = await io.importJSON({ ...sniffed.data, settings: settings || {} }, m);
-      } else if (sniffed.kind === "html") {
-        imported = await io.importHTML(text, m);
-      } else if (sniffed.kind === "homepage") {
-        // M9/Q1：主页配置导入不解释格式、不弹格式选择；只保留一次破坏性覆盖确认，
-        // 确认后整体覆盖当前搜索引擎、自定义引擎和常用网址（不合并）。
-        if (!window.confirm("导入将整体覆盖当前搜索引擎、自定义引擎与常用网址，是否继续？")) return;
-        const cfg = homepage.importHomepageConfig(text);
-        settings = await store.saveSettings({ homepage: cfg });
-        m.settings = settings;
-        say("主页配置已导入并整体覆盖");
-        return;
-      } else if (sniffed.kind === "encrypted-backup") {
-        // R1/Q2：通用「导入数据」识别到加密备份 → 先输密码 → 解密校验 → 全量覆盖确认 → 才写库。
-        const password = window.prompt("这是加密备份快照。输入备份密码以解密：");
-        if (!password) {
-          say("已取消导入（密码不能为空）");
+    // D6：导入入口（自动嗅探）通过隐藏文件输入
+    r.querySelectorAll("[data-import]").forEach((btn) => {
+      btn.addEventListener("click", () => r.querySelector("#importFile")?.click());
+    });
+    r.querySelector("#importFile")?.addEventListener("change", async (event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        // R2（m10454）：导入不做全量替换——解析后的内容合并为单个「导入书签」
+        // 新窗口（含内部层级），当前树数据/设置/回收站全部保留；导入的窗口
+        // 可整体拖出内容/拖入分组/删除，与普通窗口一致。
+        // B3（2026-11-24）：按内容嗅探格式，不按文件后缀——误命名文件也能正确识别。
+        let imported;
+        const text = await file.text();
+        const sniffed = io.sniffImport(text);
+        if (sniffed.kind === "linkmap") {
+          imported = await io.importLinkMap(sniffed.data);
+        } else if (sniffed.kind === "json") {
+          imported = await io.importJSON({ ...sniffed.data, settings: settings || {} }, m);
+        } else if (sniffed.kind === "html") {
+          imported = await io.importHTML(text, m);
+        } else if (sniffed.kind === "homepage") {
+          // M9/Q1：主页配置导入不解释格式、不弹格式选择；只保留一次破坏性覆盖确认，
+          // 确认后整体覆盖当前搜索引擎、自定义引擎和常用网址（不合并）。
+          if (!window.confirm("导入将整体覆盖当前搜索引擎、自定义引擎与常用网址，是否继续？"))
+            return;
+          const cfg = homepage.importHomepageConfig(text);
+          settings = await store.saveSettings({ homepage: cfg });
+          m.settings = settings;
+          say("主页配置已导入并整体覆盖");
           return;
-        }
-        // 先解密 + validateTree 校验；失败在此抛出，绝不写库（R9 失败原因可理解）
-        let restored;
-        try {
-          restored = await io.restoreSealedSnapshot(text, password, m);
-        } catch (err) {
-          say("恢复快照失败：" + io.describeRestoreError(err));
-          return;
-        }
-        if (
-          !window.confirm(
-            "解密校验通过。导入将全量覆盖当前书签树、回收站、设置和主页配置，是否继续？"
+        } else if (sniffed.kind === "encrypted-backup") {
+          // R1/Q2：通用「导入数据」识别到加密备份 → 先输密码 → 解密校验 → 全量覆盖确认 → 才写库。
+          const password = window.prompt("这是加密备份快照。输入备份密码以解密：");
+          if (!password) {
+            say("已取消导入（密码不能为空）");
+            return;
+          }
+          // 先解密 + validateTree 校验；失败在此抛出，绝不写库（R9 失败原因可理解）
+          let restored;
+          try {
+            restored = await io.restoreSealedSnapshot(text, password, m);
+          } catch (err) {
+            say("恢复快照失败：" + io.describeRestoreError(err));
+            return;
+          }
+          if (
+            !window.confirm(
+              "解密校验通过。导入将全量覆盖当前书签树、回收站、设置和主页配置，是否继续？"
+            )
           )
-        )
+            return;
+          await store.saveModel(restored);
+          m = restored;
+          if (restored.settings) settings = await store.saveSettings(restored.settings);
+          await applyOpenState();
+          await refreshOpen();
+          say("加密备份已恢复（全量覆盖，含主页配置）");
           return;
+        } else {
+          throw new Error("无法识别的导入内容（应为 JSON、HTML 书签、主页配置或加密备份）");
+        }
+        const win = io.mergeAsImportedWindow(m, imported);
+        await store.saveModel(m);
+        await refreshOpen();
+        const n = imported.tabs.length + imported.groups.length;
+        say(`导入完成：「${win.title}」窗口已新增（${n} 个节点）`);
+      } catch (error) {
+        say("导入失败：" + error.message);
+      } finally {
+        event.target.value = "";
+      }
+    });
+    // U6/Q3（2026-11-24 UI 审计）：本地备份「先配置后确认」——密码在展开的卡片里填写，
+    // 点「本地备份」确认后才执行；密码不落盘、不进文件、不写日志、不做会话暂存。
+    r.querySelector("#btnBackupNow")?.addEventListener("click", async () => {
+      try {
+        const password = r.querySelector("#localBackupPwd")?.value || "";
+        if (!password) {
+          say("请先在配置项中填写备份密码");
+          return;
+        }
+        // M7/B2：本地加密完整快照（模型+回收站+设置含主页配置一起打包）
+        await io.manualBackup(m, settings, chrome.downloads, chrome, password);
+        const pwdInput = r.querySelector("#localBackupPwd");
+        if (pwdInput) pwdInput.value = ""; // 用完即清，不暂存
+        await refreshBackups();
+        say("已创建加密快照并下载（.tbh，恢复需输入密码）");
+      } catch (error) {
+        say("备份失败：" + io.describeRestoreError(error));
+      }
+    });
+    // Q3（2026-11-24 UI 审计）：GitHub 备份两步流程第二步——
+    // 第一步「保存并校验配置」成功后，才允许单独点「确认备份」上传加密完整包。
+    r.querySelector("#btnBackupGithub")?.addEventListener("click", async () => {
+      try {
+        if (!settings.ghToken) {
+          say("请先在配置卡片点击「保存并校验配置」并完成授权");
+          return;
+        }
+        const password = r.querySelector("#ghBackupPwd")?.value || "";
+        if (!password) {
+          say("请填写备份密码后再确认备份");
+          return;
+        }
+        const gistSettings = { ...settings, ghBackupPassword: password };
+        const result = await io.runAutoBackup(chrome, m, gistSettings);
+        const pwdInput = r.querySelector("#ghBackupPwd");
+        if (pwdInput) pwdInput.value = ""; // 密码用完即清
+        if (result.gistId && result.gistId !== settings.ghGistId) {
+          settings = await store.saveSettings({ ghGistId: result.gistId });
+          m.settings = settings;
+          syncBackupFields();
+        }
+        say(`加密快照已备份到私有 Gist：${result.gistId}`);
+      } catch (error) {
+        say("备份失败：" + io.describeRestoreError(error));
+      }
+    });
+    // Q5：独立明文 HTML 书签导出（不属于加密备份，方便导入其他浏览器）
+    r.querySelector("#btnExportBookmarksHtml")?.addEventListener("click", async () => {
+      try {
+        const result = await io.exportBookmarksHtml(m, chrome.downloads);
+        say("明文书签已导出：" + result.filename);
+      } catch (error) {
+        say("导出失败：" + error.message);
+      }
+    });
+    const saveGitHubSettings = async (patch) => {
+      try {
+        settings = await store.saveSettings(patch);
+        m.settings = settings;
+        syncBackupFields();
+        say("GitHub 备份设置已保存");
+      } catch (error) {
+        say("设置保存失败：" + error.message);
+      }
+    };
+    root
+      .querySelector("#ghBackupFreq")
+      ?.addEventListener(
+        "change",
+        (event) => void saveGitHubSettings({ ghBackupFreq: event.target.value })
+      );
+    r.querySelector("#btnAuthorizeGithub")?.addEventListener("click", async () => {
+      try {
+        const patch = {
+          ghToken: r.querySelector("#ghToken")?.value.trim() || "",
+          ghGistId: r.querySelector("#ghGistId")?.value.trim() || "",
+          ghDesc: r.querySelector("#ghDesc")?.value.trim() || "TabHarbor encrypted backup",
+          ghFileName: r.querySelector("#ghFileName")?.value.trim() || "tabharbor-backup.tbh",
+          ghPrivate: r.querySelector("#ghPrivate")
+            ? r.querySelector("#ghPrivate").classList.contains("on")
+            : true,
+          backupTarget: "github",
+        };
+        if (!patch.ghToken) {
+          say("请填写 GitHub 访问令牌（用于创建私有 Gist）");
+          return;
+        }
+        const granted = await chrome.permissions.request({ origins: ["https://api.github.com/*"] });
+        if (!granted) {
+          say("未授予 GitHub 权限；未开始备份");
+          return;
+        }
+        await saveGitHubSettings(patch);
+        // Q3：第一步只保存并校验配置，不上传；上传由「确认备份」单独触发。
+        // B10/R8：明确提示 Token 明文保存在本机扩展存储。
+        say(
+          "Gist 配置已保存并校验通过（Token 以明文保存在本机，请勿在公用设备使用）；现在可填密码点「确认备份」"
+        );
+      } catch (error) {
+        say("GitHub 配置校验失败：" + io.describeRestoreError(error));
+      }
+    });
+    r.querySelector("#btnRestoreBackup")?.addEventListener("click", async () => {
+      const backupId = r.querySelector("#backupList")?.value;
+      if (!backupId) {
+        say("请先选择一个本地快照");
+        return;
+      }
+      if (!window.confirm("恢复会全量替换当前树数据与设置（含主页配置），是否继续？")) return;
+      // Q2：恢复加密快照要求输入密码，不落盘、不暂存
+      const password = window.prompt("输入该备份的密码以解密恢复：");
+      if (!password) {
+        say("已取消恢复（密码不能为空）");
+        return;
+      }
+      try {
+        // B9：restoreBackup 内部先解密 + importJSON/validateTree，失败即抛错、不写库
+        const restored = await io.restoreBackup(backupId, m, chrome, password);
         await store.saveModel(restored);
         m = restored;
         if (restored.settings) settings = await store.saveSettings(restored.settings);
         await applyOpenState();
-        await render();
-        say("加密备份已恢复（全量覆盖，含主页配置）");
-        return;
-      } else {
-        throw new Error("无法识别的导入内容（应为 JSON、HTML 书签、主页配置或加密备份）");
+        await refreshOpen();
+        say("加密快照已恢复（含主页配置）");
+      } catch (error) {
+        // R9：区分密码错误 / 文件损坏 / 结构非法 / 版本不兼容，给出可理解原因；失败未写库
+        say("恢复失败：" + io.describeRestoreError(error));
       }
-      const win = io.mergeAsImportedWindow(m, imported);
-      await store.saveModel(m);
-      await refreshOpen();
-      const n = imported.tabs.length + imported.groups.length;
-      say(`导入完成：「${win.title}」窗口已新增（${n} 个节点）`);
-    } catch (error) {
-      say("导入失败：" + error.message);
-    } finally {
-      event.target.value = "";
-    }
-  });
-  // U6/Q3（2026-11-24 UI 审计）：本地备份「先配置后确认」——密码在展开的卡片里填写，
-  // 点「本地备份」确认后才执行；密码不落盘、不进文件、不写日志、不做会话暂存。
-  root.querySelector("#btnBackupNow")?.addEventListener("click", async () => {
-    try {
-      const password = root.querySelector("#localBackupPwd")?.value || "";
-      if (!password) {
-        say("请先在配置项中填写备份密码");
-        return;
-      }
-      // M7/B2：本地加密完整快照（模型+回收站+设置含主页配置一起打包）
-      await io.manualBackup(m, settings, chrome.downloads, chrome, password);
-      const pwdInput = root.querySelector("#localBackupPwd");
-      if (pwdInput) pwdInput.value = ""; // 用完即清，不暂存
-      await refreshBackups();
-      say("已创建加密快照并下载（.tbh，恢复需输入密码）");
-    } catch (error) {
-      say("备份失败：" + io.describeRestoreError(error));
-    }
-  });
-  // Q3（2026-11-24 UI 审计）：GitHub 备份两步流程第二步——
-  // 第一步「保存并校验配置」成功后，才允许单独点「确认备份」上传加密完整包。
-  root.querySelector("#btnBackupGithub")?.addEventListener("click", async () => {
-    try {
-      if (!settings.ghToken) {
-        say("请先在配置卡片点击「保存并校验配置」并完成授权");
-        return;
-      }
-      const password = root.querySelector("#ghBackupPwd")?.value || "";
-      if (!password) {
-        say("请填写备份密码后再确认备份");
-        return;
-      }
-      const gistSettings = { ...settings, ghBackupPassword: password };
-      const result = await io.runAutoBackup(chrome, m, gistSettings);
-      const pwdInput = root.querySelector("#ghBackupPwd");
-      if (pwdInput) pwdInput.value = ""; // 密码用完即清
-      if (result.gistId && result.gistId !== settings.ghGistId) {
-        settings = await store.saveSettings({ ghGistId: result.gistId });
-        m.settings = settings;
-        syncBackupFields();
-      }
-      say(`加密快照已备份到私有 Gist：${result.gistId}`);
-    } catch (error) {
-      say("备份失败：" + io.describeRestoreError(error));
-    }
-  });
-  // Q5：独立明文 HTML 书签导出（不属于加密备份，方便导入其他浏览器）
-  root.querySelector("#btnExportBookmarksHtml")?.addEventListener("click", async () => {
-    try {
-      const result = await io.exportBookmarksHtml(m, chrome.downloads);
-      say("明文书签已导出：" + result.filename);
-    } catch (error) {
-      say("导出失败：" + error.message);
-    }
-  });
-  const saveGitHubSettings = async (patch) => {
-    try {
-      settings = await store.saveSettings(patch);
-      m.settings = settings;
-      syncBackupFields();
-      say("GitHub 备份设置已保存");
-    } catch (error) {
-      say("设置保存失败：" + error.message);
-    }
+    });
   };
-  root
-    .querySelector("#ghBackupFreq")
-    ?.addEventListener(
-      "change",
-      (event) => void saveGitHubSettings({ ghBackupFreq: event.target.value })
-    );
-  root.querySelector("#btnAuthorizeGithub")?.addEventListener("click", async () => {
-    try {
-      const patch = {
-        ghToken: root.querySelector("#ghToken")?.value.trim() || "",
-        ghGistId: root.querySelector("#ghGistId")?.value.trim() || "",
-        ghDesc: root.querySelector("#ghDesc")?.value.trim() || "TabHarbor encrypted backup",
-        ghFileName: root.querySelector("#ghFileName")?.value.trim() || "tabharbor-backup.tbh",
-        ghPrivate: root.querySelector("#ghPrivate")
-          ? root.querySelector("#ghPrivate").classList.contains("on")
-          : true,
-        backupTarget: "github",
-      };
-      if (!patch.ghToken) {
-        say("请填写 GitHub 访问令牌（用于创建私有 Gist）");
-        return;
-      }
-      const granted = await chrome.permissions.request({ origins: ["https://api.github.com/*"] });
-      if (!granted) {
-        say("未授予 GitHub 权限；未开始备份");
-        return;
-      }
-      await saveGitHubSettings(patch);
-      // Q3：第一步只保存并校验配置，不上传；上传由「确认备份」单独触发。
-      // B10/R8：明确提示 Token 明文保存在本机扩展存储。
-      say(
-        "Gist 配置已保存并校验通过（Token 以明文保存在本机，请勿在公用设备使用）；现在可填密码点「确认备份」"
-      );
-    } catch (error) {
-      say("GitHub 配置校验失败：" + io.describeRestoreError(error));
-    }
-  });
-  root.querySelector("#btnRestoreBackup")?.addEventListener("click", async () => {
-    const backupId = root.querySelector("#backupList")?.value;
-    if (!backupId) {
-      say("请先选择一个本地快照");
-      return;
-    }
-    if (!window.confirm("恢复会全量替换当前树数据与设置（含主页配置），是否继续？")) return;
-    // Q2：恢复加密快照要求输入密码，不落盘、不暂存
-    const password = window.prompt("输入该备份的密码以解密恢复：");
-    if (!password) {
-      say("已取消恢复（密码不能为空）");
-      return;
-    }
-    try {
-      // B9：restoreBackup 内部先解密 + importJSON/validateTree，失败即抛错、不写库
-      const restored = await io.restoreBackup(backupId, m, chrome, password);
-      await store.saveModel(restored);
-      m = restored;
-      if (restored.settings) settings = await store.saveSettings(restored.settings);
-      await applyOpenState();
-      await render();
-      say("加密快照已恢复（含主页配置）");
-    } catch (error) {
-      // R9：区分密码错误 / 文件损坏 / 结构非法 / 版本不兼容，给出可理解原因；失败未写库
-      say("恢复失败：" + io.describeRestoreError(error));
-    }
-  });
+  bindBackupControls(mainHost);
+  bindTrashControls(mainHost);
 
   // ---- 浏览器标签事件 → 实时刷新打开态（D8 联带修复）----
   // 刚 create 的标签 url 为 ""、真实地址在 pendingUrl，导航提交后才落 url；
@@ -2208,7 +2299,11 @@ export async function bootShell(root) {
     }
     if (chrome.tabs.onUpdated)
       chrome.tabs.onUpdated.addListener((tabId, info) => {
-        if (info.url || info.status === "complete") tabsChanged();
+        // 合并审计 P0-3（2026-11-24）：加载期也需去抖刷新——导航提交前 status=loading、
+        // info.url 尚未提交（目标在 pendingUrl），若只在 complete 刷新会停留在灰色。
+        // 沿用 150ms 批量去抖，不逐事件整树重渲染。
+        if (info.url || info.status === "complete" || info.status === "loading" || info.pendingUrl)
+          tabsChanged();
       });
   }
   // D13a：面板激活 / 聚焦时主动拉一次快照兜底（后台事件漏发或 SW 未唤醒时）

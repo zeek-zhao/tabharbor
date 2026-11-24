@@ -3152,12 +3152,15 @@ step("那么", "主页页含配置导入导出按钮", () => {
 // ===== M4 定位当前激活标签（静态契约）=====
 step("那么", "定位逻辑按 active 查询并反查 tabId", () => {
   const src = repoFile("src/ui/shell.js");
-  // 取 btnLocate 的 addEventListener 实现段（用 addEventListener 锚点而非首次出现）
-  const anchor = src.indexOf('root.querySelector("#btnLocate")?.addEventListener');
-  const seg = src.slice(anchor, anchor + 1400);
+  // 合并审计任务三：定位抽成共享 locateActiveTab(host)，主页面与 PiP 复用。
+  const anchor = src.indexOf("const locateActiveTab = async");
+  if (anchor < 0) throw new Error("缺共享 locateActiveTab(host)");
+  const seg = src.slice(anchor, anchor + 2200);
   if (!seg.includes("active: true") || !seg.includes("currentWindow: true"))
     throw new Error("定位未查询 active/currentWindow");
   if (!seg.includes("t.tabId === activeId")) throw new Error("未按 tabId 反查模型叶子");
+  if (/t\.url ===|title ===/.test(seg))
+    throw new Error("定位引入了 URL/标题兜底（违反 tabId-only）");
 });
 
 // ===== M7/Q6 加密完整快照含主页配置（静态契约）=====
@@ -3336,11 +3339,14 @@ step("那么", "本地与 GitHub 备份为先配置后确认的两步卡片", ()
 // U1/R2：定位前同步浏览器快照（静态）
 step("那么", "定位前先同步浏览器快照再反查", () => {
   const src = repoFile("src/ui/shell.js");
-  const anchor = src.indexOf('root.querySelector("#btnLocate")?.addEventListener');
-  const seg = src.slice(anchor, anchor + 2200);
+  const anchor = src.indexOf("const locateActiveTab = async");
+  if (anchor < 0) throw new Error("缺共享 locateActiveTab(host)");
+  const seg = src.slice(anchor, anchor + 3200);
   if (!seg.includes("syncBrowserSnapshot")) throw new Error("定位前未同步浏览器快照");
   if (!seg.includes("queryRealWindows") || !seg.includes("queryOpenTabs"))
     throw new Error("定位同步未复用真实窗口/标签查询");
+  if (!seg.includes("OWN_PAGE_RE") || !seg.includes("内部页"))
+    throw new Error("定位未给内部页明确提示");
 });
 // R5：指南文案同步（静态）
 step("那么", "指南文案反映三分类与右下角反馈", () => {
@@ -3352,4 +3358,144 @@ step("那么", "指南文案反映三分类与右下角反馈", () => {
     throw new Error("指南仍写右下角 FAB 反馈入口");
   if (!guide.includes("指南") || !guide.includes("右侧的 GitHub") || !guide.includes("外观"))
     throw new Error("指南未同步新分类/页脚反馈入口");
+});
+
+// ===== 2026-11-24 合并审计（18_merge_audit.feature，基线 9adc32b）=====
+// 任务一：叶子右键菜单收敛
+step("那么", "叶子右键菜单模板仅一项且为删除", () => {
+  const html = menu.menuHtml("leaf");
+  const count = (html.match(/data-act=/g) || []).length;
+  if (count !== 1) throw new Error(`叶子菜单项数=${count}，应为 1`);
+  if (!html.includes('data-act="del"') || !html.includes("删除到回收站"))
+    throw new Error("叶子菜单缺删除到回收站");
+  if (!html.includes('class="mi danger"')) throw new Error("删除项未标危险色");
+});
+step("那么", "叶子右键菜单不再暴露备注与复制动作", () => {
+  const html = menu.menuHtml("leaf");
+  for (const bad of ['data-act="note"', 'data-act="copy"', 'data-act="edit"', 'data-act="rename"'])
+    if (html.includes(bad)) throw new Error(`叶子菜单仍暴露 ${bad}`);
+});
+
+// 任务四：打开态派生（静态契约）
+step("那么", "打开态派生使用存活 tabId 集合不按 URL 过滤", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("async function deriveOpenState");
+  const seg = src.slice(a, src.indexOf("// 浏览器当前打开的页面", a));
+  if (!seg.includes("liveTabs") || !seg.includes("t.id != null"))
+    throw new Error("未使用存活 tabId 集合 liveTabs");
+  if (/filter\(\(t\)\s*=>\s*String\(t\.url/.test(seg))
+    throw new Error("打开态派生仍按 URL 非空过滤");
+  if (!seg.includes("computeOpenIds")) throw new Error("未调用 computeOpenIds");
+});
+step("那么", "打开态展示 URL 回退 pendingUrl 且不参与点亮", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("async function deriveOpenState");
+  const seg = src.slice(a, src.indexOf("// 浏览器当前打开的页面", a));
+  if (!seg.includes("t.pendingUrl")) throw new Error("展示 URL 未回退 pendingUrl");
+  if (!seg.includes("仅用于")) throw new Error("未标注 pendingUrl 不参与点亮");
+});
+step("那么", "computeOpenIds 仅接收 tabId", () => {
+  const src = repoFile("src/core/align.js");
+  const a = src.indexOf("export function computeOpenIds");
+  const seg = src.slice(a, a + 500);
+  if (!seg.includes(".map((t) => t.id)")) throw new Error("computeOpenIds 未只取 id");
+  if (/"url"|t\.url/.test(seg)) throw new Error("computeOpenIds 入参仍含 URL");
+});
+step("那么", "onUpdated 覆盖 loading 与 complete 与 url 事件", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("chrome.tabs.onUpdated.addListener");
+  const seg = src.slice(a, a + 500);
+  for (const k of [
+    'info.status === "loading"',
+    'info.status === "complete"',
+    "info.url",
+    "info.pendingUrl",
+  ])
+    if (!seg.includes(k)) throw new Error(`onUpdated 未覆盖 ${k}`);
+});
+step("假如", "一个含窗口分组标签的模型且标签绑定 tabId", () => {
+  ctx.m = {
+    windows: [{ id: "w1", title: "W", kind: "window" }],
+    groups: [{ id: "g1", title: "G", parentId: "w1", kind: "group" }],
+    tabs: [
+      {
+        id: "t1",
+        title: "T",
+        url: "https://example.com/",
+        parentId: "g1",
+        kind: "tab",
+        tabId: 1001,
+      },
+    ],
+    trash: [],
+  };
+});
+step("当", "以仅含 tabId 的存活标签派生打开态", () => {
+  ctx.mergeOpenIds = align.computeOpenIds(ctx.m, [{ id: 1001 }]);
+});
+step("那么", "该标签与祖链分组窗口均在打开集合", () => {
+  for (const id of ["t1", "g1", "w1"])
+    if (!ctx.mergeOpenIds.has(id)) throw new Error(`打开集合缺 ${id}`);
+});
+
+// 任务三：定位加固
+step("那么", "定位逻辑严格 tabId-only 无 URL 兜底", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const locateActiveTab = async");
+  const seg = src.slice(a, a + 3200);
+  if (!seg.includes("t.tabId === activeId")) throw new Error("定位未按 tabId 反查");
+  if (/matchUrl|byUrl|t\.url ===/.test(seg)) throw new Error("定位引入 URL 兜底");
+});
+step("那么", "定位对 TabHarbor 内部页给出明确提示", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const locateActiveTab = async");
+  const seg = src.slice(a, a + 3200);
+  if (!seg.includes("OWN_PAGE_RE")) throw new Error("缺内部页检测正则");
+  if (!seg.includes("TabHarbor 内部页")) throw new Error("内部页提示文案缺失");
+});
+
+// 任务二：PiP 宿主化
+step("那么", "PiP 控制器绑定编辑新建设置备份回收站面板", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const createShellController");
+  const seg = src.slice(a, a + 2600);
+  for (const f of [
+    "bindEditNewModals(host)",
+    "bindSettingPanelControls(host)",
+    "bindBackupControls(host)",
+    "bindTrashControls(host)",
+  ])
+    if (!seg.includes(f)) throw new Error(`PiP 控制器缺 ${f}`);
+});
+step("那么", "状态提示与 toast 广播到所有宿主", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const allHosts");
+  const seg = src.slice(a, a + 700);
+  if (!seg.includes("for (const h of allHosts())")) throw new Error("say/toast 未遍历所有宿主");
+});
+step("那么", "PiP 主题应用同步到所有宿主文档", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const saveSettingsPatch");
+  const seg = src.slice(a, a + 500);
+  if (!seg.includes("applyTheme(h.doc")) throw new Error("主题未广播到宿主文档");
+});
+step("那么", "PiP 定位走共享 locateActiveTab 不桥接主页面按钮", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const createShellController");
+  const seg = src.slice(a, a + 6000);
+  if (!seg.includes("locateActiveTab(host)")) throw new Error("PiP 定位未走共享函数");
+  // runTool 的 locate 分支不得再点击主页面按钮
+  const loc = seg.indexOf('act === "locate"');
+  const branch = seg.slice(loc, loc + 200);
+  if (branch.includes('root.querySelector("#btnLocate")'))
+    throw new Error("PiP 定位仍桥接主页面按钮");
+});
+step("那么", "弹窗打开与保存按宿主文档读写输入", () => {
+  const src = repoFile("src/ui/shell.js");
+  const a = src.indexOf("const bindEditNewModals");
+  const seg = src.slice(a, a + 1600);
+  if (!seg.includes("const r = host.root") || !seg.includes('r.querySelector("#editInput")'))
+    throw new Error("编辑弹窗未按宿主读取输入");
+  if (!seg.includes('closeModal("modalEdit", host.doc)'))
+    throw new Error("编辑弹窗未关闭宿主文档弹窗");
 });

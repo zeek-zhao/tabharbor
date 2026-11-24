@@ -703,6 +703,66 @@ try {
     realTab
   );
   assert.equal(stillOpen, false, "PiP 行内关闭未关闭浏览器标签页（R7）");
+
+  // ===== 2026-11-24 合并审计任务二：PiP 弹窗宿主化——控件在 PiP 内真实可操作 =====
+  // 设置分类切换（不依赖主页面 DOM）：PiP 点「设置」→ 切「备份」分类 → 面板显示。
+  await pipPage.click("#btnSettings");
+  assert.ok(await pipPage.isVisible("#modalSetting"), "PiP 设置弹窗未打开");
+  await pipPage.click('#modalSetting .cat-tab[data-cat="backup"]');
+  assert.ok(
+    await pipPage.isVisible('#modalSetting .cat-panel[data-panel="backup"]'),
+    "PiP 内设置分类未切换（备份面板未显示）"
+  );
+  // 备份卡片「先配置后确认」：PiP 内点配置备份展开本地配置区。
+  await pipPage.click('#modalSetting [data-backup-expand="local"]');
+  assert.ok(await pipPage.isVisible("#localBackupSub"), "PiP 内备份配置区未展开（绑定未宿主化）");
+  // 外观主题：PiP 内点浅色选项 → PiP 文档 data-theme 即时变化（saveSettingsPatch 广播）。
+  await pipPage.click('#modalSetting .cat-tab[data-cat="appearance"]');
+  await pipPage.click('#modalSetting .opt-row[data-setting="theme"][data-value="light"]');
+  await pipPage.waitForFunction(
+    () => document.documentElement.getAttribute("data-theme") === "light",
+    undefined,
+    { timeout: 4000 }
+  );
+  const themeAfter = await pipPage.evaluate(() =>
+    document.documentElement.getAttribute("data-theme")
+  );
+  assert.equal(themeAfter, "light", "PiP 内主题切换未即时生效");
+  // 切回深色，避免影响后续段落。
+  await pipPage.click('#modalSetting .opt-row[data-setting="theme"][data-value="dark"]');
+  await pipPage.waitForFunction(
+    () => document.documentElement.getAttribute("data-theme") === "dark",
+    undefined,
+    { timeout: 4000 }
+  );
+  await pipPage.click('#modalSetting [data-modal-close="modalSetting"]');
+  // 回收站：PiP 内点工具栏回收站 → 列表容器渲染（宿主化 renderTrashList）。
+  await pipPage.click("#btnTrash");
+  assert.ok(await pipPage.isVisible("#modalTrash"), "PiP 回收站弹窗未打开");
+  assert.ok(
+    await pipPage.evaluate(
+      () => !!document.querySelector("#trashList .trash-empty, #trashList .trash-item")
+    ),
+    "PiP 回收站列表未渲染"
+  );
+  await pipPage.click('#modalTrash [data-modal-close="modalTrash"]');
+  // 重命名弹窗：PiP 内点叶子行尾铅笔 → 输入框按宿主填充当前标题（宿主化 openEditModal）。
+  const renameLeaf = await pipPage.evaluate(() => {
+    const el = document.querySelector(".leaf .rename-x");
+    if (!el) return null;
+    const leaf = el.closest(".leaf");
+    return { id: leaf.dataset.id, title: leaf.querySelector(".title")?.textContent || "" };
+  });
+  assert.ok(renameLeaf, "PiP 未找到可重命名叶子");
+  await pipPage.evaluate((id) => {
+    document.querySelector(`.leaf[data-id="${id}"] .rename-x`)?.click();
+  }, renameLeaf.id);
+  assert.ok(await pipPage.isVisible("#modalEdit"), "PiP 重命名弹窗未打开");
+  const editVal = await pipPage.evaluate(() => document.querySelector("#editInput")?.value || "");
+  assert.equal(editVal, renameLeaf.title, "PiP 重命名输入框未按宿主填充标题");
+  await pipPage.click('#modalEdit [data-modal-close="modalEdit"]');
+  console.log("E2E 合并审计任务二 PiP 弹窗宿主化（设置/备份/主题/回收站/重命名）通过");
+
   // 取消置顶：再次点击 → 浮窗关闭、按钮高亮清除
   await win.click("#btnPip");
   await win.waitForFunction(
