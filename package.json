@@ -1,6 +1,6 @@
 {
   "name": "tabharbor",
-  "version": "0.2.0",
+  "version": "0.3.0-preview.1",
   "private": true,
   "type": "module",
   "description": "TabHarbor v2 — Chrome MV3 标签管理扩展（窗口/分组/标签三层树，严格实时同步；TDD+BDD 闭环）",

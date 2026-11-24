@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TabHarbor",
-  "version": "0.2.0",
+  "version": "0.3.0.1",
+  "version_name": "0.3 Preview 1",
   "description": "窗口/分组/标签三层树，拖拽整理、搜索、浏览器实时同步，侧边栏/独立窗口/置顶小窗一致体验",
   "permissions": [
     "tabs",

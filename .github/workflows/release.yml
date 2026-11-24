@@ -29,7 +29,14 @@ jobs:
           npm run compliance
           npm run format:check
           npm run committer
+          npm run contrast
           npm test
+
+      - name: 安装 Chromium（真实浏览器 E2E）
+        run: npx playwright install chromium --with-deps
+
+      - name: 真实浏览器 E2E
+        run: npm run test:e2e
 
       - name: 打包扩展 zip（下载后解压即可加载）
         run: |

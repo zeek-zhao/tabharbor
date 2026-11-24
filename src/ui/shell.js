@@ -658,11 +658,13 @@ export async function bootShell(root) {
         }
       }
       // H2/L6：新建标签默认打开扩展内部主页
+      // P0-1：复用真实窗口（非新建）时插到该窗口激活网页右侧；离线宿主新建窗口时不指定索引
       const homeUrl = homepage.resolveHomeUrl(chrome);
+      const insert = rebound ? {} : await tabsOp.queryInsertAnchor(chrome, realWinId);
       const created =
         realWinId != null
-          ? await chrome.tabs.create({ url: homeUrl, windowId: realWinId })
-          : await chrome.tabs.create({ url: homeUrl });
+          ? await chrome.tabs.create({ url: homeUrl, windowId: realWinId, ...insert })
+          : await chrome.tabs.create({ url: homeUrl, ...insert });
       const tabId = created && created.id != null ? created.id : undefined;
       // L3：目标标签建好后清理 seed，避免残留新标签页 / 误关窗口
       if (seedId != null) await tabsOp.removeSeedTab(chrome, seedId, tabId);

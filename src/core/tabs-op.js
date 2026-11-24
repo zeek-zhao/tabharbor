@@ -34,6 +34,23 @@ export async function copyToClipboard(text, clipboardApi) {
   await clipboardApi.writeText(text);
 }
 
+// P0-1（2026-11-24 0.3 预览审计）：相邻插入锚点。
+// 在目标真实窗口 windowId 内查询激活标签作为锚点，插到它右侧：
+//   找到 → { index: anchor.index + 1, openerTabId: anchor.id }
+//   找不到 → {}（省略 index，由 Chrome 决定落点）
+// 索引只在目标 windowId 内计算，绝不跨窗口，避免把新标签插到错误窗口造成错位。
+export async function queryInsertAnchor(chromeApi, windowId) {
+  if (windowId == null || typeof chromeApi.tabs?.query !== "function") return {};
+  try {
+    const actives = await chromeApi.tabs.query({ windowId, active: true });
+    const anchor = actives && actives[0];
+    if (!anchor || anchor.id == null || anchor.index == null) return {};
+    return { index: anchor.index + 1, openerTabId: anchor.id };
+  } catch {
+    return {};
+  }
+}
+
 // D16：把「顶层模型窗口」解析为可承载标签的真实浏览器窗口句柄。
 //   winId 有效 → 直接用；
 //   winId 失效/为空（离线窗口/纯整理数据）→ windows.create 新建真实窗口；
@@ -127,10 +144,13 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
     };
   }
   const host = await resolveHostWindow(chromeApi, opts.m, topWin, bound);
+  // P0-1：复用已有真实窗口（非 rebound）时，查该窗口激活标签作为锚点插到右侧；
+  // 新建窗口（rebound）只有 seed 空白页，不指定索引，保持自然追加后清理 seed。
+  const insert = host.rebound ? {} : await queryInsertAnchor(chromeApi, host.windowId);
   const created =
     host.windowId != null
-      ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
-      : await chromeApi.tabs.create({ url: node.url });
+      ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId, ...insert })
+      : await chromeApi.tabs.create({ url: node.url, ...insert });
   const tabId = created && created.id != null ? created.id : undefined;
   // O3/D24：目标标签建好后再清理新窗口自带的空白 seed，避免误关窗口/误删目标标签
   if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
@@ -177,22 +197,30 @@ export async function openAll(chromeApi, m, nodeId, openUrls) {
     if (topWin) {
       host = await resolveHostWindow(chromeApi, m, topWin, topWin.windowId);
     }
+    // P0-1：复用真实窗口时查一次激活标签作锚点，整桶从锚点右侧连续递增插入，
+    // 保持模型叶子在该窗口内的先后顺序。新窗口（rebound）无锚点，不指定 index
+    // （seed 空白页在目标标签建好后清理，自然保留目标标签）；游离桶同理省略 index。
+    const anchor = host.rebound ? null : await queryInsertAnchor(chromeApi, host.windowId);
+    let cursor = anchor && anchor.index != null ? anchor.index : null;
     const tabIds = [];
     const leafIds = [];
     for (const leaf of leaves) {
       // L5/Q 定稿：叶子已绑定且该 tabId 仍存活 → 只跳过，不聚焦、不新建、不回填
+      // P0-1：跳过的叶子不占用插入游标，后续新标签仍紧邻锚点连续排列
       if (leaf.tabId != null && liveIds.has(leaf.tabId)) {
         skippedIds.push(leaf.id);
         continue;
       }
+      const insert = cursor != null ? { index: cursor, openerTabId: anchor.openerTabId } : {};
       const made =
         host.windowId != null
-          ? await chromeApi.tabs.create({ url: leaf.url, windowId: host.windowId })
-          : await chromeApi.tabs.create({ url: leaf.url });
+          ? await chromeApi.tabs.create({ url: leaf.url, windowId: host.windowId, ...insert })
+          : await chromeApi.tabs.create({ url: leaf.url, ...insert });
       const tabId = made && made.id != null ? made.id : undefined;
       if (tabId != null) tabIds.push(tabId);
       leafIds.push(leaf.id);
       created += 1;
+      if (cursor != null) cursor += 1;
     }
     // O3/D24：整桶叶子建完后清理新窗口自带的空白 seed（至少保留一个目标标签）
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabIds[0]);

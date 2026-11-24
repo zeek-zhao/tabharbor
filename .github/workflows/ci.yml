@@ -46,6 +46,9 @@ jobs:
       - name: 单一提交人门禁
         run: npm run committer
 
+      - name: 设计态对比度门禁（深/浅色）
+        run: npm run contrast
+
       - name: BDD 全量场景（TH2-BDD-001）
         run: npm test
 

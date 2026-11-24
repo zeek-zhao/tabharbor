@@ -204,23 +204,29 @@ export function makeChromeMock() {
       // R1：openTabs 条目可带显式 id（模拟浏览器稳定 tabId）；缺省按序分配
       // M4（2026-11-24）：支持 active/currentWindow 查询——优先返回标记为 active 的 tab，
       // 否则回退到 activeId，再回退到第一个（保持旧场景行为）。
+      // P0-1（0.3 预览）：透传 index/pendingUrl/status/windowId，供相邻插入锚点查询与
+      // 打开态加载期断言使用；query({windowId,active:true}) 只在该窗口内取激活锚点。
       query: async (info) => {
         const all = ctx.openTabs.map((t, i) => ({
           id: t.id ?? i + 1,
           url: t.url,
+          pendingUrl: t.pendingUrl,
+          status: t.status || "complete",
           title: t.title,
+          index: t.index ?? i,
           active: !!t.active || (ctx.activeId != null && (t.id ?? i + 1) === ctx.activeId),
-          windowId: 1,
-          currentWindow: true,
+          windowId: t.windowId ?? 1,
+          currentWindow: (t.windowId ?? 1) === 1,
         }));
-        if (info && (info.active === true || info.currentWindow === true)) {
-          if (info.active === true) {
-            const active = all.filter((t) => t.active);
-            return active.length ? active : all.slice(0, 1);
-          }
-          return all;
+        let out = all;
+        if (info && info.windowId != null) out = out.filter((t) => t.windowId === info.windowId);
+        if (info && info.active === true) {
+          const active = out.filter((t) => t.active);
+          // P0-1：带 windowId 的锚点查询严格语义——无激活标签返回空（省略 index）；
+          // 无 windowId 的定位查询保留历史 fallback（首个标签）以免破坏既有场景。
+          out = active.length ? active : info.windowId != null ? [] : out.slice(0, 1);
         }
-        return all;
+        return out;
       },
       onCreated: { addListener: () => {} },
       onRemoved: { addListener: () => {} },
@@ -231,8 +237,10 @@ export function makeChromeMock() {
     },
     windows: {
       // F2（m11442）：真实窗口存活探测——仅 id=1（当前窗口）存在，其余视为失效
+      // P0-1：测试可通过 ctx.aliveWindowIds 注入额外存活窗口（锚点跨窗口隔离场景）
       get: async (id) => {
-        if (Number(id) === 1) return { id: 1 };
+        if (Number(id) === 1 || (ctx.aliveWindowIds || []).includes(Number(id)))
+          return { id: Number(id) };
         throw new Error(`窗口 ${id} 不存在`);
       },
       getAll: async () => [
@@ -3498,4 +3506,152 @@ step("那么", "弹窗打开与保存按宿主文档读写输入", () => {
     throw new Error("编辑弹窗未按宿主读取输入");
   if (!seg.includes('closeModal("modalEdit", host.doc)'))
     throw new Error("编辑弹窗未关闭宿主文档弹窗");
+});
+
+// ===== 0.3 预览发布审计 P0-1 新标签相邻插入（19_adjacent_insert.feature）=====
+step("假如", "一个含两个窗口的标签树且含可打开叶子", () => {
+  ctx.m = model.buildModel();
+  const w1 = model.addWindow(ctx.m, "窗口甲", "wA", 1);
+  model.addWindow(ctx.m, "窗口乙", "wB", 7);
+  const g = model.addGroup(ctx.m, "开发", w1.id, "gDev");
+  ctx.named["开发"] = g;
+  const work = model.addTab(ctx.m, "工作台", tabUrl("工作台"), g.id, "tWork");
+  ctx.named["工作台"] = work;
+  ctx.mock = makeChromeMock();
+  ctx.openTabs = [];
+});
+
+// 在当前窗口(1)注入一个指定 index/id 的激活锚点
+step("假如", "当前窗口激活标签索引为 {} 且 id 为 {}", (index, id) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.openTabs.push({
+    id: Number(id),
+    url: tabUrl("锚点"),
+    title: "锚点",
+    index: Number(index),
+    windowId: 1,
+    active: true,
+  });
+});
+
+step("假如", "当前窗口没有激活标签", () => {
+  ctx.openTabs = [
+    { id: 1, url: tabUrl("无锚点页"), title: "无锚点页", index: 0, windowId: 1, active: false },
+  ];
+  ctx.activeId = null;
+});
+
+step("当", "打开树中标签 {}", async (title) => {
+  const tab = ctx.named[title] || findAnyByTitle(title);
+  const opts = {
+    windowId: model.boundWindowId(ctx.m, tab.id),
+    topWindow: model.topWindowOf(ctx.m, tab.id),
+    m: ctx.m,
+  };
+  ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), opts);
+});
+
+step("当", "在窗口 {} 打开树中标签 {}", async (winId, title) => {
+  const tab = ctx.named[title] || findAnyByTitle(title);
+  const opts = {
+    windowId: Number(winId),
+    topWindow: model.topWindowOf(ctx.m, tab.id),
+    m: ctx.m,
+  };
+  ctx.openResult = await ops.openTab(ctx.mock.chrome, tab, openUrlsOf(), opts);
+});
+
+step("假如", "目标窗口 {} 激活标签索引为 {} 且 id 为 {}", (winId, index, id) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.aliveWindowIds = ctx.aliveWindowIds || [];
+  if (!ctx.aliveWindowIds.includes(Number(winId))) ctx.aliveWindowIds.push(Number(winId));
+  ctx.openTabs.push({
+    id: Number(id),
+    url: tabUrl("窗口锚点"),
+    title: "窗口锚点",
+    index: Number(index),
+    windowId: Number(winId),
+    active: true,
+  });
+});
+
+step("假如", "当前窗口 {} 另有激活标签索引为 {} 且 id 为 {}", (winId, index, id) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.openTabs.push({
+    id: Number(id),
+    url: tabUrl("当前锚点"),
+    title: "当前锚点",
+    index: Number(index),
+    windowId: Number(winId),
+    active: true,
+  });
+});
+
+step("那么", "新建的浏览器标签索引为 {} 且 openerTabId 为 {}", (index, openerId) => {
+  const c = ctx.mock.calls.tabsCreate;
+  if (c.length !== 1) throw new Error(`tabs.create=${c.length} ≠ 1`);
+  const o = c[0];
+  if (o.index !== Number(index)) throw new Error(`index=${o.index} ≠ ${index}`);
+  if (o.openerTabId !== Number(openerId))
+    throw new Error(`openerTabId=${o.openerTabId} ≠ ${openerId}`);
+});
+
+step("那么", "新建标签位于当前窗口 {}", (winId) => {
+  const o = ctx.mock.calls.tabsCreate[0];
+  if (o.windowId !== Number(winId)) throw new Error(`windowId=${o.windowId} ≠ ${winId}`);
+});
+
+step("那么", "新建的浏览器标签创建参数不含 {}", (key) => {
+  const c = ctx.mock.calls.tabsCreate;
+  if (c.length !== 1) throw new Error(`tabs.create=${c.length} ≠ 1`);
+  if (Object.prototype.hasOwnProperty.call(c[0], key))
+    throw new Error(`create 参数含 ${key}=${c[0][key]}，应省略`);
+});
+
+step("那么", "没有新建浏览器标签且聚焦了现有标签", () => {
+  const c = ctx.mock.calls;
+  if (c.tabsCreate.length !== 0) throw new Error(`tabs.create=${c.tabsCreate.length} ≠ 0`);
+  if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
+    throw new Error("未聚焦现有标签");
+});
+
+step("假如", "开发分组含三个可打开叶子", () => {
+  const g = ctx.named["开发"];
+  // 清空开发组下背景已建的工作台，保证恰好三个待打开叶子
+  ctx.m.tabs = ctx.m.tabs.filter((t) => t.parentId !== g.id);
+  ctx.named["叶一"] = model.addTab(ctx.m, "叶一", tabUrl("叶一"), g.id, "leaf1");
+  ctx.named["叶二"] = model.addTab(ctx.m, "叶二", tabUrl("叶二"), g.id, "leaf2");
+  ctx.named["叶三"] = model.addTab(ctx.m, "叶三", tabUrl("叶三"), g.id, "leaf3");
+});
+
+step("当", "对开发分组执行打开全部", async () => {
+  const res = await ops.openAll(ctx.mock.chrome, ctx.m, ctx.named["开发"].id, openUrlsOf());
+  ctx.openAllResult = res;
+});
+
+step("那么", "批量新建 {} 个浏览器标签且索引依次为 {}", (n, csv) => {
+  const c = ctx.mock.calls.tabsCreate;
+  if (c.length !== Number(n)) throw new Error(`批量 tabs.create=${c.length} ≠ ${n}`);
+  const idx = c.map((o) => o.index).join(",");
+  if (idx !== String(csv)) throw new Error(`批量索引 [${idx}] ≠ ${csv}`);
+});
+
+step("那么", "批量新建标签均带 openerTabId {}", (openerId) => {
+  const c = ctx.mock.calls.tabsCreate;
+  for (const o of c)
+    if (o.openerTabId !== Number(openerId))
+      throw new Error(`批量 openerTabId=${o.openerTabId} ≠ ${openerId}`);
+});
+
+// P0-1：注入一个指定 id 的存活浏览器标签（用于已绑定 tabId 命中场景）
+step("假如", "浏览器已打开 id 为 {} 的存活标签", (id) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.openTabs.push({
+    id: Number(id),
+    url: tabUrl("工作台"),
+    title: "工作台",
+    index: 0,
+    windowId: 1,
+    active: true,
+  });
 });

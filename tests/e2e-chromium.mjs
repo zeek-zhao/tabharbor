@@ -320,6 +320,49 @@ try {
     { timeout: 5000 }
   );
   console.log("E2E D3 双击标签真实打开网页通过");
+  // P0-1 容器加号相邻插入（0.3 预览）：样例叶子所属窗口在真机为离线（新建窗口无锚点，
+  // 由 BDD 覆盖）；此处验证 P0-1 重点路径——已配对真实窗口的容器行加号新建主页标签，
+  // 必须插到该窗口激活网页右侧（index = anchor.index + 1 且 openerTabId = anchor.id）。
+  {
+    const pre = await win.evaluate(async () => {
+      const { windows } = await chrome.storage.local.get("windows");
+      const bound = (windows || []).find((w) => w.kind === "window" && w.windowId != null);
+      if (!bound) return { ok: false, why: "无已绑定真实窗口的窗口节点" };
+      const actives = await chrome.tabs.query({ windowId: bound.windowId, active: true });
+      const anchor = actives && actives[0];
+      if (!anchor || anchor.index == null) return { ok: false, why: "窗口无激活锚点标签" };
+      const btn = document.querySelector(`.node[data-id="${bound.id}"] [data-act="add-tab"]`);
+      if (!btn) return { ok: false, why: `窗口节点 ${bound.id} 无行内加号` };
+      const homeUrl = chrome.runtime.getURL("home/home.html");
+      const homeCount = (await chrome.tabs.query({ url: homeUrl })).length;
+      return {
+        ok: true,
+        winId: bound.windowId,
+        anchorId: anchor.id,
+        anchorIndex: anchor.index,
+        boundId: bound.id,
+        homeUrl,
+        homeCount,
+      };
+    });
+    assert.ok(pre.ok, `容器加号相邻插入前置失败：${pre.why}`);
+    await win.click(`.node[data-id="${pre.boundId}"] [data-act="add-tab"]`);
+    await win.waitForFunction(
+      ([u, n]) => new Promise((r) => chrome.tabs.query({ url: u }, (ts) => r(ts.length > n))),
+      [pre.homeUrl, pre.homeCount],
+      { timeout: 8000 }
+    );
+    const adj = await win.evaluate(async (exp) => {
+      const ts = await chrome.tabs.query({ url: exp.homeUrl });
+      const created = ts[ts.length - 1];
+      return {
+        ok: created.index === exp.anchorIndex + 1 && created.openerTabId === exp.anchorId,
+        why: `new.index=${created.index} opener=${created.openerTabId} anchor=${exp.anchorId}@${exp.anchorIndex}`,
+      };
+    }, pre);
+    assert.ok(adj.ok, `容器加号相邻插入断言失败：${adj.why}`);
+    console.log(`E2E P0-1 容器加号相邻插入（${adj.why}）通过`);
+  }
   // 2026-11-24 行内按钮审计：叶子已无「打开」按钮，双击叶子打开网页
   assert.equal(
     await win.evaluate(() => document.querySelectorAll(".leaf .open-x").length),
