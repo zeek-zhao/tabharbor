@@ -223,6 +223,40 @@ function bind() {
     void persist();
     renderSiteEditList();
   });
+
+  // M9/B6/Q4：主页配置导出/导入（独立配置文件）
+  $("#homeExportCfg")?.addEventListener("click", () => {
+    const content = hp.exportHomepageConfig(cfg);
+    const filename = "tabharbor-homepage-" + Date.now() + ".json";
+    const dataUrl =
+      "data:application/json;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(content)));
+    if (chromeApi?.downloads?.download) {
+      void chromeApi.downloads.download({ url: dataUrl, filename, saveAs: true });
+      say("主页配置已导出：" + filename);
+    } else {
+      say("当前环境不支持下载");
+    }
+  });
+  $("#homeImportCfg")?.addEventListener("click", () => $("#homeImportFile")?.click());
+  $("#homeImportFile")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const next = hp.importHomepageConfig(text);
+      // Q4：导入前弹窗确认，确认后整体覆盖（不合并）
+      if (!window.confirm("导入将整体覆盖当前搜索引擎与常用网址（不合并），是否继续？")) return;
+      cfg = next;
+      await persist();
+      renderEngineSelect();
+      renderSiteEditList();
+      say("主页配置已导入并整体覆盖");
+    } catch (err) {
+      say("主页配置导入失败：" + err.message);
+    } finally {
+      event.target.value = "";
+    }
+  });
 }
 
 async function boot() {

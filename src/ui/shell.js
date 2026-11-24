@@ -93,7 +93,8 @@ const GUIDE_HTML = `
   <li><b>双击打开：</b>双击标签即在浏览器打开；行内复制图标一键复制，末尾 X 关闭网页（仅已打开显示）。</li>
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
-  <li><b>右键菜单：</b>标签上编辑、备注、复制、删除；分组/窗口可整组打开、重命名、添加标签/新建分组、关闭、删除；删除项进入回收站。</li>
+  <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；右键只保留备注、复制、打开、关闭、删除——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站。</li>
+  <li><b>导入与备份（M5/M7/M8）：</b>导入按内容自动识别 JSON / HTML / 主页配置（不看后缀）；备份到本地或私有 GitHub Gist 均为加密完整快照（含书签+设置+主页配置），每次备份/恢复需输入密码，密码不保存；另有独立明文 HTML 书签导出。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；设置「主页」分类或主页右上角齿轮均可进入配置。</li>
@@ -419,6 +420,13 @@ export async function bootShell(root) {
           say("复制失败：" + err.message);
         }
       }
+      return;
+    }
+    const renameBtn = e.target.closest('[data-act="rename"]');
+    if (renameBtn) {
+      e.stopPropagation();
+      const host = renameBtn.closest(".node, .leaf");
+      if (host?.dataset.id) openEditModal(host.dataset.id);
       return;
     }
     const addTabBtn = e.target.closest('[data-act="add-tab"]');
@@ -1254,22 +1262,41 @@ export async function bootShell(root) {
   // U1（2026-11-24 UI 审计）：已移除顶部全局「新建分组」按钮（三处 quickbar 同步删除），
   // 新建分组入口保留在窗口/分组行内「添加分组」加号与右键菜单。
   root.querySelector("#btnLocate")?.addEventListener("click", async () => {
-    // 定位当前标签：找第一个已打开的标签，展开其祖先并滚动到可见
-    const firstOpen = m.tabs.find((t) => openIds.has(t.id));
-    if (!firstOpen) {
-      toast("没有已打开的标签");
+    // M4（2026-11-24 菜单审计）：定位「当前浏览器窗口正在激活的标签」——
+    // 先 query({active:true,currentWindow:true}) 拿真实 tabId，再按 tabId 反查模型叶子；
+    // 未命中（该激活页不在树里 / 无浏览器权限）给明确提示，不再退化成"第一个打开的标签"。
+    let activeId = null;
+    try {
+      if (typeof chrome?.tabs?.query === "function") {
+        const actives = await chrome.tabs.query({ active: true, currentWindow: true });
+        const activeTab = actives && actives[0];
+        if (activeTab && activeTab.id != null) activeId = activeTab.id;
+      }
+    } catch {
+      activeId = null;
+    }
+    // 反查：优先 tabId 精确命中；无 activeId 时才回退到第一个已打开叶子（兼容无权限环境）
+    const target =
+      (activeId != null && m.tabs.find((t) => t.tabId === activeId)) ||
+      (activeId == null ? m.tabs.find((t) => openIds.has(t.id)) : null);
+    if (!target) {
+      toast(
+        activeId != null
+          ? "当前激活的标签不在书签树中"
+          : "无法获取当前激活标签（或没有已打开的标签）"
+      );
       return;
     }
-    selectedId = firstOpen.id;
-    let cur = findNode(m, firstOpen.parentId);
+    selectedId = target.id;
+    let cur = findNode(m, target.parentId);
     while (cur) {
       collapsed.delete(cur.id);
       cur = cur.parentId ? findNode(m, cur.parentId) : null;
     }
     await render();
-    const el = body.querySelector(`.leaf[data-id="${firstOpen.id}"]`);
+    const el = body.querySelector(`.leaf[data-id="${target.id}"]`);
     if (el) el.scrollIntoView({ block: "center" });
-    toast("已定位当前标签");
+    toast("已定位当前激活标签");
   });
   root.querySelector("#btnToggleAll")?.addEventListener("click", async () => {
     // 展开收起全部（切换）：全展开 ↔ 全折叠
@@ -1291,7 +1318,6 @@ export async function bootShell(root) {
     theme: "theme",
     startup: "openMode",
     backup: "backupTarget",
-    localFormat: "localFormat",
   };
   const syncSettingRows = () => {
     root.querySelectorAll(".opt-row[data-setting]").forEach((row) => {
@@ -1350,15 +1376,10 @@ export async function bootShell(root) {
           { openMode: value },
           "打开方式已设为：" + (value === "window" ? "独立窗口" : "侧边栏")
         );
-      // D6：备份方式 / 本地格式（原型 pickBackup 联动子面板显隐）
+      // M6/B4：备份目标只留本地/Gist——选择后二级配置按需展开（去 localFormat 三格式）
       else if (name === "backup") {
         void saveSettingsPatch({ backupTarget: value });
         syncBackupFields();
-      } else if (name === "localFormat") {
-        void saveSettingsPatch(
-          { localFormat: value },
-          "本地备份格式已设为：" + value.toUpperCase()
-        );
       }
     });
   });
@@ -1374,6 +1395,13 @@ export async function bootShell(root) {
       { restoreLast: next },
       next ? "已启用：在上次位置打开窗口" : "已关闭：每次居中打开窗口"
     );
+  });
+  // M8/Q3：私有 Gist 开关（switch-row，即时保存）
+  root.querySelector("#ghPrivate")?.addEventListener("click", (e) => {
+    const btn = e.currentTarget;
+    const next = !btn.classList.contains("on");
+    btn.classList.toggle("on", next);
+    void saveSettingsPatch({ ghPrivate: next }, next ? "已设为私有 Gist" : "已设为公开 Gist");
   });
 
   // ---- 快捷键 / 指南弹窗 ----
@@ -1537,6 +1565,12 @@ export async function bootShell(root) {
       if (openX) {
         const leaf = openX.closest(".leaf");
         if (leaf?.dataset.id) void openLeafById(leaf.dataset.id);
+        return;
+      }
+      const renameBtn = e.target.closest('[data-act="rename"]');
+      if (renameBtn) {
+        const host = renameBtn.closest(".node, .leaf");
+        if (host?.dataset.id) void runMenuAct("rename", host.dataset.id, host.dataset.kind);
         return;
       }
       const addTabBtn = e.target.closest('[data-act="add-tab"]');
@@ -1774,20 +1808,25 @@ export async function bootShell(root) {
 
   // ---- 备份与导入导出（D6：原型 opt-row 面板） ----
   const syncBackupFields = () => {
-    syncSettingRows(); // 备份方式 / 本地格式 opt-row 选中态
+    syncSettingRows(); // 备份方式 opt-row 选中态
     const ghSub = root.querySelector("#ghBackupSub");
     if (ghSub) ghSub.hidden = (settings.backupTarget || "local") !== "github";
+    const localSub = root.querySelector("#localBackupSub");
+    if (localSub) localSub.hidden = (settings.backupTarget || "local") !== "local";
+    // M8/B5/Q3：Gist 字段（去 repo/branch/path）
     for (const [id, key, fallback] of [
-      ["ghRepo", "ghRepo", ""],
-      ["ghBranch", "ghBranch", "main"],
-      ["ghPath", "ghPath", "tabharbor-bookmarks.html"],
       ["ghToken", "ghToken", ""],
+      ["ghGistId", "ghGistId", ""],
+      ["ghDesc", "ghDesc", "TabHarbor encrypted backup"],
+      ["ghFileName", "ghFileName", "tabharbor-backup.tbh"],
     ]) {
       const field = root.querySelector(`#${id}`);
       if (field && document.activeElement !== field) field.value = settings[key] || fallback;
     }
     const frequency = root.querySelector("#ghBackupFreq");
     if (frequency) frequency.value = settings.ghBackupFreq || "off";
+    const priv = root.querySelector("#ghPrivate");
+    if (priv) priv.classList.toggle("on", settings.ghPrivate !== false);
   };
   const refreshBackups = async () => {
     const list = root.querySelector("#backupList");
@@ -1813,21 +1852,27 @@ export async function bootShell(root) {
       // R2（m10454）：导入不做全量替换——解析后的内容合并为单个「导入书签」
       // 新窗口（含内部层级），当前树数据/设置/回收站全部保留；导入的窗口
       // 可整体拖出内容/拖入分组/删除，与普通窗口一致。
+      // B3（2026-11-24）：按内容嗅探格式，不按文件后缀——误命名文件也能正确识别。
       let imported;
       const text = await file.text();
-      if (file.name.toLowerCase().endsWith(".json")) {
-        const parsed = JSON.parse(text);
-        // LinkMap 导出（{rawData,version,exportTime} 树）→ 专用解析器；
-        // 否则按 TabHarbor 自有快照（version:1 + 三数组）处理。
-        if (io.isLinkMapExport(parsed)) {
-          imported = await io.importLinkMap(parsed);
-        } else {
-          imported = await io.importJSON({ ...parsed, settings: settings || {} }, m);
-        }
-      } else if (file.name.toLowerCase().endsWith(".html")) {
+      const sniffed = io.sniffImport(text);
+      if (sniffed.kind === "linkmap") {
+        imported = await io.importLinkMap(sniffed.data);
+      } else if (sniffed.kind === "json") {
+        imported = await io.importJSON({ ...sniffed.data, settings: settings || {} }, m);
+      } else if (sniffed.kind === "html") {
         imported = await io.importHTML(text, m);
+      } else if (sniffed.kind === "homepage") {
+        // M9/Q4：主页配置导入前弹窗确认，确认后整体覆盖（不合并）
+        if (!window.confirm("这是主页配置文件。导入将整体覆盖当前搜索引擎与常用网址，是否继续？"))
+          return;
+        const cfg = homepage.normalizeHomeConfig(sniffed.data.config || sniffed.data);
+        settings = await store.saveSettings({ homepage: cfg });
+        m.settings = settings;
+        say("主页配置已导入并整体覆盖");
+        return;
       } else {
-        throw new Error("仅支持 .json 或 .html 文件");
+        throw new Error("无法识别的导入内容（应为 JSON、HTML 书签或主页配置）");
       }
       const win = io.mergeAsImportedWindow(m, imported);
       await store.saveModel(m);
@@ -1842,28 +1887,44 @@ export async function bootShell(root) {
   });
   root.querySelector("#btnBackupNow")?.addEventListener("click", async () => {
     try {
-      if ((settings.backupTarget || "local") === "github") {
-        const result = await io.runAutoBackup(chrome, m, settings);
-        say(`GitHub HTML 备份完成：${result.path}`);
+      // Q2：每次备份都要求输入密码，密码不落盘、不进文件、不写日志、不做会话暂存
+      const password = window.prompt("输入备份密码（加密完整快照，恢复时需再次输入）：");
+      if (!password) {
+        say("已取消备份（密码不能为空）");
         return;
       }
-      // D6：按所选本地格式导出（json=JSON 快照+可恢复；html/native=标准 HTML 书签）
-      const fmt = settings.localFormat || "json";
-      if (fmt === "json") {
-        await io.manualBackup(m, settings, chrome.downloads, chrome);
-        await refreshBackups();
-        say("已创建可恢复快照并下载 JSON 备份");
-      } else {
-        const content = await io.exportHTML(m);
-        await io.triggerDownload(
-          "tabharbor-bookmarks-" + Date.now() + ".html",
-          content,
-          chrome.downloads
-        );
-        say("HTML 书签已导出");
+      const confirm = window.prompt("再次输入密码以确认：");
+      if (confirm !== password) {
+        say("两次密码不一致，未开始备份");
+        return;
       }
+      if ((settings.backupTarget || "local") === "github") {
+        // M8/Q3：加密完整快照上传私有 Gist；密码临时驻留本次会话内存，不写 storage
+        const gistSettings = { ...settings, ghBackupPassword: password };
+        const result = await io.runAutoBackup(chrome, m, gistSettings);
+        // 成功后回写新 gistId（仅 id，不含 token/password）
+        if (result.gistId && result.gistId !== settings.ghGistId) {
+          settings = await store.saveSettings({ ghGistId: result.gistId });
+          m.settings = settings;
+        }
+        say(`加密快照已备份到私有 Gist：${result.gistId}`);
+        return;
+      }
+      // M7/B2：本地加密完整快照（模型+回收站+设置含主页配置一起打包）
+      await io.manualBackup(m, settings, chrome.downloads, chrome, password);
+      await refreshBackups();
+      say("已创建加密快照并下载（.tbh，恢复需输入密码）");
     } catch (error) {
       say("备份失败：" + error.message);
+    }
+  });
+  // Q5：独立明文 HTML 书签导出（不属于加密备份，方便导入其他浏览器）
+  root.querySelector("#btnExportBookmarksHtml")?.addEventListener("click", async () => {
+    try {
+      const result = await io.exportBookmarksHtml(m, chrome.downloads);
+      say("明文书签已导出：" + result.filename);
+    } catch (error) {
+      say("导出失败：" + error.message);
     }
   });
   const saveGitHubSettings = async (patch) => {
@@ -1885,14 +1946,17 @@ export async function bootShell(root) {
   root.querySelector("#btnAuthorizeGithub")?.addEventListener("click", async () => {
     try {
       const patch = {
-        ghRepo: root.querySelector("#ghRepo")?.value.trim() || "",
-        ghBranch: root.querySelector("#ghBranch")?.value.trim() || "main",
-        ghPath: root.querySelector("#ghPath")?.value.trim() || "tabharbor-bookmarks.html",
-        ghToken: root.querySelector("#ghToken")?.value || "",
+        ghToken: root.querySelector("#ghToken")?.value.trim() || "",
+        ghGistId: root.querySelector("#ghGistId")?.value.trim() || "",
+        ghDesc: root.querySelector("#ghDesc")?.value.trim() || "TabHarbor encrypted backup",
+        ghFileName: root.querySelector("#ghFileName")?.value.trim() || "tabharbor-backup.tbh",
+        ghPrivate: root.querySelector("#ghPrivate")
+          ? root.querySelector("#ghPrivate").classList.contains("on")
+          : true,
         backupTarget: "github",
       };
-      if (!patch.ghRepo || !patch.ghToken || !patch.ghPath || !patch.ghBranch) {
-        say("请填写仓库地址、分支、文件路径和访问令牌");
+      if (!patch.ghToken) {
+        say("请填写 GitHub 访问令牌（用于创建私有 Gist）");
         return;
       }
       const granted = await chrome.permissions.request({ origins: ["https://api.github.com/*"] });
@@ -1901,7 +1965,8 @@ export async function bootShell(root) {
         return;
       }
       await saveGitHubSettings(patch);
-      say("GitHub 权限已授权，配置已保存在本机扩展存储");
+      // B10：明确提示 Token 明文保存在本机扩展存储
+      say("Gist 配置已保存在本机扩展存储（Token 以明文保存于本机，请勿在公用设备使用）");
     } catch (error) {
       say("GitHub 授权失败：" + error.message);
     }
@@ -1912,15 +1977,22 @@ export async function bootShell(root) {
       say("请先选择一个本地快照");
       return;
     }
-    if (!window.confirm("恢复会全量替换当前树数据与设置，是否继续？")) return;
+    if (!window.confirm("恢复会全量替换当前树数据与设置（含主页配置），是否继续？")) return;
+    // Q2：恢复加密快照要求输入密码，不落盘、不暂存
+    const password = window.prompt("输入该备份的密码以解密恢复：");
+    if (!password) {
+      say("已取消恢复（密码不能为空）");
+      return;
+    }
     try {
-      const restored = await io.restoreBackup(backupId, m, chrome);
+      // B9：restoreBackup 内部先解密 + importJSON/validateTree，失败即抛错、不写库
+      const restored = await io.restoreBackup(backupId, m, chrome, password);
       await store.saveModel(restored);
       m = restored;
       if (restored.settings) settings = await store.saveSettings(restored.settings);
       await applyOpenState();
       await render();
-      say("快照已恢复");
+      say("加密快照已恢复（含主页配置）");
     } catch (error) {
       say("恢复失败：" + error.message);
     }

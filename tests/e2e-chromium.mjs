@@ -145,16 +145,32 @@ try {
   await win.waitForFunction(() => !document.querySelector("#ghBackupSub").hidden, undefined, {
     timeout: 5000,
   });
+  // M8/B5/Q3：Gist 配置字段（去 repo/branch/path，加 gistId/desc/fileName/private）
   const ghFields = await win.evaluate(() =>
-    ["#ghRepo", "#ghBranch", "#ghPath", "#ghToken", "#ghBackupFreq", "#btnAuthorizeGithub"].every(
-      (s) => !!document.querySelector(s)
-    )
+    [
+      "#ghToken",
+      "#ghGistId",
+      "#ghDesc",
+      "#ghFileName",
+      "#ghPrivate",
+      "#ghBackupFreq",
+      "#btnAuthorizeGithub",
+    ].every((s) => !!document.querySelector(s))
   );
-  assert.ok(ghFields, "GitHub 配置字段缺失（D6）");
+  assert.ok(ghFields, "Gist 配置字段缺失（M8）");
+  const noOldFields = await win.evaluate(
+    () => !document.querySelector("#ghRepo") && !document.querySelector("#ghBranch")
+  );
+  assert.ok(noOldFields, "仍存在旧的仓库/分支字段");
+  // M6/B4：导入入口合并为单个（按内容嗅探），另加明文书签导出按钮（Q5）
   const importBtns = await win.evaluate(
     () => document.querySelectorAll("#modalSetting [data-import]").length
   );
-  assert.equal(importBtns, 3, `三种导入入口数异常: ${importBtns}`);
+  assert.equal(importBtns, 1, `导入入口应为 1 个（内容嗅探），实际: ${importBtns}`);
+  const htmlExportBtn = await win.evaluate(
+    () => !!document.querySelector("#btnExportBookmarksHtml")
+  );
+  assert.ok(htmlExportBtn, "缺明文 HTML 书签导出按钮（Q5）");
   await win.click('.opt-row[data-setting="backup"][data-value="local"]');
   await win.waitForFunction(() => document.querySelector("#ghBackupSub").hidden, undefined, {
     timeout: 5000,

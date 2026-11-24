@@ -24,10 +24,12 @@ export const DEFAULT_SETTINGS = {
   copyFormat: "md",
   linkShow: false,
   backupTarget: "local",
-  ghRepo: "",
-  ghBranch: "main",
-  ghPath: "tabharbor-bookmarks.html",
-  ghToken: "",
+  // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
+  ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
+  ghGistId: "", // 已有 Gist ID（20+ hex）→ PATCH 更新；空 → POST 新建
+  ghDesc: "TabHarbor encrypted backup",
+  ghFileName: "tabharbor-backup.tbh",
+  ghPrivate: true,
   ghBackupFreq: "off",
   onboarded: false,
   // H3：扩展内部主页配置（搜索引擎 / 自定义引擎 / 常用网址列表）

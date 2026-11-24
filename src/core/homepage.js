@@ -87,3 +87,54 @@ export function resolveHomeUrl(chromeApi = globalThis.chrome) {
   }
   return HOME_PAGE_PATH;
 }
+
+// ===== M9/B6/Q4（2026-11-24 菜单审计）：主页配置导入导出 =====
+// 独立配置文件格式：{ format:"tabharbor-homepage", version, exportedAt, config:{engine,customEngines,sites} }
+export const HOMEPAGE_CONFIG_FORMAT = "tabharbor-homepage";
+export const HOMEPAGE_CONFIG_VERSION = 1;
+
+/** 生成可导出的主页配置文件 JSON（仅主页配置，不含书签树）。 */
+export function exportHomepageConfig(config, exportedAt) {
+  return JSON.stringify(
+    {
+      format: HOMEPAGE_CONFIG_FORMAT,
+      version: HOMEPAGE_CONFIG_VERSION,
+      exportedAt: exportedAt || new Date().toISOString(),
+      config: normalizeHomeConfig(config),
+    },
+    null,
+    2
+  );
+}
+
+/** 判断解析后的对象是否为主页配置文件（供导入嗅探复用）。 */
+export function isHomepageConfigFile(data) {
+  return !!(
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    data.format === HOMEPAGE_CONFIG_FORMAT &&
+    (Array.isArray(data.config?.sites) || Array.isArray(data.sites))
+  );
+}
+
+/**
+ * 解析并校验主页配置文件 → 规范化配置对象（Q4：导入前确认，确认后整体覆盖，不合并）。
+ * 非法文件抛错，调用方不得写库。
+ */
+export function importHomepageConfig(text) {
+  let data;
+  try {
+    data = JSON.parse(String(text == null ? "" : text));
+  } catch {
+    throw new Error("主页配置文件不是合法 JSON");
+  }
+  if (!isHomepageConfigFile(data)) throw new Error("不是合法的 TabHarbor 主页配置文件");
+  if (data.version != null && data.version !== HOMEPAGE_CONFIG_VERSION)
+    throw new Error("主页配置版本不兼容");
+  const raw = data.config || data;
+  const cfg = normalizeHomeConfig(raw);
+  if (!Array.isArray(raw.sites) && !Array.isArray(raw.customEngines))
+    throw new Error("主页配置缺少引擎或站点字段");
+  return cfg;
+}

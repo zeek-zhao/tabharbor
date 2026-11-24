@@ -95,6 +95,14 @@
             <button id="resetHomeCfg" class="btn" type="button">恢复默认</button>
           </div>
 
+          <div class="sec-title" style="margin-top: 18px">配置导入导出（M9）</div>
+          <p class="home-hint">导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。</p>
+          <div class="modal-actions">
+            <button id="homeExportCfg" class="btn" type="button">导出主页配置</button>
+            <button id="homeImportCfg" class="btn" type="button">导入主页配置</button>
+          </div>
+          <input id="homeImportFile" type="file" hidden />
+
           <div class="sec-title" style="margin-top: 18px">常用网址</div>
           <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
           <div id="siteEditList" class="home-cfg-sites"></div>

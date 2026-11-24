@@ -94,12 +94,14 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   });
   void syncAutoBackupAlarm(chromeApi);
 
-  // FR-019：GitHub 标准 HTML 定时覆盖；配置前/关闭时不触发任何网络请求。
+  // M8/Q2：GitHub Gist 加密定时备份；配置前/关闭时不触发网络请求。
+  // Q2 密码不落盘：alarm 无用户交互无法取得密码时，runAutoBackup 抛"需要密码"，
+  // 由下方 catch 写成 credential-free 结果提示用户手动备份（不保存密码、不写日志）。
   chromeApi.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== "auto-backup") return;
     const all = await loadAll(chromeApi);
     const settings = all.settings || {};
-    if (settings.backupTarget !== "github" || !settings.ghToken || !settings.ghRepo) return;
+    if (settings.backupTarget !== "github" || !settings.ghToken) return;
     const model = {
       windows: all.windows,
       groups: all.groups,
@@ -112,7 +114,7 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
       await chromeApi.storage.local.set({
         backupLastResult: {
           ok: true,
-          message: "GitHub HTML 备份完成",
+          message: "加密快照已备份到私有 Gist",
           at: new Date().toISOString(),
         },
       });

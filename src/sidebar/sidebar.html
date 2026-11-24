@@ -260,44 +260,22 @@
               <span class="radio"></span>
               <div>
                 <div class="t">备份到本地</div>
-                <div class="d">按所选格式导出备份文件，可手动导入浏览器书签完成恢复</div>
+                <div class="d">加密完整快照（书签+设置+主页配置）保存到本机，可导出文件与恢复</div>
               </div>
             </div>
             <div class="opt-row" data-setting="backup" data-value="github">
               <span class="radio"></span>
               <div>
-                <div class="t">备份到 GitHub 仓库</div>
-                <div class="d">
-                  固定使用浏览器标准 HTML 书签格式，定时覆盖远端同一份文件，版本由 Git 历史管理
-                </div>
+                <div class="t">备份到 GitHub Gist</div>
+                <div class="d">加密完整快照上传到私有 Gist，Token 仅请求 api.github.com 权限</div>
               </div>
             </div>
             <div class="sub-block" id="localBackupSub">
-              <div class="sec-title">本地备份格式</div>
-              <div class="opt-row" data-setting="localFormat" data-value="json">
-                <span class="radio"></span>
-                <div>
-                  <div class="t">JSON 备份格式</div>
-                  <div class="d">完整结构与状态，便于后续导入恢复</div>
-                </div>
-              </div>
-              <div class="opt-row" data-setting="localFormat" data-value="html">
-                <span class="radio"></span>
-                <div>
-                  <div class="t">标准 HTML 书签格式</div>
-                  <div class="d">通用书签文件，可导入多数浏览器</div>
-                </div>
-              </div>
-              <div class="opt-row" data-setting="localFormat" data-value="native">
-                <span class="radio"></span>
-                <div>
-                  <div class="t">当前浏览器原生格式</div>
-                  <div class="d">按当前浏览器原生书签结构导出（标准 HTML）</div>
-                </div>
-              </div>
+              <div class="sec-title">本地加密备份</div>
+              <p>备份时输入密码加密，恢复时需再次输入；密码不保存、不写入文件、不写日志。</p>
               <div class="modal-actions" style="margin-top: 14px">
                 <button class="btn primary" id="btnBackupNow" type="button">
-                  按所选格式备份到本地
+                  加密备份到本地（输入密码）
                 </button>
               </div>
               <div class="sec-title" style="margin-top: 14px">本地快照恢复（最多保留 20 份）</div>
@@ -306,50 +284,34 @@
                 <select class="edit-input" id="backupList"></select>
               </div>
               <div class="modal-actions">
-                <button class="btn" id="btnRestoreBackup" type="button">确认恢复所选快照</button>
+                <button class="btn" id="btnRestoreBackup" type="button">解密并恢复所选快照</button>
               </div>
             </div>
             <div class="sub-block hidden" id="ghBackupSub">
-              <div class="sec-title">GitHub 配置参数</div>
-              <div class="field-row">
-                <label for="ghRepo">仓库地址</label>
-                <input
-                  class="edit-input"
-                  id="ghRepo"
-                  type="text"
-                  placeholder="https://github.com/owner/repo"
-                  autocomplete="url"
-                />
-              </div>
-              <div class="field-row">
-                <label for="ghBranch">分支</label>
-                <input
-                  class="edit-input"
-                  id="ghBranch"
-                  type="text"
-                  placeholder="main"
-                  value="main"
-                />
-              </div>
-              <div class="field-row">
-                <label for="ghPath">文件路径</label>
-                <input
-                  class="edit-input"
-                  id="ghPath"
-                  type="text"
-                  placeholder="bookmarks.html"
-                  value="bookmarks.html"
-                />
-              </div>
+              <div class="sec-title">GitHub 私有 Gist 配置</div>
               <div class="field-row">
                 <label for="ghToken">访问令牌</label>
-                <input
-                  class="edit-input"
-                  id="ghToken"
-                  type="password"
-                  autocomplete="new-password"
-                  placeholder="仅保存于本机扩展存储"
-                />
+                <input class="edit-input" id="ghToken" type="password" autocomplete="new-password"
+                  placeholder="Personal Access Token（gist 权限）" />
+              </div>
+              <div class="field-row">
+                <label for="ghGistId">Gist ID</label>
+                <input class="edit-input" id="ghGistId" type="text" placeholder="留空则新建私有 Gist" />
+              </div>
+              <div class="field-row">
+                <label for="ghDesc">Gist 描述</label>
+                <input class="edit-input" id="ghDesc" type="text" placeholder="TabHarbor encrypted backup" />
+              </div>
+              <div class="field-row">
+                <label for="ghFileName">文件名</label>
+                <input class="edit-input" id="ghFileName" type="text" placeholder="tabharbor-backup.tbh" />
+              </div>
+              <div class="switch-row">
+                <div>
+                  <div class="t">私有 Gist</div>
+                  <div class="d">关闭后 Gist 将公开可见，请勿用于敏感书签</div>
+                </div>
+                <button class="switch on" id="ghPrivate" type="button"></button>
               </div>
               <div class="field-row">
                 <label for="ghBackupFreq">定时备份</label>
@@ -361,52 +323,37 @@
                   <option value="daily">每天</option>
                 </select>
               </div>
-              <p>Token 仅存储在本机；只请求 api.github.com 权限，不会同步或写入日志。</p>
+              <p>Q2：密码不落盘、不写入 Gist、不写日志；定时自动备份需会话内密码，否则跳过。</p>
+              <p>B10：Token 以明文保存在本机扩展存储，请勿在公用设备使用。</p>
               <div class="modal-actions" style="margin-top: 14px">
                 <button class="btn primary" id="btnAuthorizeGithub" type="button">
-                  保存 GitHub 配置
+                  保存 Gist 配置并授权
                 </button>
               </div>
             </div>
             <div class="sec-title" style="margin-top: 18px">导入</div>
             <div class="sub-block">
-              <div class="sec-title">手动选择文件导入</div>
               <div class="opt-row">
                 <div>
-                  <div class="t">JSON 备份文件</div>
-                  <div class="d">完整结构与状态，可完整恢复分组与开关状态</div>
+                  <div class="t">选择文件导入（自动识别）</div>
+                  <div class="d">按内容自动识别 JSON 快照 / HTML 书签 / 主页配置，无需区分后缀</div>
                 </div>
                 <span class="ops"
-                  ><button class="mini-btn" data-import="json" type="button">选择文件</button></span
+                  ><button class="mini-btn" data-import="auto" type="button">选择文件</button></span
                 >
               </div>
               <div class="opt-row">
                 <div>
-                  <div class="t">标准 HTML 书签文件</div>
-                  <div class="d">通用书签导出文件，解析书签条目与层级</div>
+                  <div class="t">明文书签导出（HTML）</div>
+                  <div class="d">标准书签文件，可导入其他浏览器；不属于加密备份</div>
                 </div>
                 <span class="ops"
-                  ><button class="mini-btn" data-import="html" type="button">选择文件</button></span
-                >
-              </div>
-              <div class="opt-row">
-                <div>
-                  <div class="t">浏览器原生书签结构</div>
-                  <div class="d">浏览器导出的 HTML 书签，按目录层级导入</div>
-                </div>
-                <span class="ops"
-                  ><button class="mini-btn" data-import="native" type="button">
-                    选择文件
-                  </button></span
+                  ><button class="mini-btn" id="btnExportBookmarksHtml" type="button">导出</button></span
                 >
               </div>
             </div>
-            <input
-              id="importFile"
-              type="file"
-              accept=".json,.html,text/html,application/json"
-              hidden
-            />
+            <input id="importFile" type="file" hidden />
+
           </div>
           <div class="cat-panel" data-panel="home" hidden>
             <div class="sec-title">扩展内部主页</div>

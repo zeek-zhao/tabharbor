@@ -15,6 +15,9 @@ const CP =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="2"/></svg>';
 const XI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+// M2/B8（2026-11-24 菜单审计）：行尾「重命名」铅笔按钮，容器与标签共用；复用 openEditModal。
+const PENCIL =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 17.2V21h3.8L17.9 9.9l-3.8-3.8L3 17.2zM20.7 7.1a1 1 0 0 0 0-1.4l-2.4-2.4a1 1 0 0 0-1.4 0l-1.8 1.8 3.8 3.8 1.8-1.8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 // D2：标签行内「打开」按钮（原型菜单 open 图标同款播放三角）
 const OI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M7 4l10 8-10 8V4Z" fill="currentColor"/></svg>';
@@ -100,9 +103,10 @@ function containerOpen(n, opts, depth) {
       : "";
   // U2（2026-11-24 UI 审计）：窗口行与分组行都渲染「添加标签」「添加分组」两个加号，
   // 图标不同（page-plus / folder-plus）。窗口下建分组、分组下建子组；行为由 shell 接线。
-  const addTab = `<button class="add-tab-x row-add" data-act="add-tab" title="添加标签">${PAGE_PLUS}</button>`;
-  const addGroup = `<button class="add-group-x row-add" data-act="add-group-inline" title="${n.kind === "window" ? "新建分组" : "新建子组"}">${FOLDER_PLUS}</button>`;
-  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}${addGroup}<button class="copy-x" data-act="copy" title="${copyTip}">${CP}</button></span></div>`;
+  const addTab = `<button class="add-tab-x row-add" data-act="add-tab" title="添加标签" aria-label="在${n.kind === "window" ? "窗口" : "分组"}下添加标签">${PAGE_PLUS}</button>`;
+  const addGroup = `<button class="add-group-x row-add" data-act="add-group-inline" title="${n.kind === "window" ? "新建分组" : "新建子组"}" aria-label="${n.kind === "window" ? "新建分组" : "新建子组"}">${FOLDER_PLUS}</button>`;
+  const rename = `<button class="rename-x row-add" data-act="rename" title="重命名" aria-label="重命名${n.kind === "window" ? "窗口" : "分组"}">${PENCIL}</button>`;
+  return `<div class="node node-${n.kind}${collapsed}${dim}" data-id="${n.id}" data-kind="${n.kind}" style="padding-left:${pad}px" draggable="true"><div class="node-row" data-target="${n.id}" data-kind="${n.kind}"><span class="tri">${TRI}</span><span class="${nameCls}">${escapeHtml(n.title || "")}</span>${offline}<span class="row-ops">${addTab}${addGroup}${rename}<button class="copy-x" data-act="copy" title="${copyTip}" aria-label="${copyTip}">${CP}</button></span></div>`;
 }
 
 // 标签叶子（U5/Q2：favicon 前缀 + 高亮/灰色状态 + title + link + note + 行内按钮）
@@ -129,13 +133,15 @@ function leafRow(t, opts) {
   }
   // H1（2026-11-24）：前缀只保留 favicon，状态由 .on/.off 表达（去并列状态圆点）
   const prefix = fav;
-  const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签">${CP}</button>`;
+  // B8：所有图标按钮补 title + aria-label
+  const renameBtn = `<button class="rename-x" data-act="rename" title="重命名" aria-label="重命名标签">${PENCIL}</button>`;
+  const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签" aria-label="复制标签">${CP}</button>`;
   // U6（2026-11-23 UI 审计）：已打开只显示关闭按钮、未打开只显示打开按钮（双向条件渲染）
   const openBtn = open
     ? ""
-    : `<button class="open-x" data-act="open" title="打开网页">${OI}</button>`;
+    : `<button class="open-x" data-act="open" title="打开网页" aria-label="打开网页">${OI}</button>`;
   const closeBtn = open
-    ? `<button class="close-x" data-act="close" title="关闭网页">${XI}</button>`
+    ? `<button class="close-x" data-act="close" title="关闭网页" aria-label="关闭网页">${XI}</button>`
     : "";
   // D11（2026-11-23）：内部页（chrome:///about:/file:///chrome-extension://）标题缺失时
   // 用「协议页面」兜底；所有文本走 escapeHtml，异常 URL 不产生裸 HTML。
@@ -147,7 +153,7 @@ function leafRow(t, opts) {
     rawTitle ||
     String(t.url || "").trim() ||
     (internal ? `${internal[1].replace(/-/g, "")} 页面` : "未命名标签");
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}${copyBtn}${openBtn}${closeBtn}</div>`;
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}${renameBtn}${copyBtn}${openBtn}${closeBtn}</div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断
