@@ -44,6 +44,18 @@
 
 环境要求：`npx playwright install chromium --with-deps`。CI 的 `e2e` job 与 release 工作流均已覆盖。
 
+## 2.1 证据口径（必须分层表述）
+
+测试结论分三层，**未取得对应证据的项目不得标「已验证」**：
+
+| 层 | 环境 | 可证明的内容 | 当前证据 |
+| --- | --- | --- | --- |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 249/249 PASS |
+| E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
+| 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
+
+文档中禁止出现「E2E 全部通过」这类不分层表述；写结论时注明证据来源（本地 / CI / 手工）与日期。
+
 ## 3. 门禁命令
 
 | 命令 | 内容 | 本轮结果 |
@@ -54,7 +66,9 @@
 | `npm run format:check` | Prettier | 通过 |
 | `npm run committer` | 单一提交人 | 通过 |
 | `npm run contrast` | 深/浅色设计态对比度 | 全部达标 |
-| `npm run test:e2e` | 真机 Chromium 冒烟 | 全部通过 |
+| `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-24）；CI `e2e` job 随 push/PR 复验 |
+
+> 以上门禁结果为 `release/v0.3.0-preview` @ `bcc1969` 基线的本地复跑记录（2026-11-24）。
 
 CI（`.github/workflows/ci.yml`）：`test` job（语法/红线/合规/格式/提交人/contrast/BDD/打包）+ `e2e` job；push `main` 与所有 PR 触发。release（`release.yml`）：tag 触发，全量门禁 + E2E + 打包 + GitHub Release。
 

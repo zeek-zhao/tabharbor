@@ -1,6 +1,8 @@
 # TabHarbor 隐私政策（Chrome Web Store 发布稿）
 
 > 本文件用于 Chrome Web Store 上架的「隐私政策 URL」与权限理由披露。TabHarbor 是一款 Chrome MV3 标签管理扩展，把浏览器真实窗口 / 分组 / 标签整理为一棵可拖拽的树，提供打开 / 关闭 / 聚焦、搜索、复制、导入导出与本地或加密备份。
+>
+> **待办**：正式上架前需将本政策发布为公开可访问的 URL（如 GitHub Pages / Release 页附件），并在 Dashboard 填写该链接；上架材料清单见 `docs/release/v0.3.0-preview.md`。
 
 ## 1. 收集与处理的信息
 

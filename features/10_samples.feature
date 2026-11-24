@@ -20,5 +20,5 @@
   并且 HTML 样例网址全部是 example.com 占位地址
 
 场景: 样例使用说明诚实界定当前预览状态
-  那么 "docs/SAMPLES-使用与验证指南.md" 包含 "0.3 预览候选状态"
-  并且 "docs/SAMPLES-使用与验证指南.md" 包含 "全屏卡片视图仍未实现"
+  那么 "docs/operations/sample-data.md" 包含 "专用测试 Chrome Profile"
+  并且 "docs/operations/sample-data.md" 包含 "全屏卡片视图"

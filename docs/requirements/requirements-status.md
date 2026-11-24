@@ -1,7 +1,7 @@
 # TabHarbor 功能状态台账（requirements-status）
 
 > 重建于 2026-11-24（0.3 预览候选 `release/v0.3.0-preview`）。每条功能可追溯到：**需求口径 → 源码模块 → BDD 场景 → E2E/手工验收 → 状态 → 已知限制**。
-> 早期立项文档（`docs/history/TH2-001`、旧 SRS v0.1）与原型 `prototypes/tabharbor.html` 仅为历史追溯，与当前口径冲突时以本台账和代码为准。
+> 本台账是唯一需求状态源；原型 `prototypes/tabharbor.html` 与 `docs/history/` 仅为历史追溯，与当前口径冲突时以本台账和代码为准。
 
 ## 状态枚举
 
@@ -90,4 +90,4 @@
 
 - `main` @ `v0.2.0`（tag `v0.2.0`）：已发布基线。
 - `release/v0.3.0-preview` @ `0.3.0-preview.1`（manifest `0.3.0.1`）：预览候选，详见 `docs/release/v0.3.0-preview.md`。
-- 立项规划的 `v1.0.0` / M0–M4 里程碑编号已废弃映射关系（历史见 `docs/history/`）。
+- 早期立项的里程碑规划编号不再用于描述当前功能；历史教训见 `docs/history/resolved-issues.md`。

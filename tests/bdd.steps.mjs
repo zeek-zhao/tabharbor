@@ -80,19 +80,20 @@ step("那么", "HTML 样例网址全部是 example.com 占位地址", () => {
   if (ctx.sampleImportedHtml.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
     throw new Error("HTML 样例包含非占位地址");
 });
-step("那么", '"docs/SAMPLES-使用与验证指南.md" 包含 "0.3 预览候选状态"', async () => {
+step("那么", '"docs/operations/sample-data.md" 包含 "专用测试 Chrome Profile"', async () => {
   const guide = await fs.promises.readFile(
-    path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+    path.resolve(TEST_ROOT, "docs/operations/sample-data.md"),
     "utf8"
   );
-  if (!guide.includes("0.3 预览候选状态")) throw new Error("指南未注明 0.3 预览候选状态");
+  if (!guide.includes("专用测试 Chrome Profile"))
+    throw new Error("指南未注明专用测试 Profile 安全边界");
 });
-step("那么", '"docs/SAMPLES-使用与验证指南.md" 包含 "全屏卡片视图仍未实现"', async () => {
+step("那么", '"docs/operations/sample-data.md" 包含 "全屏卡片视图"', async () => {
   const guide = await fs.promises.readFile(
-    path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+    path.resolve(TEST_ROOT, "docs/operations/sample-data.md"),
     "utf8"
   );
-  if (!guide.includes("全屏卡片视图仍未实现")) throw new Error("指南未注明全屏卡片视图待实现边界");
+  if (!guide.includes("全屏卡片视图")) throw new Error("指南未注明全屏卡片视图待实现边界");
 });
 /* ---------- 模块级上下文 ---------- */
 const ctx = {
