@@ -1383,6 +1383,59 @@ try {
   console.log(
     "E2E D14/D21/D15/D16 定稿语义由 BDD Case5-8 覆盖（真实拖拽在 10/7 段已验证模型变更落盘）通过"
   );
+  // 回收站关闭链路（2026-11-24 口径反转）：删除已打开叶子到回收站，
+  // 必须同步关闭对应真实浏览器标签（旧口径「浏览器标签不动」已废弃）。
+  {
+    // 开一个独立 URL 标签，等待快照监听把它收进树并绑定 tabId（P0-2 快照变更落盘）
+    await win.evaluate(() =>
+      chrome.tabs.create({ url: "https://example.com/trash-close-target", active: false })
+    );
+    const leafId = await win.evaluate(async () => {
+      for (let i = 0; i < 40; i += 1) {
+        const { tabs } = await chrome.storage.local.get("tabs");
+        const ts = await chrome.tabs.query({});
+        const live = new Set(ts.map((t) => t.id));
+        const t = (tabs || []).find(
+          (x) =>
+            x.url === "https://example.com/trash-close-target" &&
+            x.tabId != null &&
+            live.has(x.tabId)
+        );
+        if (t && t.id != null) return String(t.id);
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return null;
+    });
+    assert.ok(leafId, "快照未把新开标签收进树并绑定 tabId");
+    await win.click(`.leaf[data-id="${leafId}"]`);
+    await win.waitForFunction(
+      () => !!document.querySelector(".leaf.selected[data-id]"),
+      undefined,
+      { timeout: 5000 }
+    );
+    const before = await win.evaluate(
+      async () =>
+        (await chrome.tabs.query({ url: "https://example.com/trash-close-target" })).length
+    );
+    await win.keyboard.press("Delete");
+    await win.waitForFunction(
+      (n) =>
+        new Promise((r) =>
+          chrome.tabs.query({ url: "https://example.com/trash-close-target" }, (ts) =>
+            r(ts.length < n)
+          )
+        ),
+      before,
+      { timeout: 8000 }
+    );
+    const after = await win.evaluate(
+      async () =>
+        (await chrome.tabs.query({ url: "https://example.com/trash-close-target" })).length
+    );
+    assert.equal(after, 0, "删除叶子到回收站后对应浏览器标签未被关闭");
+    console.log("E2E 回收站口径反转：删除已开叶子同步关闭浏览器标签通过");
+  }
+
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
   await context.close();

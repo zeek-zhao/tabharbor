@@ -253,13 +253,23 @@ export async function closeLeaf(chromeApi, m, leafId) {
 
 // FR-020（D17）：关闭节点网页——只按 tabId 精确关闭，每个叶子最多关一个标签页；
 // 无 tabId 的叶子不参与（不跨 URL 误关）。模型节点保留（D15）。
+// 2026-11-24 回收站口径：关闭成功后同步清理该叶子 open=false 并删除 tabId，
+// 使回收站入站/后续克隆不携带失效绑定；单个关闭失败只跳过该叶子并继续其余，
+// 返回实际成功关闭数（失败标签的绑定不误清）。
 export async function closeNode(chromeApi, m, nodeId) {
   const open = await chromeApi.tabs.query({});
   const openIds = new Set(open.map((t) => t.id));
-  const targets = [];
+  let closed = 0;
   for (const leaf of collectLeaves(m, nodeId)) {
-    if (leaf.tabId != null && openIds.has(leaf.tabId)) targets.push(leaf.tabId);
+    if (leaf.tabId == null || !openIds.has(leaf.tabId)) continue;
+    try {
+      await chromeApi.tabs.remove([leaf.tabId]);
+      leaf.open = false;
+      delete leaf.tabId;
+      closed += 1;
+    } catch {
+      // 单个标签关闭失败：保留其绑定，继续关闭其余
+    }
   }
-  if (targets.length) await chromeApi.tabs.remove(targets);
-  return targets.length;
+  return closed;
 }

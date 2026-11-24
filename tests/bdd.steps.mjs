@@ -80,30 +80,20 @@ step("那么", "HTML 样例网址全部是 example.com 占位地址", () => {
   if (ctx.sampleImportedHtml.tabs.some((tab) => !tab.url.startsWith("https://example.com/")))
     throw new Error("HTML 样例包含非占位地址");
 });
-step(
-  "那么",
-  '"docs/SAMPLES-使用与验证指南.md" 包含 "M3-1 PR #28 仍需用户手工 Chrome 验收"',
-  async () => {
-    const guide = await fs.promises.readFile(
-      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
-      "utf8"
-    );
-    if (!guide.includes("M3-1 PR #28 仍需用户手工 Chrome 验收"))
-      throw new Error("指南未注明 M3-1 手工验收状态");
-  }
-);
-step(
-  "那么",
-  '"docs/SAMPLES-使用与验证指南.md" 包含 "不能将 HTML 控件/需求文字当作已实现功能"',
-  async () => {
-    const guide = await fs.promises.readFile(
-      path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
-      "utf8"
-    );
-    if (!guide.includes("不能将 HTML 控件/需求文字当作已实现功能"))
-      throw new Error("指南未注明能力边界");
-  }
-);
+step("那么", '"docs/SAMPLES-使用与验证指南.md" 包含 "0.3 预览候选状态"', async () => {
+  const guide = await fs.promises.readFile(
+    path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+    "utf8"
+  );
+  if (!guide.includes("0.3 预览候选状态")) throw new Error("指南未注明 0.3 预览候选状态");
+});
+step("那么", '"docs/SAMPLES-使用与验证指南.md" 包含 "全屏卡片视图仍未实现"', async () => {
+  const guide = await fs.promises.readFile(
+    path.resolve(TEST_ROOT, "docs/SAMPLES-使用与验证指南.md"),
+    "utf8"
+  );
+  if (!guide.includes("全屏卡片视图仍未实现")) throw new Error("指南未注明全屏卡片视图待实现边界");
+});
 /* ---------- 模块级上下文 ---------- */
 const ctx = {
   named: {},
@@ -191,7 +181,11 @@ export function makeChromeMock() {
         return { id };
       },
       remove: async (ids) => {
-        calls.tabsRemove.push(...(Array.isArray(ids) ? ids : [ids]));
+        const arr = Array.isArray(ids) ? ids : [ids];
+        calls.tabsRemove.push(...arr);
+        // 2026-11-24 回收站口径补强：移除后同步从浏览器标签列表剔除，
+        // 使后续 query 无法再命中，证明"网页真的被关闭"而非仅记录调用。
+        ctx.openTabs = (ctx.openTabs || []).filter((t) => !arr.includes(t.id));
       },
       // D14/D21：拖拽时同步移动真实 tab；ctx.failTabsMove 可注入失败以验证整体回滚。
       move: async (id, opts) => {
@@ -771,9 +765,70 @@ step("那么", "窗口 {} 的分组随行并入窗口 {}", (srcTitle, targetTitl
 });
 
 /* ---------- 场景组：回收站（FR-018/037，#31） ---------- */
-step("当", "把 {} 删除到回收站", (title) => {
+step("当", "把 {} 删除到回收站", async (title) => {
   const node = freshByTitle(title);
+  // 2026-11-24 回收站口径反转：删除入回收站 = 同步关闭对应真实网页。
+  // 容器走 closeNode（逐叶 tabId 精确关闭），叶子走 closeLeaf；与 shell.removeToTrash 同链路。
+  let closed = 0;
+  if (ctx.mock && ctx.mock.chrome) {
+    if (node.kind !== "tab") {
+      closed = await ops.closeNode(ctx.mock.chrome, ctx.m, node.id);
+    } else if (node.tabId != null) {
+      closed = await ops.closeLeaf(ctx.mock.chrome, ctx.m, node.id);
+    }
+  }
+  ctx.trashClosed = closed;
   ctx.trashEntry = trashOp.trashNode(ctx.m, node.id, "2026-01-01 08:00");
+});
+
+// 2026-11-24 回收站关闭链路断言
+step("假如", "回收站场景浏览器环境就绪", () => {
+  ctx.mock = makeChromeMock();
+  ctx.openTabs = [];
+});
+
+step("假如", "回收站场景标签 {} 绑定浏览器标签页号 {}", (title, n) => {
+  ctx.named = ctx.named || {};
+  const node = ctx.named[title] || freshByTitle(title);
+  node.tabId = Number(n);
+  ctx.named[title] = node;
+});
+
+step("假如", "回收站场景浏览器已打开 id 为 {} 的存活标签", (id) => {
+  ctx.openTabs = ctx.openTabs || [];
+  ctx.openTabs.push({
+    id: Number(id),
+    url: tabUrl("回收站存活页"),
+    title: "回收站存活页",
+    index: 0,
+    windowId: 1,
+    active: true,
+  });
+});
+
+step("那么", "浏览器标签页号 {} 已被关闭", (n) => {
+  const id = Number(n);
+  if (!(ctx.mock.calls.tabsRemove || []).includes(id)) throw new Error(`tabs.remove 未调用 ${id}`);
+  if ((ctx.openTabs || []).some((t) => t.id === id))
+    throw new Error(`标签页 ${id} 仍在浏览器标签列表中`);
+});
+
+step("那么", "没有浏览器标签被关闭", () => {
+  const calls = (ctx.mock && ctx.mock.calls && ctx.mock.calls.tabsRemove) || [];
+  if (calls.length) throw new Error(`tabs.remove=${calls.length}，应未关闭任何标签`);
+});
+
+step("那么", "回收站条目 {} 不携带浏览器绑定", (i) => {
+  const e = (ctx.m.trash || [])[Number(i)];
+  if (!e) throw new Error(`回收站条目 ${i} 不存在`);
+  const p = e.payload || {};
+  if (p.kind === "tab" && (p.tabId != null || p.open != null))
+    throw new Error("回收站 payload 残留叶子绑定 tabId/open");
+  if (p.kind === "window" && p.windowId != null) throw new Error("回收站 payload 残留 windowId");
+  for (const t of (e.desc && e.desc.tabs) || [])
+    if (t.tabId != null || t.open != null) throw new Error("desc.tabs 残留绑定");
+  for (const g of (e.desc && e.desc.groups) || [])
+    if (g.windowId != null) throw new Error("desc.groups 残留 windowId");
 });
 
 step("那么", "回收站条目数为 {}", (n) => {

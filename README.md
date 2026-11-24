@@ -36,12 +36,18 @@ npm run committer     # 单一提交人
 
 ## 文档索引
 
-| 文档                                                                   | 内容                                          |
-| ---------------------------------------------------------------------- | --------------------------------------------- |
-| [docs/TH2-001_立项确认清单_v1.0.md](docs/TH2-001_立项确认清单_v1.0.md) | 需求基线（继承/舍弃/60 条台账/Q 裁决/里程碑） |
-| [docs/TH2-LEARNINGS.md](docs/TH2-LEARNINGS.md)                         | 解决过的问题（现象→根因→修复→教训）           |
-| [prototypes/tabharbor.html](prototypes/tabharbor.html)                 | 交互原型 v16（冻结，功能真相源）              |
-| [.github/project-config.json](.github/project-config.json)             | gh-project-flow 面板配置                      |
+> 结构化文档体系（2026-11-24 重建）：需求状态 / 架构 / 测试 / 发布四类当前文档 + 历史基线归档。
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/requirements/requirements-status.md](docs/requirements/requirements-status.md) | **当前功能状态台账**：功能 → 源码模块 → BDD/E2E → 状态 → 已知限制 |
+| [docs/architecture/module-map.md](docs/architecture/module-map.md) | 源码模块职责、数据流、存储键、权限、核心对象关系 |
+| [docs/testing/test-matrix.md](docs/testing/test-matrix.md) | BDD/E2E 覆盖矩阵、门禁命令、环境要求与缺口 |
+| [docs/release/v0.3.0-preview.md](docs/release/v0.3.0-preview.md) | 0.3 预览版变更、已知限制、验收清单、正式版待办 |
+| [docs/TH2-002_对象定义与操作边界.md](docs/TH2-002_对象定义与操作边界.md) | 窗口/分组/标签定义、操作矩阵、类型判定口径 |
+| [docs/TH2-LEARNINGS.md](docs/TH2-LEARNINGS.md) | 解决过的问题（现象→根因→修复→教训） |
+| [docs/history/](docs/history/) | 历史基线（旧 SRS、早期立项里程碑、D1-D21 报告）——仅供追溯 |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | 隐私政策（权限、数据类别、Gist 传输、Token 存储） |
 
 ## 导入导出与备份
 

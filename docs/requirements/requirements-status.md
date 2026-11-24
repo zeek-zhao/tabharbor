@@ -1,0 +1,93 @@
+# TabHarbor 功能状态台账（requirements-status）
+
+> 重建于 2026-11-24（0.3 预览候选 `release/v0.3.0-preview`）。每条功能可追溯到：**需求口径 → 源码模块 → BDD 场景 → E2E/手工验收 → 状态 → 已知限制**。
+> 早期立项文档（`docs/history/TH2-001`、旧 SRS v0.1）与原型 `prototypes/tabharbor.html` 仅为历史追溯，与当前口径冲突时以本台账和代码为准。
+
+## 状态枚举
+
+| 状态 | 含义 |
+| --- | --- |
+| 已实现 | 代码已落库，对应 BDD/静态契约通过；不等于真实浏览器 E2E 已验证 |
+| 已验证 | 本地门禁 + 真实浏览器 E2E 通过，有证据可追溯 |
+| 部分实现 | 主流程可用，存在明确已知限制 |
+| 待实现 | 未交付；写明原因或依赖 |
+| 已废弃 | 旧需求被用户口径或红线规则推翻；仅保留历史记录 |
+
+## 1. 数据模型与树结构
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-01 | 三层树模型（窗口→分组可嵌套→标签） | `src/core/model.js` | 哈希 ID、父链闭合、后代有序 | 已验证 | 01_model（27 场景） | — |
+| F-02 | 类型判定与数组归属 | `src/core/levels.js` | kind 与数组一致、互转规则、拒绝原因 | 已验证 | 01/12/13 feature；E2E F4 | — |
+| F-03 | 树结构不变式与自动修复 | `src/core/invariants.js` | 根必须 Window、父 ID 存在、脏节点修复 | 已验证 | 12_invariants（13 场景） | — |
+| F-04 | 拖拽整理（标签/组/窗全层级、防环） | `model.js` + `render.js` | 事务性：真实移动失败整体回滚 | 已验证 | 01 拖拽场景；E2E 10 真实鼠标拖拽 | — |
+| F-05 | 窗口→窗口降级为子组（无合并） | `model.js` 互转 | 归属/kind/位次/子树完整 | 已验证 | 13_window_lifecycle；E2E N1 四次互转 | **「窗口合并」已废弃** |
+| F-06 | 持久化（模型/设置/回收站） | `src/core/store.js` | 分键存储、实时广播 | 已验证 | 03_storage；E2E 2 | — |
+
+## 2. 打开 / 关闭 / 浏览器同步
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-10 | 双击打开 / 存活命中只聚焦 | `tabs-op.js` `openTab` | tabId 精确命中不重复开 | 已验证 | 07_ops；E2E D3 | — |
+| F-11 | **相邻插入**：新标签插到激活网页右侧 | `tabs-op.js` `queryInsertAnchor` | 单标签 index=锚点+1 且 openerTabId；无锚点省略 index | 已验证 | 19_adjacent_insert（6 场景）；E2E P0-1 容器加号 | 新建窗口/游离标签不指定索引 |
+| F-12 | 批量打开：分桶各窗口、锚点右侧连续递增 | `tabs-op.js` `openAll` | 顺序与模型叶子一致；存活跳过不占游标 | 已验证 | 07_ops + 19 feature | 批量不聚焦（不打断用户） |
+| F-13 | 关闭叶子：只按 tabId 精确关一个 | `tabs-op.js` `closeLeaf` | 同 URL 多开不误关 | 已验证 | 07_ops；E2E D8 | — |
+| F-14 | 关闭节点子树 + 成功后清理绑定 | `tabs-op.js` `closeNode` | 关闭成功清 `open/tabId`；失败跳过不误清 | 已验证 | 11_trash 关闭链路场景 | — |
+| F-15 | 启动归类 / 窗口配对 / 打开态派生 | `src/core/align.js` | tabId-only，无 URL 兜底；pendingUrl 不点亮 | 已验证 | 05_align（15 场景）+ 18 feature | 打开态是派生态不入库 |
+| F-16 | 加载期刷新（loading/complete/url） | `shell.js` onUpdated | 加载中与完成态均保持高亮 | 已验证 | 18_merge_audit 静态契约 | 真机 pendingUrl 瞬态难伪造，由 BDD 覆盖 |
+
+## 3. 回收站（2026-11-24 口径反转）
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-20 | **删除入回收站同步关闭网页** | `shell.js` `removeToTrash` + `tabs-op.js` | 叶子先 `closeLeaf`；容器 `closeNode` 关子树；关闭抛错不入回收站并提示；标签已不存在照常入站 | 已验证 | 11_trash（14 场景，含反转场景） | 取代旧 FR-018「浏览器标签不动」 |
+| F-21 | 回收站条目清洗活绑定 | `src/core/trash-op.js` `trashNode` | payload/desc 清 tabId/open/windowId，保留模型数据 | 已验证 | 11_trash「不携带浏览器绑定」 | 恢复后为离线整理数据，不绑回已关标签 |
+| F-22 | 恢复回原父原位 / 兜底父 | `trash-op.js` `restoreEntry` | 原父在回原位；否则首个可用分组/新建默认 | 已验证 | 11_trash；E2E 12 | 恢复不自动重开网页（用户双击/Enter 打开） |
+| F-23 | 彻底删除 | `trash-op.js` `purgeEntry` | 条目移除不可恢复 | 已验证 | 11_trash；E2E 12 | — |
+
+## 4. 菜单与行内交互（2026-11-24 收敛定稿）
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-30 | 右键菜单收敛 | `src/ui/menu.js` | 叶子仅「删除到回收站」；组/窗各 3 项（打开/关闭/删除） | 已验证 | 08_menu（10 场景） | **备注右键入口已移除** |
+| F-31 | 行内按钮 | `src/ui/render.js` | 复制 ⧉ + 行尾铅笔重命名 + ✕ 仅已开常显 | 已验证 | 06/17 feature；E2E 8 | **`.open-x` 打开按钮已移除**（双击/Enter/右键打开） |
+| F-32 | 状态图标 | `render.js` | favicon 高亮/灰度表达打开态，无独立圆点 | 已验证 | 06_visual；E2E N3 | **独立状态圆点已废弃** |
+
+## 5. 设置 / 备份 / 导入导出 / 主页
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-40 | 设置三分类（外观/备份/复制） | `shell.js` 设置面板 | 单击行即时保存并广播所有宿主 | 已验证 | 02_shell（25 场景）；E2E 4 | — |
+| F-41 | 本地加密备份（两步卡片） | `import-export.js` + `crypto.js` | 密码不落盘；快照最多 20；恢复四类失败提示 | 已验证 | 09/16 feature；E2E 13 | — |
+| F-42 | GitHub Gist 加密备份 | `import-export.js` | 私有 Gist、可选 `api.github.com` 授权、定时 alarm | 已实现 | 09/16 feature（mock） | **真实线上演练待正式版前** |
+| F-43 | JSON/HTML/LinkMap 导入导出 | `import-export.js` | 嗅探自动识别、非法版本拒绝 | 已验证 | 09 feature（24 场景）；E2E 13 | — |
+| F-44 | 内部主页 | `homepage.js` + `src/home/` | 搜索引擎/常用站点配置、容器加号开主页 | 已验证 | 15_homepage_audit（15 场景） | — |
+| F-45 | 浏览器原生书签一键导入 | — | — | **已废弃（红线）** | — | 需 `bookmarks` 权限违反 C05；替代：手动导入 HTML |
+
+## 6. 多宿主（侧边栏 / 独立窗口 / PiP / 主页）
+
+| ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-50 | 双模式壳 + sidePanel | `sidebar.html` / `window.html` / service-worker | 快捷键/图标/右键唤起；同数据源 | 已验证 | 04_manifest_sw；E2E 1/9 | — |
+| F-51 | PiP 置顶（共享控制器宿主化） | `shell.js` `buildShellSkeleton`/`createShellController` | PiP 内设置/回收站/编辑/新建/备份/导入导出可操作；say/toast/主题广播全宿主；定位走共享 `locateActiveTab` | 已验证 | 18_merge_audit；E2E PiP 宿主化段 | 深度配置（GitHub 授权）建议独立窗口 |
+| F-52 | 统计底栏 / 快捷键表 / 指南 | `render.js` / `shell.js` | 四项实时统计；页脚指南/反馈入口 | 已验证 | 02 feature；E2E 3/5 | 反馈入口在页脚指南右侧（三端一致） |
+| F-53 | 定位当前标签 | `shell.js` `locateActiveTab` | tabId-only 反查；先同步快照补游离标签；内部页明确提示 | 已验证 | 17/18 feature；E2E | — |
+| F-54 | 全屏卡片视图 | — | — | **待实现** | 02 feature 契约（提示「待实现」） | 发布文案不得承诺 |
+
+## 7. 工程红线（门禁强制，非功能需求）
+
+| 红线 | 门禁 |
+| --- | --- |
+| 只信 tabId，禁 URL/标题兜底绑定或重新点亮 | `tools/check-constraints.mjs` + BDD 静态契约 |
+| 不申请 bookmarks/cookies/webRequest/all_urls 等额外权限 | constraints C05/C09 |
+| 零出站（唯一例外 `api.github.com` 仅 backup） | constraints C11/C12 |
+| 备份密码不落盘/不进备份文件/不写日志 | constraints + 09 feature |
+| 加密备份整体原子还原（树+回收站+设置+主页配置） | 16 feature |
+| 不改浏览器全局新标签页配置 | constraints |
+| 单一提交人 zeek.zhao / zeek.zhao@foxmail.com | `tools/check-committer.mjs` |
+
+## 8. 版本状态
+
+- `main` @ `v0.2.0`（tag `v0.2.0`）：已发布基线。
+- `release/v0.3.0-preview` @ `0.3.0-preview.1`（manifest `0.3.0.1`）：预览候选，详见 `docs/release/v0.3.0-preview.md`。
+- 立项规划的 `v1.0.0` / M0–M4 里程碑编号已废弃映射关系（历史见 `docs/history/`）。

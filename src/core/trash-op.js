@@ -7,6 +7,20 @@ import { findNode, descendantsOf, DEFAULT_WINDOW_TITLE } from "./model.js";
 
 const clone = (n) => JSON.parse(JSON.stringify(n));
 
+// 2026-11-24 回收站口径定稿：条目不得携带活浏览器绑定——
+// 叶子清除 tabId/open、窗口清除 windowId，保留 title/url/note/parentId/index 等模型数据。
+// 恢复后的节点作为离线整理数据存在，不会在下次同步时错误绑回已关闭的浏览器窗口/标签。
+function sanitizeForTrash(n) {
+  const c = clone(n);
+  if (c.kind === "tab") {
+    delete c.tabId;
+    delete c.open;
+  } else if (c.kind === "window") {
+    delete c.windowId;
+  }
+  return c;
+}
+
 export function entryLabel(entry) {
   const p = entry.payload || {};
   return p.title ?? p.url ?? "(无标题)";
@@ -29,13 +43,13 @@ export function trashNode(m, id, time) {
   const desc = descendantsOf(m, id);
   const entry = {
     kind: node.kind,
-    payload: clone(node),
+    payload: sanitizeForTrash(node),
     parentId: node.parentId ?? null,
     index: siblingIndexOf(m, node),
     time: time || "",
     desc: {
-      groups: desc.filter((d) => d.kind === "group").map(clone),
-      tabs: desc.filter((d) => d.kind === "tab").map(clone),
+      groups: desc.filter((d) => d.kind === "group").map(sanitizeForTrash),
+      tabs: desc.filter((d) => d.kind === "tab").map(sanitizeForTrash),
     },
   };
   const ids = new Set([id, ...desc.map((d) => d.id)]);
