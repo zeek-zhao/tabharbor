@@ -61,7 +61,7 @@
 | F-41 | 本地文件备份（明文/加密可选） | `import-export.js` `exportLocalSnapshot` + `crypto.js` | 默认明文 .json / 可选加密 .tbh；密码不落盘；**明文只下载不写扩展历史**；加密快照最多 20、条目区分明文/加密；恢复四类失败提示 | 已实现 | 09/16/21 feature；真机 E2E | 明文含敏感信息，UI 已明示；真实文件选择器待复核 |
 | F-42 | GitHub Gist 加密备份与恢复 | `import-export.js` `backupToGist`/`restoreFromGist` + `service-worker.js` | 私有 Gist POST/PATCH；密码 = `GET /user` 的 login（不落盘）；GET Gist + `owner.login` 解密恢复；旧 Gist 手动密码兜底；定时 alarm 用 Token 取 login 无人值守备份 | 已实现 | 09/16/21 feature（mock）；真机 E2E | **真实线上 Token 演练待完成；login 非强密码（UI 已明示）** |
 | F-43 | JSON/HTML/LinkMap 导入导出 + 完整快照分类 | `import-export.js` `isFullSnapshot`/`sniffImport` + `shell.js` | 完整快照 JSON 走二次确认全量覆盖（树/回收站/设置/主页配置）；HTML/LinkMap/纯书签树 JSON 合并为「导入书签」窗口不覆盖；主页配置只覆盖主页；嗅探按内容、非法拒绝 | 已实现 | 09 + 22 feature；真机 E2E | — |
-| F-44 | 内部主页（9 引擎 / 17 站点 / 壁纸） | `homepage.js` + `src/home/` | 9 内置引擎 + 17 默认站点、URL 协议常量拼接；壁纸 5 套渐变 + 本地图片（png/jpeg/webp ≤1MB）+ 遮罩，仅作用内部主页、零远程 URL | 已实现 | 15 + 24 feature | 主页配置导出/导入含 wallpaper |
+| F-44 | 内部主页（9 引擎 / 17 站点 / 壁纸） | `homepage.js` + `src/home/` | 9 内置引擎 + 17 默认站点、URL 协议常量拼接；壁纸 5 套渐变 + 本地图片（png/jpeg/webp ≤1MB）+ 用户主动输入的 https 图片链接 + 遮罩，仅作用内部主页；远程图片非代码硬编码、仅用户输入的 https 例外 | 已实现 | 15 + 24 feature | 主页配置导出/导入含 wallpaper 与 imageUrl；远程链接红线例外待用户拍板 |
 | F-45 | 浏览器原生书签一键导入 | — | — | **已废弃（红线）** | — | 需 `bookmarks` 权限违反 C05；替代：手动导入 HTML |
 
 ## 6. 多宿主（侧边栏 / 独立窗口 / PiP / 主页）
@@ -71,7 +71,7 @@
 | F-50 | 双模式壳 + sidePanel | `sidebar.html` / `window.html` / service-worker | 快捷键/图标/右键唤起；同数据源 | 已验证 | 04_manifest_sw；E2E 1/9 | — |
 | F-51 | PiP 置顶（共享控制器宿主化） | `shell.js` `buildShellSkeleton`/`createShellController` | PiP 内设置/回收站/编辑/新建/备份/导入导出可操作；say/toast/主题广播全宿主；定位走共享 `locateActiveTab` | 已验证 | 18_merge_audit；E2E PiP 宿主化段 | 深度配置（GitHub 授权）建议独立窗口 |
 | F-52 | 独立窗口左右拖拽缩放与宽度记忆 | `service-worker.js` `normalizeStandaloneWidth`/`openWindow` + `shell.js` + `m2.css` | lastBounds.standaloneWidth（默认 380，300–720 clamp）；仅 .winmode 显示手柄；拖拽 windows.update 改宽、松手持久化；侧边栏保持 420px 上限 | 已实现 | 23 feature；真机待复核 | Chrome popup 类型是否允许 windows.update 需真机确认 |
-| F-52 | 统计底栏 / 快捷键表 / 指南 | `render.js` / `shell.js` | 四项实时统计；页脚指南/反馈入口 | 已验证 | 02 feature；E2E 3/5 | 反馈入口在页脚指南右侧（三端一致） |
+| F-55 | 统计底栏 / 快捷键表 / 指南 | `render.js` / `shell.js` | 四项实时统计；页脚指南/反馈入口 | 已验证 | 02 feature；E2E 3/5 | 反馈入口在页脚指南右侧（三端一致） |
 | F-53 | 定位当前标签 | `shell.js` `locateActiveTab` | tabId-only 反查；先同步快照补游离标签；内部页明确提示 | 已验证 | 17/18 feature；E2E | — |
 | F-54 | 全屏卡片视图 | — | — | **待实现** | 02 feature 契约（提示「待实现」） | 发布文案不得承诺 |
 
@@ -81,7 +81,7 @@
 | --- | --- |
 | 只信 tabId，禁 URL/标题兜底绑定或重新点亮 | `tools/check-constraints.mjs` + BDD 静态契约 |
 | 不申请 bookmarks/cookies/webRequest/all_urls 等额外权限 | constraints C05/C09 |
-| 零出站（唯一例外 `api.github.com` 仅 backup） | constraints C11/C12 |
+| 代码主动出站仅 `api.github.com`（backup）；用户主动输入的 https 图片壁纸链接为运行时资源例外（非代码请求，经校验拒绝伪协议） | constraints C11/C12 + 24 feature |
 | 备份密码不落盘/不进备份文件/不写日志 | constraints + 09 feature |
 | 加密备份整体原子还原（树+回收站+设置+主页配置） | 16 feature |
 | 不改浏览器全局新标签页配置 | constraints |
@@ -114,8 +114,28 @@ CI 证据链接：<https://github.com/zeek-zhao/tabharbor/actions/runs/454454261
 | F-70 | 完整 JSON 快照导入分类（P0） | `import-export.js` `isFullSnapshot`/`sniffImport` + `shell.js` | 完整快照走覆盖恢复（校验+二次确认+全量写回）；HTML/LinkMap/纯树 JSON 合并不覆盖；取消/校验失败不写库 | 已实现 | 22 feature（8 场景）+ 真机 E2E |
 | F-71 | 独立窗口拖拽缩放与宽度记忆 | `service-worker.js` + `shell.js` + `m2.css` | 300–720 clamp、仅 winmode 手柄、windows.update 改宽、lastBounds 持久化 | 已实现 | 23 feature（3 场景）；popup 宽度更新待真机确认 |
 | F-72 | 主页引擎 9 / 站点 17 扩充 | `homepage.js` + `15_homepage_audit.feature` | 协议常量拼接、非法 URL 过滤、normalizeHomeConfig 去重 | 已实现 | 15 feature |
-| F-73 | 主页壁纸 | `homepage.js` `normalizeWallpaper` + `src/home/` | 5 渐变 + 本地图片 ≤1MB + scrim 遮罩、仅内部主页、零远程 URL、配置导入导出含 wallpaper | 已实现 | 24 feature（7 场景）；深浅渲染对比度待真机复核 |
+| F-73 | 主页壁纸 | `homepage.js` `normalizeWallpaper` + `src/home/` | 5 渐变 + 本地图片 ≤1MB + scrim 遮罩、仅内部主页、配置导入导出含 wallpaper；第二轮新增用户输入的 https 链接（二选一、伪协议拒绝、失败回退渐变） | 已实现 | 24 feature（9 场景）；深浅渲染对比度、CSP 远程图片待真机复核 |
 | F-74 | 按钮扁平统一 + 文案 | `m2.css`/`home.css` + 两 HTML | 32px/8px/12px 统一、nowrap、三端 ID 与文案一致 | 已实现 | 17 feature + 静态契约 |
 | F-75 | 明文快照不写扩展历史 / 结构化旧密码错误 / 样例去 m3 | `import-export.js` + `shell.js` + `samples/` | 明文只下载；错误码 `legacy-password-required`；样例重命名 | 已实现 | 21/24 feature + 样例校验 |
 
 CI 证据：本轮推送后新 run 见最终执行报告；已发布 v0.3.0 的历史证据见 §9 链接。**未取得真机/CI 证据前，上述状态均为「已实现」而非「已验证」。**
+
+## 11. 第三轮审计修复（2026-11-25，基于 `3479738`，待 v0.3.1 决策）
+
+> 依据审计报告《TabHarbor 最新提交复核：主页升级迁移/壁纸链接/两栏布局/备份残留问题》，本轮 7 项任务已落库于 `refactor/backup-three-categories`，**未包含在已发布 `v0.3.0` tag**。
+
+| ID | 修复 | 源码 | 验收 | 状态 | 证据/缺口 |
+| --- | --- | --- | --- | --- | --- |
+| F-76 | 设置版本迁移与升级默认值提示（P0） | `store.js` `migrateSettings`/`loadAll` + `homepage.js` `migrateHomeConfig`/`needsHomepageMigration` + `home.js` 一次性弹窗 | settings 加 schema/默认版本；旧配置补齐缺失默认站点、失效引擎回退、壁纸补默认、隐藏站点不重复加回；新安装不弹；三选一 + 主题单独询问 | 已实现 | 25 feature（6 场景）；旧用户真机升级路径待复核 |
+| F-77 | 主页设置分类两栏布局 | `home.html` `home-cfg-grid`/4 卡片 + `home.css` | 宽屏两栏、<560px 回退单列；四类分区；窄屏不折行 | 已实现 | 26 feature + 真机 Chromium 渲染（宽屏 419+419 / 窄屏单列） |
+| F-78 | 纯书签树 JSON 容错解析 | `import-export.js` `parseBookmarkTree` + `shell.js` | 只校验三层树，缺 settings/trash/version 补空；完整快照仍走校验覆盖 | 已实现 | 27 feature（2 场景）+ 22 feature 回归 |
+| F-79 | 网络链接壁纸（https 白名单） | `homepage.js` `normalizeWallpaperUrl` + `home.js` + 24 feature + C11/C12 口径 | 仅用户主动输入的 https 链接；拒绝伪协议与注入字符；二选一；加载失败回退渐变；导出导入含 imageUrl | 已实现 | 24 feature（9 场景）+ 真机 DOM 交互；**红线例外待用户拍板、MV3 CSP 远程图片待真机确认** |
+| F-80 | 本地图片壁纸交互完善 | `home.js` + `home.html` + `home.css` | 选择按钮/预览/文件名大小；移除当前图片 vs 恢复默认拆分；≤1MB + 配额可读提示；导入确认文案含壁纸 | 已实现 | 28 feature（2 场景）+ 真机 Chromium 交互 |
+| F-81 | 独立窗 bounds 合并与拖拽兜底 | `store.js` `saveBounds` + `shell.js` | 合并写 lastBounds 不清空位置；起始宽度不依赖 outerWidth；监听解绑 + blur/mouseleave 兜底 | 已实现 | 29 feature（2 场景）；popup windows.update 仍待真机确认 |
+| F-82 | 文档与状态口径 | 本台账 + `test-matrix.md` + `backup-guide.md` + `PRIVACY.md` | 修复重复 F-52（→F-55）；未真机证据一律「已实现」；同步远程壁纸红线口径 | 已实现 | 本轮门禁全绿 |
+
+**待用户拍板的隐私/红线口径**：F-79 把「零出站」从硬红线调整为「代码主动出站仅 GitHub + 用户主动输入的 https 图片链接为运行时资源例外」。该例外不写源码字面量、不 fetch、仅浏览器按用户配置加载图片；但会暴露网络环境信息与第三方统计，需产品/用户确认后决定是否正式纳入红线白名单。
+
+BDD 场景总数：301/301 PASS（基线 285 → 本轮 +16）。**未取得真机/CI E2E 证据前，本轮状态均为「已实现」而非「已验证」。**
+
+> 回归修复（同轮）：容错解析初版把「带完整快照标记但版本不符」的 JSON 降级为纯书签树合并，导致真机 E2E 的"版本不兼容"提示丢失；已在 `parseBookmarkTree` 加快照标记守卫并补 27 号场景（E2E 现已全段通过）。

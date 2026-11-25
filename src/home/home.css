@@ -249,7 +249,37 @@
   font-size: 11px;
 }
 
-/* 配置面板 */
+/* 原生 hidden 属性优先于本文件的 display:flex 类（wpUrlActions / wpPreview 折叠用）。 */
+.home-body [hidden] {
+  display: none !important;
+}
+
+/* 配置面板（2026-11-25 分类两栏布局）：宽屏两列网格，窄屏（侧边栏/PiP <560px）回退单列。 */
+.home-cfg-modal {
+  width: 880px;
+}
+.home-cfg-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+.home-cfg-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line1);
+  border-radius: 10px;
+  background: var(--bg1);
+}
+.home-cfg-card .sec-title {
+  margin-top: 0;
+}
+@media (max-width: 560px) {
+  .home-cfg-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .home-cfg-engines,
 .home-cfg-sites {
   display: flex;
@@ -313,4 +343,39 @@
   font-size: 11px;
   color: var(--fg2);
   margin: 0 0 10px;
+}
+/* 壁纸预览块：显示当前来源；本地/网络图片作缩略图，渐变作色块。 */
+.wp-preview {
+  margin-top: 8px;
+  min-height: 54px;
+  border: 1px solid var(--line1);
+  border-radius: 8px;
+  background: var(--bg3);
+  display: flex;
+  align-items: flex-end;
+  padding: 6px 8px;
+  box-sizing: border-box;
+}
+.wp-preview.has-image {
+  background-color: var(--bg3);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+}
+.wp-preview-label {
+  font-size: 11px;
+  color: var(--fg1);
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+.wp-image-meta {
+  font-size: 11px;
+  color: var(--fg2);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

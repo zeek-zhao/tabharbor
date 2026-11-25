@@ -151,6 +151,46 @@ export async function importJSON(data, currentModel) {
 }
 
 /**
+ * 纯书签树 JSON 容错解析（2026-11-25 审计 §8.1）：只校验 windows/groups/tabs 三层树，
+ * 缺 settings / trash / version 时补空对象/空数组，交给 mergeAsImportedWindow 合并导入。
+ * 与 importJSON 的区别：importJSON 强制完整快照字段（version/settings/trash/exportedAt），
+ * 真实世界交换的纯书签树 JSON 往往没有这些字段，不应被完整快照校验拒绝。
+ * 返回的 settings 来自调用方传入的 currentSettings，不污染/覆盖当前设置或回收站。
+ */
+export function parseBookmarkTree(data, currentModel = {}) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("导入数据无效：非对象");
+  }
+  // 2026-11-25 回归修复：带完整快照标记（settings 对象 + trash 数组 + exportedAt 字符串）
+  // 却版本不符的 JSON，是"损坏/不兼容的快照"，不能降级为纯书签树容错合并，
+  // 否则用户会以为导入成功但静默丢弃回收站/设置。交给通用 catch 报"导入失败：版本不兼容…"。
+  const looksLikeSnapshot =
+    data.settings &&
+    typeof data.settings === "object" &&
+    !Array.isArray(data.settings) &&
+    Array.isArray(data.trash) &&
+    typeof data.exportedAt === "string";
+  if (looksLikeSnapshot && data.version !== EXPORT_VERSION) {
+    throw new Error(
+      "版本不兼容：期望 v" + EXPORT_VERSION + "，实际 v" + (data.version ?? "unknown")
+    );
+  }
+  for (const key of ["windows", "groups", "tabs"]) {
+    if (!Array.isArray(data[key])) throw new Error("书签树缺少字段：" + key);
+  }
+  const newModel = {
+    windows: data.windows || [],
+    groups: data.groups || [],
+    tabs: data.tabs || [],
+    trash: [], // 合并导入不携带回收站
+    settings: currentModel.settings || {}, // 合并导入不覆盖设置
+  };
+  reassignDuplicateIds(newModel);
+  validateTree(newModel);
+  return newModel;
+}
+
+/**
  * R2（m10454）：导入内容合并为单个「导入书签」窗口。
  * 不做全量替换：当前模型的窗口/分组/标签/回收站/设置全部保留，
  * 导入快照的全部顶层内容归入一个新建窗口（导入内容内部的层级保持不变）。

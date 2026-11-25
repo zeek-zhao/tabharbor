@@ -59,16 +59,31 @@ export const WALLPAPER_PRESETS = [
 ];
 
 export const DEFAULT_WALLPAPER = {
-  mode: "none", // none | gradient | image
+  mode: "none", // none | gradient | image（本地图片）| url-image（用户主动输入的 https 图片）
   preset: "deep-blue",
-  imageData: "", // 仅本地图片 data URL（png/jpeg/webp），禁止远程 URL
+  imageData: "", // 本地图片 data URL（png/jpeg/webp），仅存本机
+  imageUrl: "", // 用户主动输入的 https 图片链接（远程壁纸例外，见 C11/C12 口径）
   scrim: 0.35, // 遮罩不透明度，保证文字对比度
 };
 
-/** 壁纸配置规范化：模式/preset/scrim 合法化；image 模式无合法 data URL 时回退 gradient。 */
+/**
+ * 远程壁纸链接校验（2026-11-25，红线例外）：
+ * - 仅允许 https 图片（用协议常量 P 拼接，源码不出现字面远程协议，遵守 C12）；
+ * - 拒绝 http 明文与 javascript:/blob:/file:/data: 等一切伪协议；
+ * - 拒绝引号/反斜杠/空白/括号/尖括号等可用于 CSS 注入的字符（数据层即净化，渲染不再拼接恶意值）。
+ * 返回净化后的链接；非法返回空串。
+ */
+export function normalizeWallpaperUrl(value) {
+  const s = String(value == null ? "" : value).trim();
+  if (!s.startsWith(P)) return ""; // 仅安全 https 协议，天然拒绝明文 http 与所有伪协议
+  if (/["'\\\s()<>]/.test(s)) return "";
+  return s;
+}
+
+/** 壁纸配置规范化：模式/preset/scrim 合法化；image/url-image 无合法来源时回退 gradient；两种图片来源二选一。 */
 export function normalizeWallpaper(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
-  const mode = ["none", "gradient", "image"].includes(src.mode) ? src.mode : "none";
+  const mode = ["none", "gradient", "image", "url-image"].includes(src.mode) ? src.mode : "none";
   const preset = WALLPAPER_PRESETS.some((p) => p.id === src.preset)
     ? src.preset
     : DEFAULT_WALLPAPER.preset;
@@ -80,10 +95,18 @@ export function normalizeWallpaper(raw) {
     typeof src.imageData === "string" && /^data:image\/(png|jpeg|webp);base64,/i.test(src.imageData)
       ? src.imageData
       : "";
+  const imageUrl = normalizeWallpaperUrl(src.imageUrl);
+  // 二选一：本地图片模式清空远程链接，网络链接模式清空本地数据；缺合法来源回退渐变。
+  const effectiveImageData = mode === "image" ? imageData : "";
+  const effectiveImageUrl = mode === "url-image" ? imageUrl : "";
+  let finalMode = mode;
+  if (mode === "image" && !effectiveImageData) finalMode = "gradient";
+  if (mode === "url-image" && !effectiveImageUrl) finalMode = "gradient";
   return {
-    mode: mode === "image" && !imageData ? "gradient" : mode,
+    mode: finalMode,
     preset,
-    imageData,
+    imageData: effectiveImageData,
+    imageUrl: effectiveImageUrl,
     scrim,
   };
 }
@@ -94,7 +117,72 @@ export const DEFAULT_HOMEPAGE = {
   customEngines: [], // [{ id, name, url }]，url 含 %s 占位
   sites: DEFAULT_SITES, // [{ title, url }]，顺序即展示顺序
   wallpaper: DEFAULT_WALLPAPER, // 2026-11-25：壁纸配置
+  hiddenDefaultSiteUrls: [], // 2026-11-25 P0：用户主动删除的内置默认站点 URL，升级不再加回
 };
+
+// ===== 2026-11-25 P0：设置版本迁移与升级默认值补全 =====
+// 主页默认配置版本号：随内置引擎/站点/壁纸结构变化递增；旧持久化配置版本落后时走迁移。
+export const HOMEPAGE_DEFAULTS_VERSION = "2026.11.25";
+export const SETTINGS_SCHEMA_VERSION = 1;
+
+/**
+ * 判断引擎 id 是否合法（内置或用户自定义引擎中存在）。
+ */
+export function isEngineAvailable(config, id) {
+  const all = [...BUILTIN_ENGINES, ...((config && config.customEngines) || [])];
+  return all.some((e) => e && e.id === id);
+}
+
+/**
+ * 是否需要主页配置迁移：仅当存在已持久化的 homepage 配置但版本落后/缺失时为 true。
+ * 全新安装（无 settings / 无 homepage）返回 false —— 不弹升级提示。
+ */
+export function needsHomepageMigration(settings) {
+  if (!settings || typeof settings !== "object") return false;
+  if (!settings.homepage || typeof settings.homepage !== "object") return false;
+  return settings.homepageDefaultsVersion !== HOMEPAGE_DEFAULTS_VERSION;
+}
+
+/** 全量恢复插件默认主页配置（升级弹窗「恢复默认」选项）。 */
+export function resetHomepageConfig() {
+  return normalizeHomeConfig(null);
+}
+
+/**
+ * 主页配置迁移（P0）：把旧版本持久化的 homepage 配置升级到当前默认集合。
+ * - engine：合法则保留，否则回退 bing；
+ * - customEngines：保留用户自定义，过滤缺 %s / 非法协议（复用 normalizeHomeConfig）；
+ * - sites：保留用户现有站点，按 URL 去重后追加当前内置默认站点中缺失的那些；
+ *   主动删除过的默认站点（hiddenDefaultSiteUrls）不再加回；
+ * - wallpaper：已有配置不覆盖（normalizeWallpaper 规整），缺失补默认；
+ * - hiddenDefaultSiteUrls：规整为合法 http(s) URL 数组。
+ * 返回 { config, added: 新增默认站点数 }，供 store 迁移与 BDD 校验。
+ */
+export function migrateHomeConfig(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const base = normalizeHomeConfig(src);
+  const engine = isEngineAvailable(base, base.engine) ? base.engine : BUILTIN_ENGINES[0].id;
+  const hidden = base.hiddenDefaultSiteUrls;
+  const hiddenSet = new Set(hidden.map((u) => String(u).toLowerCase()));
+  const seen = new Set(base.sites.map((s) => String(s.url).toLowerCase()));
+  const addedSites = [];
+  for (const d of DEFAULT_SITES) {
+    const key = d.url.toLowerCase();
+    if (seen.has(key) || hiddenSet.has(key)) continue;
+    seen.add(key);
+    addedSites.push({ ...d });
+  }
+  return {
+    config: {
+      engine,
+      customEngines: base.customEngines,
+      sites: [...base.sites, ...addedSites],
+      wallpaper: base.wallpaper,
+      hiddenDefaultSiteUrls: hidden,
+    },
+    added: addedSites.length,
+  };
+}
 
 // 把关键词代入引擎模板：无 %s 时退化为 url + 编码关键词（兼容用户手填引擎）。
 export function engineSearchUrl(engine, query) {
@@ -143,7 +231,19 @@ export function normalizeHomeConfig(raw) {
           return true;
         })
     : DEFAULT_SITES.map((s) => ({ ...s }));
-  return { engine, customEngines, sites, wallpaper: normalizeWallpaper(src.wallpaper) };
+  // P0（2026-11-25）：用户主动删除的内置默认站点 URL，迁移时不再加回。
+  const hiddenDefaultSiteUrls = Array.isArray(src.hiddenDefaultSiteUrls)
+    ? src.hiddenDefaultSiteUrls
+        .filter((u) => typeof u === "string" && safeUrl(u))
+        .map((u) => u.trim())
+    : [];
+  return {
+    engine,
+    customEngines,
+    sites,
+    wallpaper: normalizeWallpaper(src.wallpaper),
+    hiddenDefaultSiteUrls,
+  };
 }
 
 // 解析主页完整 URL：优先 chrome.runtime.getURL，测试/无 runtime 环境回退相对路径。

@@ -4,7 +4,15 @@
 
 // H3（2026-11-24 主页审计）：主页配置存于 settings.homepage，settings 已在 ALL_KEYS 中，
 // 无需新增顶层键；此处引入默认值供全新安装与迁移合并。
+// P0（2026-11-25）：迁移时需按当前默认集合补齐字段/引擎回退，故引入规范化工具。
 import { DEFAULT_HOMEPAGE } from "./homepage.js";
+import {
+  HOMEPAGE_DEFAULTS_VERSION,
+  SETTINGS_SCHEMA_VERSION,
+  normalizeHomeConfig,
+  migrateHomeConfig,
+  needsHomepageMigration,
+} from "./homepage.js";
 
 export const MODEL_KEYS = ["windows", "groups", "tabs"];
 export const ALL_KEYS = [
@@ -17,6 +25,9 @@ export const ALL_KEYS = [
 ];
 
 export const DEFAULT_SETTINGS = {
+  // P0（2026-11-25）：设置结构版本 + 主页默认配置版本，供旧配置自动迁移识别（不弹破坏性覆盖）。
+  settingsSchemaVersion: SETTINGS_SCHEMA_VERSION,
+  homepageDefaultsVersion: HOMEPAGE_DEFAULTS_VERSION,
   theme: "dark",
   openMode: "sidebar",
   restoreLast: true,
@@ -41,11 +52,34 @@ export const DEFAULT_SETTINGS = {
   },
 };
 
+/**
+ * 设置层迁移（P0，2026-11-25）：non-destructive，loadAll 纯读不写库。
+ * - 旧持久化 homepage（版本落后）走 migrateHomeConfig：保留用户站点/自定义引擎/壁纸，
+ *   追加缺失的内置默认站点，失效引擎回退必应，隐藏站点不重复加回；
+ * - 迁移结果即时生效于内存（下次 saveSettings 自然落库），无需用户弹窗即可看到新增站点；
+ * - 补齐 settingsSchemaVersion / homepageDefaultsVersion 版本标记；
+ * - 清除旧 ghBackupPassword（密码不落盘红线）。
+ * 「恢复插件默认」属破坏性操作，不在此自动执行，由 home.js 一次性升级弹窗显式确认。
+ */
+export function migrateSettings(rawSettings) {
+  const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) };
+  delete merged.ghBackupPassword;
+  if (rawSettings && rawSettings.homepage && typeof rawSettings.homepage === "object") {
+    merged.homepage =
+      rawSettings.homepageDefaultsVersion !== HOMEPAGE_DEFAULTS_VERSION
+        ? migrateHomeConfig(rawSettings.homepage).config
+        : normalizeHomeConfig(rawSettings.homepage);
+  }
+  merged.settingsSchemaVersion = SETTINGS_SCHEMA_VERSION;
+  merged.homepageDefaultsVersion = HOMEPAGE_DEFAULTS_VERSION;
+  return merged;
+}
+
 export async function loadAll(chromeApi = globalThis.chrome) {
   const got = await chromeApi.storage.local.get(ALL_KEYS);
-  const settings = { ...DEFAULT_SETTINGS, ...(got.settings || {}) };
-  // 2026-11-25 备份重构：清除旧 ghBackupPassword（密码不落盘红线；login 派生密码已取代它）。
-  delete settings.ghBackupPassword;
+  // 记录迁移前的版本落后状态（内存标志，不写库），供 UI 一次性升级弹窗判断。
+  const needsUpgrade = needsHomepageMigration(got.settings);
+  const settings = migrateSettings(got.settings);
   return {
     windows: got.windows || [],
     groups: got.groups || [],
@@ -53,6 +87,7 @@ export async function loadAll(chromeApi = globalThis.chrome) {
     trash: got.trash || [],
     settings,
     lastBounds: got.lastBounds || {},
+    homepageNeedsUpgrade: needsUpgrade,
   };
 }
 
@@ -80,8 +115,12 @@ export async function appendTrash(entry) {
   return next;
 }
 
-export async function saveBounds(b) {
-  await chrome.storage.local.set({ lastBounds: b });
+// 合并写入（2026-11-25 审计 §8.2）：只更新传入的 patch 字段，不清空窗口位置/高度等其他 bounds。
+export async function saveBounds(patch, chromeApi = globalThis.chrome) {
+  const got = await chromeApi.storage.local.get(["lastBounds"]);
+  const next = { ...(got.lastBounds || {}), ...(patch || {}) };
+  await chromeApi.storage.local.set({ lastBounds: next });
+  return next;
 }
 
 // 模型键（含 trash/settings 视需要）变更广播：双模式实时同步的数据通道（FR-001/FR-012）

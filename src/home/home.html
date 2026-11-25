@@ -72,85 +72,118 @@
       </section>
     </main>
 
-    <!-- 主页配置面板（Q2 引擎 / Q3 常用网址增删改排序） -->
+    <!-- 主页配置面板（Q2 引擎 / Q3 常用网址 / Q4 壁纸；2026-11-25 分类两栏布局） -->
     <div id="homeCfgMask" class="mask" hidden>
-      <div class="modal">
+      <div class="modal home-cfg-modal">
         <header>
           <h3>主页设置</h3>
           <button id="homeCfgClose" class="x tbtn" type="button" aria-label="关闭">✕</button>
         </header>
-        <div class="content">
-          <div class="sec-title">搜索引擎</div>
-          <div id="engineList" class="home-cfg-engines"></div>
-          <div class="field-row">
-            <label for="customEngineName">自定义引擎名称</label>
-            <input
-              id="customEngineName"
-              class="edit-input"
-              type="text"
-              placeholder="如：我的搜索"
-            />
-          </div>
-          <div class="field-row">
-            <label for="customEngineUrl">搜索地址（%s 为关键词占位）</label>
-            <input
-              id="customEngineUrl"
-              class="edit-input"
-              type="text"
-              placeholder="https://example.com/search?q=%s"
-            />
-          </div>
-          <div class="modal-actions">
-            <button id="addEngine" class="btn" type="button">添加自定义引擎</button>
-            <button id="resetHomeCfg" class="btn" type="button">恢复默认</button>
-          </div>
+        <div class="content home-cfg-grid">
+          <!-- 外观与壁纸 -->
+          <section class="home-cfg-card">
+            <div class="sec-title">外观与壁纸（仅内部主页）</div>
+            <div class="field-row">
+              <label for="wpMode">壁纸模式</label>
+              <select id="wpMode" class="edit-input">
+                <option value="none">无（默认渐变）</option>
+                <option value="gradient">内置渐变</option>
+                <option value="image">本地图片</option>
+                <option value="url-image">网络图片链接</option>
+              </select>
+            </div>
+            <div class="field-row" id="wpPresetRow">
+              <label for="wpPreset">渐变预设</label>
+              <select id="wpPreset" class="edit-input"></select>
+            </div>
+            <div class="field-row hidden" id="wpImageRow">
+              <label>本地图片（png/jpeg/webp，≤1MB）</label>
+              <input
+                id="wpImage"
+                class="hidden"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+              />
+              <button id="wpPickImage" class="btn" type="button">选择本地图片</button>
+              <span id="wpImageMeta" class="wp-image-meta"></span>
+            </div>
+            <div class="field-row hidden" id="wpUrlRow">
+              <label for="wpImageUrl">图片链接</label>
+              <input
+                id="wpImageUrl"
+                class="edit-input"
+                type="url"
+                inputmode="url"
+                placeholder="仅 https 图片链接"
+              />
+            </div>
+            <div class="modal-actions" id="wpUrlActions" hidden>
+              <button id="wpUrlApply" class="btn" type="button">预览并应用</button>
+              <button id="wpUrlClear" class="btn" type="button">清除链接</button>
+            </div>
+            <div id="wpPreview" class="wp-preview" hidden>
+              <span id="wpPreviewLabel" class="wp-preview-label">当前壁纸</span>
+            </div>
+            <div class="field-row" id="wpScrimRow">
+              <label for="wpScrim">遮罩浓度 <span id="wpScrimVal">0.35</span></label>
+              <input id="wpScrim" class="edit-input" type="range" min="0" max="0.85" step="0.05" />
+            </div>
+            <p class="home-hint">
+              本地图片以 data URL 仅存本机，不上传；网络链接仅存本机、可能暴露网络环境，请谨慎。
+            </p>
+            <div class="modal-actions">
+              <button id="wpRemoveImage" class="btn" type="button">移除当前图片</button>
+              <button id="wpResetWallpaper" class="btn" type="button">恢复默认壁纸</button>
+            </div>
+          </section>
 
-          <div class="sec-title" style="margin-top: 18px">壁纸（仅内部主页）</div>
-          <div class="field-row">
-            <label for="wpMode">壁纸模式</label>
-            <select id="wpMode" class="edit-input">
-              <option value="none">无（默认渐变）</option>
-              <option value="gradient">内置渐变</option>
-              <option value="image">本地图片</option>
-            </select>
-          </div>
-          <div class="field-row" id="wpPresetRow">
-            <label for="wpPreset">渐变预设</label>
-            <select id="wpPreset" class="edit-input"></select>
-          </div>
-          <div class="field-row hidden" id="wpImageRow">
-            <label for="wpImage">本地图片（png/jpeg/webp，≤1MB）</label>
-            <input
-              id="wpImage"
-              class="edit-input"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-            />
-          </div>
-          <div class="field-row" id="wpScrimRow">
-            <label for="wpScrim">遮罩浓度 <span id="wpScrimVal">0.35</span></label>
-            <input id="wpScrim" class="edit-input" type="range" min="0" max="0.85" step="0.05" />
-          </div>
-          <p class="home-hint">
-            图片以 data URL 仅存本机，不上传、不提供远程地址；敏感内容请谨慎。
-          </p>
-          <div class="modal-actions">
-            <button id="wpRemoveImage" class="btn" type="button">移除图片并恢复默认</button>
-          </div>
+          <!-- 搜索引擎 -->
+          <section class="home-cfg-card">
+            <div class="sec-title">搜索引擎</div>
+            <div id="engineList" class="home-cfg-engines"></div>
+            <div class="field-row">
+              <label for="customEngineName">自定义引擎名称</label>
+              <input
+                id="customEngineName"
+                class="edit-input"
+                type="text"
+                placeholder="如：我的搜索"
+              />
+            </div>
+            <div class="field-row">
+              <label for="customEngineUrl">搜索地址（%s 为关键词占位）</label>
+              <input
+                id="customEngineUrl"
+                class="edit-input"
+                type="text"
+                placeholder="https://example.com/search?q=%s"
+              />
+            </div>
+            <div class="modal-actions">
+              <button id="addEngine" class="btn" type="button">添加自定义引擎</button>
+              <button id="resetHomeCfg" class="btn" type="button">恢复默认</button>
+            </div>
+          </section>
 
-          <div class="sec-title" style="margin-top: 18px">配置导入导出（M9）</div>
-          <p class="home-hint">
-            导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。
-          </p>
-          <div class="modal-actions">
-            <button id="homeExportCfg" class="btn" type="button">导出主页配置</button>
-            <button id="homeImportCfg" class="btn" type="button">导入主页配置</button>
-          </div>
-          <input id="homeImportFile" type="file" hidden />
+          <!-- 常用网址 -->
+          <section class="home-cfg-card">
+            <div class="sec-title">常用网址</div>
+            <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
+            <div id="siteEditList" class="home-cfg-sites"></div>
+          </section>
 
-          <div class="sec-title" style="margin-top: 18px">常用网址</div>
-          <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
-          <div id="siteEditList" class="home-cfg-sites"></div>
+          <!-- 配置导入导出 -->
+          <section class="home-cfg-card">
+            <div class="sec-title">配置导入导出（M9）</div>
+            <p class="home-hint">
+              导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。
+            </p>
+            <div class="modal-actions">
+              <button id="homeExportCfg" class="btn" type="button">导出主页配置</button>
+              <button id="homeImportCfg" class="btn" type="button">导入主页配置</button>
+            </div>
+            <input id="homeImportFile" type="file" hidden />
+          </section>
         </div>
       </div>
     </div>

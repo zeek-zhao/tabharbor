@@ -42,13 +42,16 @@ const RULES = [
   {
     id: "C11",
     re: /\bfetch\s*\(|XMLHttpRequest\b/g,
-    desc: "网络出站（红线 7 修订白名单：仅 GitHub 备份模块）",
+    desc: "代码主动网络出站（红线 7 修订白名单：仅 GitHub 备份模块）",
     allowFiles: ["src/core/import-export.js"],
   },
   {
     id: "C12",
     re: /https?:\/\/(?!api\.github\.com)/g,
-    desc: "出站 URL 必须是 https://api.github.com（红线 7 修订）",
+    // 2026-11-25 红线例外：用户主动输入的 https 图片壁纸链接（运行时数据，不落源码字面量）
+    // 由 home.js 经 normalizeWallpaperUrl 校验后以 CSS url() 加载，不是代码硬编码出站；
+    // 本规则继续禁止源码中出现任何非 GitHub 的协议字面量，故无需为该例外开 allowFiles。
+    desc: "源码出站 URL 必须是 https://api.github.com（红线 7 修订）",
     allowFiles: ["src/core/import-export.js"],
   },
 ];

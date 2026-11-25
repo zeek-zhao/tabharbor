@@ -4312,8 +4312,10 @@ step("当", "合并一份纯书签树 JSON 为导入窗口", async () => {
       },
     ],
   };
-  // importJSON 要求完整字段；纯书签树合并场景补齐 settings/trash，但合并时不使用它们。
-  const parsed = await io.importJSON({ ...tree, settings: ctx.m.settings, trash: [] }, ctx.m);
+  // 2026-11-25 审计 §8.1：纯书签树缺 settings/trash/version 也必须能被容错解析。
+  // 这里刻意只传三层树（无 version/settings/trash），验证真实交换文件不再被完整快照校验拒绝。
+  const parsed = io.parseBookmarkTree(tree, { settings: ctx.m.settings });
+  if (parsed.trash.length !== 0) throw new Error("容错解析不应携带回收站");
   ctx.mergeModel = JSON.parse(JSON.stringify(ctx.m));
   ctx.importedWin = io.mergeAsImportedWindow(ctx.mergeModel, parsed);
 });
@@ -4477,25 +4479,331 @@ step("当", "规范化一份空主页配置", () => {
 
 step("那么", "规范化配置含合法 wallpaper 字段", () => {
   const wp = ctx.wpCfg.wallpaper;
-  if (!wp || !["none", "gradient", "image"].includes(wp.mode))
+  if (!wp || !["none", "gradient", "image", "url-image"].includes(wp.mode))
     throw new Error("规范化配置缺合法 wallpaper");
   if (!Number.isFinite(wp.scrim)) throw new Error("scrim 非法");
 });
 
-step("那么", "壁纸仅作用内部主页且无远程 URL 输入", () => {
+step("那么", "壁纸仅作用内部主页且远程图片仅接受用户输入的 https 链接", () => {
   const homeJs = repoFile("src/home/home.js");
   const homeCss = repoFile("src/home/home.css");
   const hpSrc = repoFile("src/core/homepage.js");
+  const homeHtml = repoFile("src/home/home.html");
   if (!homeJs.includes("renderWallpaper")) throw new Error("主页未渲染壁纸");
   if (!homeCss.includes("data-wallpaper-mode")) throw new Error("壁纸样式未限定内部主页");
-  // 零出站：壁纸仅接受 data:image/*；不接受远程 URL 输入
+  // 本地图片仍仅接受 data:image/*（不提供任意本地路径读取）
   if (!/\^data:image\\?\/\(png\|jpeg\|webp\);base64,/.test(hpSrc))
     throw new Error("缺 data URL 校验");
-  if (homeJs.includes("wallpaperUrl") || homeJs.includes("wpRemoteUrl"))
-    throw new Error("存在远程壁纸 URL 输入");
-  const homeHtml = repoFile("src/home/home.html");
-  if (!homeJs.includes("image/") && !homeHtml.includes("image/png,image/jpeg,image/webp"))
-    throw new Error("未限制本地图片类型");
+  // 远程图片：必须来自 UI 输入框（用户主动输入），且 URL 经 normalizeWallpaperUrl 校验；
+  // 源码不得硬编码任何远程壁纸地址（用协议常量 P 拼接，无字面 https://）。
+  if (!homeHtml.includes('id="wpImageUrl"')) throw new Error("缺用户输入的图片链接框");
+  if (!homeJs.includes("normalizeWallpaperUrl")) throw new Error("远程链接未走校验");
+  if (!hpSrc.includes("normalizeWallpaperUrl")) throw new Error("远程链接校验不在数据层");
+  if (!/url\(\"/.test(homeJs)) throw new Error("远程图片未以 CSS url() 方式加载");
+  if (!homeJs.includes("probe.onerror")) throw new Error("远程图片无加载失败回退");
+  if (!homeHtml.includes("image/png,image/jpeg,image/webp")) throw new Error("未限制本地图片类型");
+});
+
+step("那么", "网络壁纸链接仅允许 https 并拒绝伪协议与注入字符", () => {
+  const P = "https:" + "//";
+  const ok = homepage.normalizeWallpaperUrl(`${P}img.example.com/a.jpg?x=1`);
+  if (!ok.startsWith(P)) throw new Error("合法 https 图片链接被拒绝");
+  for (const bad of [
+    "http:" + "//evil.com/a.png",
+    "javascript:alert(1)",
+    "data:image/png;base64,AAAA",
+    "blob:" + "//x/y",
+    "file:" + "//etc/passwd",
+    `${P}img.example.com/a\"onerror=alert(1)`,
+    `${P}img.example.com/a b.png`,
+    `${P}img.example.com/a(b).png`,
+  ]) {
+    if (homepage.normalizeWallpaperUrl(bad) !== "")
+      throw new Error("非法/注入链接未被拒绝：" + bad);
+  }
+});
+
+step("那么", "网络图片与本地图片二选一且缺来源回退渐变", () => {
+  const P = "https:" + "//";
+  // 网络模式：清空本地 data
+  const net = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    imageUrl: `${P}img.example.com/a.jpg`,
+  });
+  if (net.mode !== "url-image" || net.imageData !== "" || !net.imageUrl)
+    throw new Error("网络模式未清空本地图片");
+  // 本地模式：清空远程链接
+  const local = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    imageUrl: `${P}img.example.com/a.jpg`,
+  });
+  if (local.mode !== "image" || local.imageUrl !== "" || !local.imageData)
+    throw new Error("本地模式未清空远程链接");
+  // 网络模式但链接非法 → 回退渐变
+  const fallback = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: "javascript:alert(1)",
+  });
+  if (fallback.mode !== "gradient") throw new Error("缺合法链接未回退渐变");
+});
+
+/* ========== 2026-11-25 P0 设置版本迁移与升级默认值（features/25）========== */
+
+// 构造一份「旧版本」主页配置：仅 6 个内置默认站点、无 wallpaper、无版本标记、含一个失效引擎。
+function legacyHomeConfig(overrides = {}) {
+  return {
+    engine: "retired-engine",
+    customEngines: [{ id: "custom-a", name: "A", url: "https://a.com/?q=%s" }],
+    sites: homepage.DEFAULT_SITES.slice(0, 6).map((s) => ({ ...s })),
+    ...overrides,
+  };
+}
+
+step("假如", "一份旧版本主页配置只有六个站点且无壁纸字段", () => {
+  ctx.legacyCfg = legacyHomeConfig();
+});
+
+step("当", "用迁移函数升级该旧主页配置", () => {
+  ctx.migrated = homepage.migrateHomeConfig(ctx.legacyCfg);
+});
+
+step("那么", "迁移后默认站点补齐到十七个且失效引擎回退必应", () => {
+  const c = ctx.migrated.config;
+  if (!Array.isArray(c.sites) || c.sites.length < 17)
+    throw new Error(`站点未补齐到至少 17 个：${c.sites && c.sites.length}`);
+  if (c.engine !== "bing") throw new Error(`失效引擎未回退必应：${c.engine}`);
+  if (!c.wallpaper || c.wallpaper.mode === undefined) throw new Error("壁纸字段未补默认");
+  if (ctx.migrated.added < 1) throw new Error("迁移未追加新增默认站点");
+});
+
+step("假如", "一份旧主页配置曾主动删除默认站点 GitHub", () => {
+  ctx.legacyCfg = legacyHomeConfig({
+    engine: "bing",
+    customEngines: [],
+    hiddenDefaultSiteUrls: ["https://github.com"],
+    sites: homepage.DEFAULT_SITES.filter((s) => !/github\.com/i.test(s.url)).slice(0, 6),
+  });
+});
+
+step("那么", "迁移后隐藏的默认站点不再被加回", () => {
+  const c = ctx.migrated.config;
+  if (c.sites.some((s) => /github\.com/i.test(s.url)))
+    throw new Error("已删除的 GitHub 默认站点被加回");
+  if (!Array.isArray(c.hiddenDefaultSiteUrls) || c.hiddenDefaultSiteUrls.length !== 1)
+    throw new Error("隐藏列表未保留");
+});
+
+step("那么", "旧配置被识别为需要主页迁移而新安装不触发", () => {
+  if (!homepage.needsHomepageMigration({ homepage: legacyHomeConfig() }))
+    throw new Error("旧主页配置未被识别为需迁移");
+  if (homepage.needsHomepageMigration(store.DEFAULT_SETTINGS))
+    throw new Error("默认设置不应触发迁移");
+  if (homepage.needsHomepageMigration({})) throw new Error("新安装（无 homepage）不应触发迁移");
+});
+
+step("那么", "迁移函数为设置补齐版本标记并清除旧密码", () => {
+  const raw = { homepage: legacyHomeConfig(), ghBackupPassword: "should-be-gone" };
+  const next = store.migrateSettings(raw);
+  if (next.homepageDefaultsVersion !== homepage.HOMEPAGE_DEFAULTS_VERSION)
+    throw new Error("未补齐 homepageDefaultsVersion");
+  if (next.settingsSchemaVersion !== homepage.SETTINGS_SCHEMA_VERSION)
+    throw new Error("未补齐 settingsSchemaVersion");
+  if ("ghBackupPassword" in next) throw new Error("旧密码字段未清除");
+  if (!next.homepage || next.homepage.sites.length < 17) throw new Error("设置迁移未补齐站点");
+});
+
+step("那么", "恢复默认主页配置回到代码默认集合", () => {
+  const cfg = homepage.resetHomepageConfig();
+  if (cfg.engine !== "bing") throw new Error("恢复默认引擎错误");
+  if (cfg.sites.length !== homepage.DEFAULT_SITES.length) throw new Error("恢复默认站点数错误");
+  if (cfg.customEngines.length !== 0) throw new Error("恢复默认仍含自定义引擎");
+});
+
+step("那么", "主页脚本提供一次性升级提示与保留恢复稍后三选一", () => {
+  const js = repoFile("src/home/home.js");
+  const storeSrc = repoFile("src/core/store.js");
+  for (const needle of [
+    "offerHomepageUpgrade",
+    "askThemeUpgrade",
+    "homepageNeedsUpgrade",
+    "resetHomepageConfig",
+    "稍后再说",
+    "保留当前配置",
+    "恢复插件默认深色",
+  ]) {
+    if (!js.includes(needle)) throw new Error(`home.js 缺升级提示要素：${needle}`);
+  }
+  if (!storeSrc.includes("homepageNeedsUpgrade")) throw new Error("store 未暴露迁移标志");
+  if (!storeSrc.includes("migrateSettings")) throw new Error("store 未走迁移函数");
+});
+
+/* ========== 2026-11-25 独立窗 bounds 合并与拖拽兜底强化（features/29）========== */
+step("那么", "saveBounds 合并写入而不清空其他 bounds 字段", async () => {
+  const mock = freshMock().chrome;
+  await mock.storage.local.set({ lastBounds: { left: 120, top: 80, standaloneWidth: 400 } });
+  const next = await store.saveBounds({ standaloneWidth: 520 }, mock);
+  if (next.standaloneWidth !== 520) throw new Error("宽度未更新");
+  if (next.left !== 120 || next.top !== 80) throw new Error("合并写入清掉了窗口位置");
+  const got = await mock.storage.local.get(["lastBounds"]);
+  if (got.lastBounds.left !== 120 || got.lastBounds.standaloneWidth !== 520)
+    throw new Error("落库值与返回值不一致");
+});
+
+step("那么", "拖拽起始宽度不依赖 outerWidth且监听可解绑并有失焦兜底", () => {
+  const shell = repoFile("src/ui/shell.js");
+  // 起始宽度用保存宽度/clientWidth，不用 outerWidth
+  if (shell.includes("window.outerWidth")) throw new Error("仍在使用 outerWidth");
+  if (!shell.includes("lastBounds.standaloneWidth")) throw new Error("起始宽度未读保存值");
+  if (!shell.includes("document.documentElement?.clientWidth"))
+    throw new Error("缺 clientWidth 回退");
+  // 监听解绑 + blur/mouseleave 兜底
+  if (!shell.includes('removeEventListener("mousemove"')) throw new Error("mousemove 未解绑");
+  if (!shell.includes('removeEventListener("mouseup"')) throw new Error("mouseup 未解绑");
+  if (!shell.includes('window.addEventListener("blur"')) throw new Error("缺 blur 兜底");
+  if (!shell.includes('document.addEventListener("mouseleave"'))
+    throw new Error("缺 mouseleave 兜底");
+  // saveBounds 合并语义
+  const storeSrc = repoFile("src/core/store.js");
+  if (!storeSrc.includes("...(patch || {})")) throw new Error("saveBounds 未合并 patch");
+});
+
+/* ========== 2026-11-25 本地图片壁纸交互完善（features/28）========== */
+step("那么", "本地图片有选择按钮与预览且移除与恢复默认已拆分", () => {
+  const html = repoFile("src/home/home.html");
+  const js = repoFile("src/home/home.js");
+  for (const needle of [
+    'id="wpPickImage"',
+    "选择本地图片",
+    'id="wpImageMeta"',
+    'id="wpPreview"',
+    'id="wpRemoveImage"',
+    "移除当前图片",
+    'id="wpResetWallpaper"',
+    "恢复默认壁纸",
+  ]) {
+    if (!html.includes(needle)) throw new Error(`home.html 缺本地图片交互要素：${needle}`);
+  }
+  if (!js.includes("wpPickImage")) throw new Error("选择按钮未接线");
+  if (!js.includes("renderWallpaperPreview")) throw new Error("缺壁纸预览渲染");
+  // 「移除当前图片」保留配置只清来源；「恢复默认」重置整个配置
+  const rm = js.indexOf("wpRemoveImage");
+  const rmSeg = js.slice(rm, rm + 400);
+  if (!rmSeg.includes('imageData: "", imageUrl: ""')) throw new Error("移除未只清图片来源");
+  const reset = js.indexOf("wpResetWallpaper");
+  const resetSeg = js.slice(reset, reset + 300);
+  if (!resetSeg.includes("hp.normalizeWallpaper(null)")) throw new Error("恢复默认未重置整配置");
+  // 存储配额可读提示
+  if (!js.includes("本地存储空间不足")) throw new Error("缺存储配额可读提示");
+});
+
+step("那么", "主页配置导入确认文案包含壁纸且两入口一致", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const shell = repoFile("src/ui/shell.js");
+  if (!homeJs.includes("常用网址与壁纸配置")) throw new Error("home 导入确认文案未含壁纸");
+  if (!shell.includes("常用网址与壁纸配置")) throw new Error("shell 导入确认文案未含壁纸");
+});
+
+/* ========== 2026-11-25 纯书签树 JSON 容错解析（features/27）========== */
+step("那么", "纯书签树缺设置回收站版本仍可被容错解析", () => {
+  const tree = {
+    windows: [{ id: "w_a", kind: "window", title: "树窗", collapsed: false }],
+    groups: [{ id: "g_a", kind: "group", title: "组", parentId: "w_a" }],
+    tabs: [
+      {
+        id: "t_a",
+        kind: "tab",
+        title: "标签",
+        url: "https://example.com/a",
+        parentId: "g_a",
+      },
+    ],
+  };
+  const parsed = io.parseBookmarkTree(tree, { settings: { theme: "light" } });
+  if (parsed.windows.length !== 1 || parsed.groups.length !== 1 || parsed.tabs.length !== 1)
+    throw new Error("容错解析丢失书签树节点");
+  if (parsed.settings.theme !== "light") throw new Error("容错解析未沿用当前设置");
+  if (!Array.isArray(parsed.trash) || parsed.trash.length !== 0)
+    throw new Error("缺 trash 未补空数组");
+  // 非法树（缺 tabs）仍应被拒绝
+  let rejected = false;
+  try {
+    io.parseBookmarkTree({ windows: [], groups: [] }, {});
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error("缺三层树的非法数据未被拒绝");
+});
+
+step("那么", "shell 普通 json 走容错解析且完整快照仍走校验覆盖", () => {
+  const src = repoFile("src/ui/shell.js");
+  const ioSrc = repoFile("src/core/import-export.js");
+  if (!ioSrc.includes("export function parseBookmarkTree")) throw new Error("缺容错解析函数");
+  const jsonAnchor = src.indexOf('sniffed.kind === "json"');
+  const jsonSeg = src.slice(jsonAnchor, jsonAnchor + 400);
+  if (!jsonSeg.includes("io.parseBookmarkTree")) throw new Error("普通 json 未走容错解析");
+  const fullAnchor = src.indexOf('sniffed.kind === "full-snapshot"');
+  const fullSeg = src.slice(fullAnchor, fullAnchor + 600);
+  if (!fullSeg.includes("io.importJSON")) throw new Error("完整快照未走结构校验");
+});
+
+step("那么", "带完整快照标记但版本不符的 json 不被容错合并而报版本不兼容", () => {
+  // 回归：version=2 且含 settings/trash/exportedAt 的 JSON 是损坏快照，
+  // 不能降级为纯书签树静默合并（会丢回收站/设置）；应抛"版本不兼容"由 shell 报"导入失败"。
+  const broken = {
+    version: 2,
+    exportedAt: "2026-11-21T00:00:00.000Z",
+    windows: [{ id: "w_bad", kind: "window", title: "坏窗", collapsed: false }],
+    groups: [],
+    tabs: [],
+    settings: {},
+    trash: [],
+  };
+  let err = null;
+  try {
+    io.parseBookmarkTree(broken, { settings: {} });
+  } catch (e) {
+    err = e;
+  }
+  if (!err || !err.message.includes("版本不兼容"))
+    throw new Error("版本不符的快照标记数据未被拒绝：" + (err && err.message));
+  // 对照：真正缺标记的纯书签树（即使带无关 version）仍可容错合并
+  const pure = io.parseBookmarkTree(
+    { version: 2, windows: [], groups: [], tabs: [] },
+    { settings: {} }
+  );
+  if (!Array.isArray(pure.trash)) throw new Error("纯书签树仍应被容错解析");
+});
+
+/* ========== 2026-11-25 主页设置分类两栏布局（features/26）========== */
+step("那么", "主页设置弹窗按四类分区且宽屏两栏窄屏单列", () => {
+  const html = repoFile("src/home/home.html");
+  const css = repoFile("src/home/home.css");
+  // 四类分区卡片：外观与壁纸 / 搜索引擎 / 常用网址 / 配置导入导出
+  for (const needle of [
+    "home-cfg-modal",
+    "home-cfg-grid",
+    "home-cfg-card",
+    "外观与壁纸",
+    "搜索引擎",
+    "常用网址",
+    "配置导入导出",
+    "siteEditList",
+    "engineList",
+    "wpMode",
+    "homeImportFile",
+  ]) {
+    if (!html.includes(needle)) throw new Error(`home.html 缺布局要素：${needle}`);
+  }
+  // 4 张分区卡片
+  const cards = (html.match(/class="home-cfg-card"/g) || []).length;
+  if (cards < 4) throw new Error(`分区卡片应为 4 张，实际 ${cards}`);
+  // 两栏 grid + 560px 媒体查询回退单列
+  if (!/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/.test(css))
+    throw new Error("未定义两栏网格");
+  if (!css.includes("@media (max-width: 560px)")) throw new Error("缺窄屏回退媒体查询");
+  if (!/grid-template-columns:\s*1fr/.test(css)) throw new Error("窄屏未回退单列");
 });
 
 /* ========== 2026-11-25 按钮扁平统一（features/17）========== */

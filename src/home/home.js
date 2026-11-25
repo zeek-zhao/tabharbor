@@ -10,6 +10,10 @@ const chromeApi = globalThis.chrome;
 let settings = { ...store.DEFAULT_SETTINGS };
 let cfg = hp.normalizeHomeConfig(null);
 let toastTimer = 0;
+// 用户正在编辑的壁纸模式（可能暂无合法来源）：仅用于展开对应输入区，不写库。
+// null 表示跟随已持久化的 cfg.wallpaper.mode。切到 image/url-image 但尚未选图/填链接时，
+// 数据层 normalizeWallpaper 会把无来源配置回退为 gradient，故需此临时态保证输入框可见。
+let wpEditMode = null;
 
 function say(msg) {
   const el = $("#homeToast");
@@ -31,15 +35,27 @@ function initialOf(title) {
   return s ? s.slice(0, 2).toUpperCase() : "?";
 }
 
+// 返回是否写库成功；本地图片 data URL 可能触发存储配额，超限给可读提示。
 async function persist() {
   cfg = hp.normalizeHomeConfig(cfg);
-  settings = await store.saveSettings({ homepage: cfg }, chromeApi);
+  try {
+    settings = await store.saveSettings({ homepage: cfg }, chromeApi);
+  } catch (err) {
+    say("保存失败：本地存储空间不足，请换更小的图片或减少壁纸数量");
+    throw err;
+  }
   renderEngines();
   renderSites();
   renderWallpaper();
 }
 
-// 2026-11-25 壁纸：仅作用于内部主页 body；渐变/图片 + scrim 遮罩保证文字对比度。
+// 2026-11-25 壁纸：仅作用于内部主页 body；渐变/本地图片/用户主动输入的 https 图片 + scrim 遮罩。
+// 远程图片是用户显式输入的 https 例外（非代码硬编码、非 fetch/XHR）；加载失败时回退渐变。
+function wallpaperGradient(wp) {
+  const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
+  return preset.css;
+}
+
 function renderWallpaper() {
   const wp = cfg.wallpaper || hp.DEFAULT_WALLPAPER;
   const body = document.body;
@@ -51,10 +67,23 @@ function renderWallpaper() {
   body.setAttribute("data-wallpaper-mode", wp.mode);
   body.style.setProperty("--wp-scrim", String(wp.scrim));
   if (wp.mode === "image" && wp.imageData) {
+    // data URL 不含引号/括号（normalizeWallpaper 已净化），直接写入。
     body.style.setProperty("--wp-image", `url("${wp.imageData}")`);
+  } else if (wp.mode === "url-image" && wp.imageUrl) {
+    // 链接在 normalizeWallpaperUrl 已拒绝引号/反斜杠/空白/括号/尖括号，避免 CSS 注入。
+    body.style.setProperty("--wp-image", `url("${wp.imageUrl}")`);
+    // 远程图片可能 404/被墙：预加载失败回退内置渐变，并给出可读提示。
+    const probe = new Image();
+    probe.onerror = () => {
+      if ((cfg.wallpaper || {}).mode !== "url-image") return;
+      body.setAttribute("data-wallpaper-mode", "gradient");
+      body.style.removeProperty("--wp-image");
+      body.style.setProperty("--wp-gradient", wallpaperGradient(wp));
+      say("网络壁纸加载失败，已回退内置渐变");
+    };
+    probe.src = wp.imageUrl;
   } else {
-    const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
-    body.style.setProperty("--wp-gradient", preset.css);
+    body.style.setProperty("--wp-gradient", wallpaperGradient(wp));
   }
 }
 
@@ -67,16 +96,49 @@ function renderWallpaperControls() {
         `<option value="${escapeHtml(p.id)}"${p.id === wp.preset ? " selected" : ""}>${escapeHtml(p.name)}</option>`
     ).join("");
   }
+  const shownMode = wpEditMode || wp.mode;
   const mode = $("#wpMode");
-  if (mode) mode.value = wp.mode;
+  if (mode) mode.value = shownMode;
   const scrim = $("#wpScrim");
   if (scrim) scrim.value = String(wp.scrim);
   const scrimVal = $("#wpScrimVal");
   if (scrimVal) scrimVal.textContent = String(wp.scrim);
   const presetRow = $("#wpPresetRow");
-  if (presetRow) presetRow.classList.toggle("hidden", wp.mode === "image");
+  if (presetRow)
+    presetRow.classList.toggle("hidden", shownMode === "image" || shownMode === "url-image");
   const imageRow = $("#wpImageRow");
-  if (imageRow) imageRow.classList.toggle("hidden", wp.mode !== "image");
+  if (imageRow) imageRow.classList.toggle("hidden", shownMode !== "image");
+  const urlRow = $("#wpUrlRow");
+  if (urlRow) urlRow.classList.toggle("hidden", shownMode !== "url-image");
+  const urlActions = $("#wpUrlActions");
+  if (urlActions) urlActions.hidden = shownMode !== "url-image";
+  const urlInput = $("#wpImageUrl");
+  if (urlInput) urlInput.value = wp.imageUrl || "";
+  renderWallpaperPreview(wp);
+}
+
+// 壁纸预览块：显示当前来源（渐变名 / 本地图片 / 远程链接），不加载远程图到设置面板本身。
+function renderWallpaperPreview(wp) {
+  const box = $("#wpPreview");
+  const label = $("#wpPreviewLabel");
+  if (!box || !label) return;
+  let text = "未设置（跟随主题）";
+  let bg = "";
+  if (wp.mode === "gradient") {
+    const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
+    text = `内置渐变：${preset.name}`;
+    bg = preset.css;
+  } else if (wp.mode === "image" && wp.imageData) {
+    text = "本地图片（仅存本机）";
+    bg = `url("${wp.imageData}") center/cover`;
+  } else if (wp.mode === "url-image" && wp.imageUrl) {
+    text = "网络图片链接";
+    bg = `url("${wp.imageUrl}") center/cover`;
+  }
+  label.textContent = text;
+  box.style.background = bg;
+  box.classList.toggle("has-image", !!bg);
+  box.hidden = wp.mode === "none";
 }
 
 // 搜索引擎下拉：内置 + 自定义
@@ -173,6 +235,7 @@ function bind() {
   });
 
   $("#homeSettings")?.addEventListener("click", () => {
+    wpEditMode = null; // 每次打开都回到已持久化的真实模式
     renderEngines();
     renderSiteEditList();
     renderWallpaperControls();
@@ -220,12 +283,22 @@ function bind() {
 
   // 2026-11-25 壁纸控件
   $("#wpMode")?.addEventListener("change", (e) => {
-    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, mode: e.target.value });
+    const mode = e.target.value;
+    if (mode === "image" || mode === "url-image") {
+      // 只展开输入区，不落库；等用户选图/填链接后再提交（避免无来源被 normalize 回退）。
+      wpEditMode = mode;
+      renderWallpaperControls();
+      return;
+    }
+    // none/gradient 有确定来源，直接提交。
+    wpEditMode = null;
+    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, mode });
     void persist();
     renderWallpaperControls();
     say("壁纸模式已更新");
   });
   $("#wpPreset")?.addEventListener("change", (e) => {
+    wpEditMode = null;
     cfg.wallpaper = hp.normalizeWallpaper({
       ...cfg.wallpaper,
       mode: "gradient",
@@ -242,10 +315,12 @@ function bind() {
     cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, scrim: Number(e.target.value) });
     void persist();
   });
+  // 本地图片入口：文件 input 隐藏，统一由「选择本地图片」按钮触发（可见路径）。
+  $("#wpPickImage")?.addEventListener("click", () => $("#wpImage")?.click());
   $("#wpImage")?.addEventListener("change", (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    // 仅本地图片、≤1MB；非法/超大不入库（零出站、隐私可控）。
+    // 仅本地图片、≤1MB；非法/超大不入库（data URL 膨胀约 33%，超限会触发配额提示）。
     if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
       say("仅支持 png/jpeg/webp 图片");
       e.target.value = "";
@@ -258,23 +333,69 @@ function bind() {
     }
     const reader = new FileReader();
     reader.onload = () => {
+      wpEditMode = null;
       cfg.wallpaper = hp.normalizeWallpaper({
         ...cfg.wallpaper,
         mode: "image",
         imageData: String(reader.result || ""),
+        imageUrl: "", // 二选一：清空网络链接
       });
-      void persist();
+      const meta = $("#wpImageMeta");
+      if (meta) meta.textContent = `${file.name} · ${(file.size / 1024).toFixed(0)} KB`;
+      void persist().then(() => renderWallpaperControls());
       say("本地壁纸已设置（仅存本机）");
     };
     reader.onerror = () => say("图片读取失败");
     reader.readAsDataURL(file);
     e.target.value = "";
   });
-  $("#wpRemoveImage")?.addEventListener("click", () => {
-    cfg.wallpaper = hp.normalizeWallpaper(null);
+  // 网络图片链接：仅接受用户主动输入的 https 图片；校验失败/加载失败回退渐变。
+  $("#wpUrlApply")?.addEventListener("click", () => {
+    const raw = String($("#wpImageUrl")?.value || "");
+    const imageUrl = hp.normalizeWallpaperUrl(raw);
+    if (!imageUrl) {
+      say("链接无效：仅支持 https 图片链接，且不能含特殊字符");
+      return;
+    }
+    wpEditMode = null;
+    cfg.wallpaper = hp.normalizeWallpaper({
+      ...cfg.wallpaper,
+      mode: "url-image",
+      imageUrl,
+      imageData: "", // 二选一：清空本地图片
+    });
     void persist();
     renderWallpaperControls();
-    say("已移除图片并恢复默认壁纸");
+    say("网络壁纸已应用（链接仅存本机，加载失败将回退渐变）");
+  });
+  $("#wpUrlClear")?.addEventListener("click", () => {
+    wpEditMode = null;
+    const urlInput = $("#wpImageUrl");
+    if (urlInput) urlInput.value = "";
+    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, mode: "gradient", imageUrl: "" });
+    void persist();
+    renderWallpaperControls();
+    say("已清除网络壁纸链接");
+  });
+  // 移除当前图片：保留模式/遮罩/预设，只清空图片来源（image/url-image 无来源回退渐变）。
+  $("#wpRemoveImage")?.addEventListener("click", () => {
+    wpEditMode = null;
+    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, imageData: "", imageUrl: "" });
+    const meta = $("#wpImageMeta");
+    if (meta) meta.textContent = "";
+    void persist();
+    renderWallpaperControls();
+    say("已移除当前图片");
+  });
+  // 恢复默认壁纸：重置整个 wallpaper 配置。
+  $("#wpResetWallpaper")?.addEventListener("click", () => {
+    wpEditMode = null;
+    cfg.wallpaper = hp.normalizeWallpaper(null);
+    const meta = $("#wpImageMeta");
+    if (meta) meta.textContent = "";
+    void persist();
+    renderWallpaperControls();
+    say("已恢复默认壁纸");
   });
 
   $("#resetHomeCfg")?.addEventListener("click", () => {
@@ -347,8 +468,10 @@ function bind() {
       const text = await file.text();
       const next = hp.importHomepageConfig(text);
       // Q4：导入前弹窗确认，确认后整体覆盖（不合并）
-      if (!window.confirm("导入将整体覆盖当前搜索引擎与常用网址（不合并），是否继续？")) return;
+      if (!window.confirm("导入将整体覆盖当前搜索引擎、常用网址与壁纸配置（不合并），是否继续？"))
+        return;
       cfg = next;
+      wpEditMode = null;
       await persist();
       renderEngineSelect();
       renderSiteEditList();
@@ -362,12 +485,46 @@ function bind() {
   });
 }
 
+// P0（2026-11-25）：升级后一次性主页配置提示。
+// loadAll 已自动把旧站点/引擎/壁纸迁移到内存（新增站点立即可见，无需弹窗即可生效）；
+// 这里只做一次性的「保留并追加 / 全部恢复默认 / 稍后再说」确认与主题单独询问。
+// 「稍后再说」不写库 → 版本标记保持落后 → 下次启动仍提示，直到用户选择。
+async function askThemeUpgrade() {
+  if (settings.theme === "dark") return; // 已是默认深色，无需询问
+  if (window.confirm("当前主题：浅色。是否恢复插件默认深色？")) {
+    settings = await store.saveSettings({ theme: "dark" }, chromeApi);
+    applyTheme("dark");
+  }
+}
+
+async function offerHomepageUpgrade() {
+  const keep = window.confirm(
+    "检测到新版本主页配置：新增了常用网址与壁纸选项。\n是否保留当前配置并自动追加新增默认站点？（推荐）"
+  );
+  if (keep) {
+    // cfg 已在 loadAll 自动迁移好；写库固化版本标记，避免下次重复提示。
+    await store.saveSettings({ homepage: cfg }, chromeApi);
+    await askThemeUpgrade();
+    return;
+  }
+  const restore = window.confirm(
+    "是否全部恢复插件默认主页配置？（取消 = 稍后再说，下次启动再提示）"
+  );
+  if (restore) {
+    cfg = hp.resetHomepageConfig();
+    await store.saveSettings({ homepage: cfg }, chromeApi);
+    await askThemeUpgrade();
+  }
+  // 稍后再说：不写库，保持版本落后，下次启动仍提示。
+}
+
 async function boot() {
   try {
     const all = await store.loadAll(chromeApi);
     settings = all.settings || settings;
     applyTheme(settings.theme);
     cfg = hp.normalizeHomeConfig(settings.homepage);
+    if (all.homepageNeedsUpgrade) await offerHomepageUpgrade();
   } catch {
     cfg = hp.normalizeHomeConfig(null);
   }

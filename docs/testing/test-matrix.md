@@ -1,8 +1,8 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24，2026-11-25 v0.3.1 后续修复复核。BDD 285 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，2026-11-25 第三轮审计修复复核。BDD 301 场景 + 真机 Chromium E2E + 六项门禁。
 
-## 1. BDD 场景分布（共 285，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
+## 1. BDD 场景分布（共 301，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
 
 | feature | 场景数 | 覆盖域 |
 | --- | --- | --- |
@@ -26,7 +26,12 @@
 | 21_backup_three_categories | 12 | 本地明文/加密、Gist login 加密与 owner.login 解密、旧 Gist 兜底、HTML、alarm、权限红线、三宿主 UI |
 | 22_snapshot_import_classification | 8 | 完整快照覆盖恢复 vs 书签交换合并、分类嗅探、非法拒绝、三宿主确认契约 |
 | 23_window_resize | 3 | 宽度 clamp 300–720、开窗读保存宽度、winmode 手柄与持久化 |
-| 24_homepage_wallpaper | 7 | 壁纸 schema/规范化/本地图片/导入导出/零远程 URL |
+| 24_homepage_wallpaper | 9 | 壁纸 schema/规范化/本地图片/导入导出/用户输入的 https 链接（伪协议拒绝）/二选一 |
+| 25_settings_migration | 6 | 设置版本迁移：站点补齐、引擎回退、隐藏站点不重复加回、一次性升级弹窗 |
+| 26_homepage_settings_layout | 1 | 主页设置分类两栏布局、窄屏回退单列 |
+| 27_bookmark_tree_tolerance | 3 | 纯书签树 JSON 容错解析、shell 分流、版本不符快照不静默合并 |
+| 28_local_image_interaction | 2 | 本地图片选择/预览/移除拆分、导入确认文案含壁纸 |
+| 29_bounds_merge_and_drag_guard | 2 | saveBounds 合并写入、拖拽监听解绑与失焦兜底 |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
 | 03_storage | 6 | 存储读写、实时广播 |
 | 10_samples | 3 | 样例数据合法性、指南当前状态断言 |
@@ -55,7 +60,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 285/285 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 301/301 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -65,7 +70,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 285 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 301 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |

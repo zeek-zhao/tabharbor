@@ -2166,8 +2166,9 @@ export async function bootShell(root) {
         if (sniffed.kind === "linkmap") {
           imported = await io.importLinkMap(sniffed.data);
         } else if (sniffed.kind === "json") {
-          // 纯书签树 JSON（无完整快照标记）：合并为「导入书签」窗口，不覆盖设置/回收站。
-          imported = await io.importJSON({ ...sniffed.data, settings: settings || {} }, m);
+          // 纯书签树 JSON（无完整快照标记）：容错解析（只需三层树，缺 settings/trash 补空），
+          // 合并为「导入书签」窗口，不覆盖设置/回收站。
+          imported = await io.parseBookmarkTree(sniffed.data, { settings });
         } else if (sniffed.kind === "full-snapshot") {
           // 2026-11-25 P0：完整明文 JSON 快照 → 结构校验 → 二次确认 → 全量覆盖
           // （树 + 回收站 + 设置 + 主页配置），不再误走合并导入、不再丢失 settings/trash。
@@ -2195,8 +2196,12 @@ export async function bootShell(root) {
           imported = await io.importHTML(text, m);
         } else if (sniffed.kind === "homepage") {
           // M9/Q1：主页配置导入不解释格式、不弹格式选择；只保留一次破坏性覆盖确认，
-          // 确认后整体覆盖当前搜索引擎、自定义引擎和常用网址（不合并）。
-          if (!window.confirm("导入将整体覆盖当前搜索引擎、自定义引擎与常用网址，是否继续？"))
+          // 确认后整体覆盖当前搜索引擎、自定义引擎、常用网址和壁纸配置（不合并）。
+          if (
+            !window.confirm(
+              "导入将整体覆盖当前搜索引擎、自定义引擎、常用网址与壁纸配置，是否继续？"
+            )
+          )
             return;
           const cfg = homepage.importHomepageConfig(text);
           settings = await store.saveSettings({ homepage: cfg });
@@ -2450,6 +2455,18 @@ export async function bootShell(root) {
       }
       return currentWindowId;
     };
+    // 起始宽度：优先用已保存宽度，其次文档可视宽度；不用可能含边框/滚动条的 outerWidth（审计 §8.3）。
+    const getStartWidth = async () => {
+      try {
+        const { lastBounds } = await store.loadAll(chrome);
+        if (lastBounds && Number.isFinite(Number(lastBounds.standaloneWidth))) {
+          return clampWidth(lastBounds.standaloneWidth);
+        }
+      } catch {
+        /* 读宽失败回退 clientWidth */
+      }
+      return clampWidth(document.documentElement?.clientWidth || 380);
+    };
     const makeHandle = (side) => {
       const h = document.createElement("div");
       h.className = `win-resize-handle ${side}`;
@@ -2463,44 +2480,62 @@ export async function bootShell(root) {
       document.body.appendChild(h);
       return h;
     };
+    // 全局监听只注册一份，拖拽状态由 dragging 守卫；结束时统一解绑并加 blur/mouseleave 兜底。
+    let activeHandle = null;
+    let activeOnMove = null;
+    let activeOnUp = null;
+    const detach = () => {
+      if (activeOnMove) document.removeEventListener("mousemove", activeOnMove);
+      if (activeOnUp) document.removeEventListener("mouseup", activeOnUp);
+      window.removeEventListener("blur", endDrag);
+      document.removeEventListener("mouseleave", endDrag);
+      activeOnMove = null;
+      activeOnUp = null;
+    };
+    const finishDrag = async () => {
+      if (!dragging) return;
+      dragging = false;
+      detach();
+      activeHandle?.classList.remove("active");
+      activeHandle = null;
+      try {
+        await store.saveBounds({ standaloneWidth: clampWidth(lastWidth) });
+      } catch {
+        /* 持久化失败不影响本次会话 */
+      }
+    };
+    const endDrag = () => void finishDrag();
     for (const side of ["left", "right"]) {
       const handle = makeHandle(side);
       handle.addEventListener("mousedown", async (event) => {
         event.preventDefault();
+        if (dragging) return;
         dragging = true;
+        activeHandle = handle;
         handle.classList.add("active");
         startX = event.clientX;
-        startWidth = window.outerWidth || 380;
+        startWidth = await getStartWidth(); // 异步期间 dragging 已置位，onMove 尚未绑定
         lastWidth = startWidth;
         currentWindowId = await getWindowId();
-      });
-      const onMove = async (event) => {
-        if (!dragging) return;
-        event.preventDefault();
-        const delta = event.clientX - startX;
-        const target = clampWidth(side === "left" ? startWidth - delta : startWidth + delta);
-        if (target === lastWidth) return;
-        lastWidth = target;
-        if (currentWindowId != null && chrome.windows?.update) {
-          try {
-            await chrome.windows.update(currentWindowId, { width: target });
-          } catch {
-            /* popup 类型若被浏览器限制则忽略，不阻断拖拽 */
+        activeOnMove = (moveEvent) => {
+          if (!dragging) return;
+          moveEvent.preventDefault();
+          const delta = moveEvent.clientX - startX;
+          const target = clampWidth(side === "left" ? startWidth - delta : startWidth + delta);
+          if (target === lastWidth) return;
+          lastWidth = target;
+          if (currentWindowId != null && chrome.windows?.update) {
+            void chrome.windows.update(currentWindowId, { width: target }).catch(() => {
+              /* popup 类型若被浏览器限制则忽略，不阻断拖拽 */
+            });
           }
-        }
-      };
-      const onUp = async () => {
-        if (!dragging) return;
-        dragging = false;
-        handle.classList.remove("active");
-        try {
-          await store.saveBounds({ standaloneWidth: clampWidth(lastWidth) });
-        } catch {
-          /* 持久化失败不影响本次会话 */
-        }
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+        };
+        activeOnUp = () => void finishDrag();
+        document.addEventListener("mousemove", activeOnMove);
+        document.addEventListener("mouseup", activeOnUp);
+        window.addEventListener("blur", endDrag);
+        document.addEventListener("mouseleave", endDrag);
+      });
     }
   };
   bindWindowResize();
