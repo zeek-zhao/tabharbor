@@ -1,11 +1,36 @@
 /* TabHarbor 扩展内部主页样式（H2/H3/H4，2026-11-24）
-   Q4：跟随插件深/浅主题（复用 m2.css 的 token），极简工具风：居中搜索框 + 图标网格，
-   不加壁纸/时钟/天气。 */
+   Q4：跟随插件深/浅主题（复用 m2.css 的 token），极简工具风：居中搜索框 + 图标网格；
+   2026-11-25 增加壁纸（本地渐变/图片 + 遮罩），不含时钟/天气。 */
 
 .home-body {
   min-height: 100vh;
   background: radial-gradient(circle at 50% 0%, var(--bg2), var(--bg1) 62%);
   color: var(--fg1);
+}
+/* 2026-11-25 壁纸：仅内部主页。渐变/本地图片 + scrim 遮罩，内容层提升 z-index 保证对比度。 */
+.home-body[data-wallpaper-mode] {
+  position: relative;
+  background: var(--bg1);
+}
+.home-body[data-wallpaper-mode]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image: var(--wp-gradient, none), var(--wp-image, none);
+  background-size: cover;
+  background-position: center;
+}
+.home-body[data-wallpaper-mode]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(0, 0, 0, var(--wp-scrim, 0.35));
+}
+.home-body[data-wallpaper-mode] .home-wrap {
+  position: relative;
+  z-index: 1;
 }
 .home-wrap {
   max-width: 760px;
@@ -59,7 +84,9 @@
   border: 1px solid var(--line1);
   border-radius: 12px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 .home-search-box:focus-within {
   border-color: var(--accent);
@@ -128,13 +155,20 @@
   font-weight: 500;
   color: var(--fg1);
 }
+/* 2026-11-25：与 .btn/.mini-btn 统一扁平体系，单行不折行。 */
 .home-mini {
   border: 1px solid var(--line1);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg2);
   color: var(--fg2);
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 7px 12px;
+  height: 32px;
+  box-shadow: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 .home-mini:hover {
@@ -157,7 +191,10 @@
   color: var(--fg1);
   text-decoration: none;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
 }
 .home-site:hover {
   background: var(--bg2);

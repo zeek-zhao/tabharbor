@@ -58,10 +58,10 @@
 | ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-40 | 设置三分类（外观/备份/复制） | `shell.js` 设置面板 | 单击行即时保存并广播所有宿主 | 已验证 | 02_shell（25 场景）；E2E 4 | — |
-| F-41 | 本地文件备份（明文/加密可选） | `import-export.js` `exportLocalSnapshot` + `crypto.js` | 默认明文 .json / 可选加密 .tbh；密码不落盘；快照最多 20、条目区分明文/加密；恢复四类失败提示 | 已验证 | 09/16/21 feature；E2E 13 | 明文文件含敏感信息，UI 已明示 |
+| F-41 | 本地文件备份（明文/加密可选） | `import-export.js` `exportLocalSnapshot` + `crypto.js` | 默认明文 .json / 可选加密 .tbh；密码不落盘；**明文只下载不写扩展历史**；加密快照最多 20、条目区分明文/加密；恢复四类失败提示 | 已实现 | 09/16/21 feature；真机 E2E | 明文含敏感信息，UI 已明示；真实文件选择器待复核 |
 | F-42 | GitHub Gist 加密备份与恢复 | `import-export.js` `backupToGist`/`restoreFromGist` + `service-worker.js` | 私有 Gist POST/PATCH；密码 = `GET /user` 的 login（不落盘）；GET Gist + `owner.login` 解密恢复；旧 Gist 手动密码兜底；定时 alarm 用 Token 取 login 无人值守备份 | 已实现 | 09/16/21 feature（mock）；真机 E2E | **真实线上 Token 演练待完成；login 非强密码（UI 已明示）** |
-| F-43 | JSON/HTML/LinkMap 导入导出 | `import-export.js` | 嗅探自动识别、非法版本拒绝 | 已验证 | 09 feature（24 场景）；E2E 13 | — |
-| F-44 | 内部主页 | `homepage.js` + `src/home/` | 搜索引擎/常用站点配置、容器加号开主页 | 已验证 | 15_homepage_audit（15 场景） | — |
+| F-43 | JSON/HTML/LinkMap 导入导出 + 完整快照分类 | `import-export.js` `isFullSnapshot`/`sniffImport` + `shell.js` | 完整快照 JSON 走二次确认全量覆盖（树/回收站/设置/主页配置）；HTML/LinkMap/纯书签树 JSON 合并为「导入书签」窗口不覆盖；主页配置只覆盖主页；嗅探按内容、非法拒绝 | 已实现 | 09 + 22 feature；真机 E2E | — |
+| F-44 | 内部主页（9 引擎 / 17 站点 / 壁纸） | `homepage.js` + `src/home/` | 9 内置引擎 + 17 默认站点、URL 协议常量拼接；壁纸 5 套渐变 + 本地图片（png/jpeg/webp ≤1MB）+ 遮罩，仅作用内部主页、零远程 URL | 已实现 | 15 + 24 feature | 主页配置导出/导入含 wallpaper |
 | F-45 | 浏览器原生书签一键导入 | — | — | **已废弃（红线）** | — | 需 `bookmarks` 权限违反 C05；替代：手动导入 HTML |
 
 ## 6. 多宿主（侧边栏 / 独立窗口 / PiP / 主页）
@@ -70,6 +70,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | F-50 | 双模式壳 + sidePanel | `sidebar.html` / `window.html` / service-worker | 快捷键/图标/右键唤起；同数据源 | 已验证 | 04_manifest_sw；E2E 1/9 | — |
 | F-51 | PiP 置顶（共享控制器宿主化） | `shell.js` `buildShellSkeleton`/`createShellController` | PiP 内设置/回收站/编辑/新建/备份/导入导出可操作；say/toast/主题广播全宿主；定位走共享 `locateActiveTab` | 已验证 | 18_merge_audit；E2E PiP 宿主化段 | 深度配置（GitHub 授权）建议独立窗口 |
+| F-52 | 独立窗口左右拖拽缩放与宽度记忆 | `service-worker.js` `normalizeStandaloneWidth`/`openWindow` + `shell.js` + `m2.css` | lastBounds.standaloneWidth（默认 380，300–720 clamp）；仅 .winmode 显示手柄；拖拽 windows.update 改宽、松手持久化；侧边栏保持 420px 上限 | 已实现 | 23 feature；真机待复核 | Chrome popup 类型是否允许 windows.update 需真机确认 |
 | F-52 | 统计底栏 / 快捷键表 / 指南 | `render.js` / `shell.js` | 四项实时统计；页脚指南/反馈入口 | 已验证 | 02 feature；E2E 3/5 | 反馈入口在页脚指南右侧（三端一致） |
 | F-53 | 定位当前标签 | `shell.js` `locateActiveTab` | tabId-only 反查；先同步快照补游离标签；内部页明确提示 | 已验证 | 17/18 feature；E2E | — |
 | F-54 | 全屏卡片视图 | — | — | **待实现** | 02 feature 契约（提示「待实现」） | 发布文案不得承诺 |
@@ -103,3 +104,18 @@
 | F-62 | GitHub 无人值守定时备份（口径反转） | `import-export.js` `registerAutoBackup`/`runAutoBackup` + `service-worker.js` | 2026-11-25 二次重构：改由 login 派生密码消除冲突，恢复 alarm 注册；Token 缺失不发请求、不读 ghBackupPassword | 已实现 | 09 + 21 feature（alarm/login 场景） | 真机 service worker 重启后自动备份待复核 |
 
 CI 证据链接：<https://github.com/zeek-zhao/tabharbor/actions/runs/45445426126>（main @ `1fe6ed3` test+e2e）、<https://github.com/zeek-zhao/tabharbor/actions/runs/45445619199>（release.yml，tag v0.3.0）。上述修复推送后由新 run 复验。
+
+## 10. v0.3.1 后续修复（2026-11-25 第二轮，基于 `refactor/backup-three-categories`）
+
+> 以下修复在集成分支 `refactor/backup-three-categories` 后续提交中，**未包含在已发布 `v0.3.0` tag**；不重写已有 tag。
+
+| ID | 修复 | 源码 | 验收 | 状态 | 证据/缺口 |
+| --- | --- | --- | --- | --- | --- |
+| F-70 | 完整 JSON 快照导入分类（P0） | `import-export.js` `isFullSnapshot`/`sniffImport` + `shell.js` | 完整快照走覆盖恢复（校验+二次确认+全量写回）；HTML/LinkMap/纯树 JSON 合并不覆盖；取消/校验失败不写库 | 已实现 | 22 feature（8 场景）+ 真机 E2E |
+| F-71 | 独立窗口拖拽缩放与宽度记忆 | `service-worker.js` + `shell.js` + `m2.css` | 300–720 clamp、仅 winmode 手柄、windows.update 改宽、lastBounds 持久化 | 已实现 | 23 feature（3 场景）；popup 宽度更新待真机确认 |
+| F-72 | 主页引擎 9 / 站点 17 扩充 | `homepage.js` + `15_homepage_audit.feature` | 协议常量拼接、非法 URL 过滤、normalizeHomeConfig 去重 | 已实现 | 15 feature |
+| F-73 | 主页壁纸 | `homepage.js` `normalizeWallpaper` + `src/home/` | 5 渐变 + 本地图片 ≤1MB + scrim 遮罩、仅内部主页、零远程 URL、配置导入导出含 wallpaper | 已实现 | 24 feature（7 场景）；深浅渲染对比度待真机复核 |
+| F-74 | 按钮扁平统一 + 文案 | `m2.css`/`home.css` + 两 HTML | 32px/8px/12px 统一、nowrap、三端 ID 与文案一致 | 已实现 | 17 feature + 静态契约 |
+| F-75 | 明文快照不写扩展历史 / 结构化旧密码错误 / 样例去 m3 | `import-export.js` + `shell.js` + `samples/` | 明文只下载；错误码 `legacy-password-required`；样例重命名 | 已实现 | 21/24 feature + 样例校验 |
+
+CI 证据：本轮推送后新 run 见最终执行报告；已发布 v0.3.0 的历史证据见 §9 链接。**未取得真机/CI 证据前，上述状态均为「已实现」而非「已验证」。**

@@ -216,8 +216,32 @@ export function isLinkMapExport(data) {
 }
 
 /**
+ * 完整快照判定（2026-11-25 P0）：区分「完整快照 JSON」与「纯书签树 JSON」。
+ * 完整快照需同时满足：version 为 EXPORT_VERSION、windows/groups/tabs 均为数组、
+ * 且显式含 settings（对象）与 trash（数组）字段、带 exportedAt 标记。
+ * 只有完整快照才走「二次确认 → 全量覆盖树/回收站/设置/主页配置」恢复链路；
+ * 纯书签树 JSON（仅三层数组，无完整快照标记）仍合并为「导入书签」窗口。
+ */
+export function isFullSnapshot(data) {
+  return !!(
+    data &&
+    typeof data === "object" &&
+    !Array.isArray(data) &&
+    data.version === EXPORT_VERSION &&
+    Array.isArray(data.windows) &&
+    Array.isArray(data.groups) &&
+    Array.isArray(data.tabs) &&
+    data.settings &&
+    typeof data.settings === "object" &&
+    !Array.isArray(data.settings) &&
+    Array.isArray(data.trash) &&
+    typeof data.exportedAt === "string"
+  );
+}
+
+/**
  * B3（2026-11-24 菜单审计）：导入内容嗅探——按文本内容而非文件后缀识别格式。
- * 返回 { kind: "json"|"linkmap"|"html"|"homepage"|"unknown", data?, text }。
+ * 返回 { kind: "full-snapshot"|"json"|"linkmap"|"html"|"homepage"|"encrypted-backup"|"unknown", data?, text }。
  *  - 以 `{`/`[` 开头 → JSON 解析；再细分 LinkMap / 主页配置 / TabHarbor 自有快照；
  *  - 含 `<` 且像 Netscape 书签（<!DOCTYPE NETSCAPE / <DL> / <A HREF）→ HTML；
  *  - 解析失败或无法识别 → unknown（由调用方报错）。
@@ -237,6 +261,8 @@ export function sniffImport(text) {
       if (crypto.isEnvelope(parsed)) result.kind = "encrypted-backup";
       else if (isLinkMapExport(parsed)) result.kind = "linkmap";
       else if (isHomepageConfigExport(parsed)) result.kind = "homepage";
+      // 2026-11-25 P0：完整快照优先于普通 JSON，走全量覆盖恢复而非合并导入。
+      else if (isFullSnapshot(parsed)) result.kind = "full-snapshot";
       else if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) result.kind = "json";
     } catch {
       result.kind = "unknown";
@@ -571,7 +597,9 @@ export async function exportLocalSnapshot(
     content = JSON.stringify(buildFullSnapshot(model, settings), null, 2);
     filename = "tabharbor-snapshot-" + formatTimestamp() + ".json";
   }
-  if (chromeApi?.storage?.local)
+  // P2（2026-11-25）：明文完整快照含敏感标题/网址/备注/设置，只下载文件，
+  // 不写入扩展存储历史（历史列表仅保留加密快照），降低本机其他扩展读取风险。
+  if (encrypted && chromeApi?.storage?.local)
     await saveLocalBackup(chromeApi, content, model, { encrypted, filename });
   if (downloadApi) await triggerDownload(filename, content, downloadApi);
   return { filename, content, encrypted };
@@ -787,8 +815,12 @@ export async function restoreFromGist(
     }
   }
   if (!model) {
-    if (!fallbackPassword)
-      throw new Error("GitHub 登录名无法解密该 Gist，请输入此备份的旧密码重试");
+    if (!fallbackPassword) {
+      // P2（2026-11-25）：结构化错误码，供 UI 按类型兜底，避免脆弱的中文文案匹配。
+      const err = new Error("GitHub 登录名无法解密该 Gist，需要旧密码");
+      err.code = "legacy-password-required";
+      throw err;
+    }
     model = await restoreSealedSnapshot(content, fallbackPassword, {});
     usedFallback = true;
   }

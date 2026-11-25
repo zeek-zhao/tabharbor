@@ -2166,7 +2166,31 @@ export async function bootShell(root) {
         if (sniffed.kind === "linkmap") {
           imported = await io.importLinkMap(sniffed.data);
         } else if (sniffed.kind === "json") {
+          // 纯书签树 JSON（无完整快照标记）：合并为「导入书签」窗口，不覆盖设置/回收站。
           imported = await io.importJSON({ ...sniffed.data, settings: settings || {} }, m);
+        } else if (sniffed.kind === "full-snapshot") {
+          // 2026-11-25 P0：完整明文 JSON 快照 → 结构校验 → 二次确认 → 全量覆盖
+          // （树 + 回收站 + 设置 + 主页配置），不再误走合并导入、不再丢失 settings/trash。
+          let restored;
+          try {
+            restored = await io.importJSON(sniffed.data, m);
+          } catch (err) {
+            say("完整快照校验失败：" + io.describeRestoreError(err));
+            return;
+          }
+          if (
+            !window.confirm(
+              "这是完整快照（含书签树、回收站、设置和主页配置）。导入将全量覆盖当前数据，是否继续？"
+            )
+          )
+            return;
+          await store.saveModel(restored);
+          m = restored;
+          if (restored.settings) settings = await store.saveSettings(restored.settings);
+          await applyOpenState();
+          await refreshOpen();
+          say("完整快照已恢复（全量覆盖，含回收站、设置与主页配置）");
+          return;
         } else if (sniffed.kind === "html") {
           imported = await io.importHTML(text, m);
         } else if (sniffed.kind === "homepage") {
@@ -2279,7 +2303,8 @@ export async function bootShell(root) {
         try {
           restored = await io.restoreFromGist(chrome, settings);
         } catch (err) {
-          if (String(err?.message || "").includes("旧密码")) {
+          // P2（2026-11-25）：按结构化 code 判断，而非脆弱的中文文案匹配。
+          if (err?.code === "legacy-password-required") {
             const old = window.prompt("GitHub 登录名无法解密该 Gist，请输入此备份的旧密码：");
             if (!old) {
               say("已取消恢复");
@@ -2399,6 +2424,86 @@ export async function bootShell(root) {
   };
   bindBackupControls(mainHost);
   bindTrashControls(mainHost);
+
+  // ---- 独立窗口左右拖拽缩放（2026-11-25）----
+  // 仅 .winmode 独立窗口渲染左右 6px 手柄；侧边栏/PiP 不显示。
+  // 拖拽期间调 windows.update({ width }) 实时改宽，松手持久化到 lastBounds.standaloneWidth。
+  const bindWindowResize = () => {
+    const winSide = root.querySelector("#side.winmode") || root.querySelector(".winmode");
+    if (!winSide) return; // 侧边栏/PiP：不绑定
+    const clampWidth = (n) => {
+      const v = Number(n);
+      return Number.isFinite(v) ? Math.max(300, Math.min(720, Math.round(v))) : 380;
+    };
+    let currentWindowId = null;
+    let startX = 0;
+    let startWidth = 0;
+    let dragging = false;
+    let lastWidth = 0;
+    const getWindowId = async () => {
+      if (currentWindowId != null) return currentWindowId;
+      try {
+        const w = await chrome.windows.getCurrent();
+        currentWindowId = w?.id ?? null;
+      } catch {
+        currentWindowId = null;
+      }
+      return currentWindowId;
+    };
+    const makeHandle = (side) => {
+      const h = document.createElement("div");
+      h.className = `win-resize-handle ${side}`;
+      h.setAttribute("data-winmode", "true");
+      h.setAttribute("data-win-resize", side);
+      h.setAttribute("role", "separator");
+      h.setAttribute(
+        "aria-label",
+        side === "left" ? "向左拖拽调整窗口宽度" : "向右拖拽调整窗口宽度"
+      );
+      document.body.appendChild(h);
+      return h;
+    };
+    for (const side of ["left", "right"]) {
+      const handle = makeHandle(side);
+      handle.addEventListener("mousedown", async (event) => {
+        event.preventDefault();
+        dragging = true;
+        handle.classList.add("active");
+        startX = event.clientX;
+        startWidth = window.outerWidth || 380;
+        lastWidth = startWidth;
+        currentWindowId = await getWindowId();
+      });
+      const onMove = async (event) => {
+        if (!dragging) return;
+        event.preventDefault();
+        const delta = event.clientX - startX;
+        const target = clampWidth(side === "left" ? startWidth - delta : startWidth + delta);
+        if (target === lastWidth) return;
+        lastWidth = target;
+        if (currentWindowId != null && chrome.windows?.update) {
+          try {
+            await chrome.windows.update(currentWindowId, { width: target });
+          } catch {
+            /* popup 类型若被浏览器限制则忽略，不阻断拖拽 */
+          }
+        }
+      };
+      const onUp = async () => {
+        if (!dragging) return;
+        dragging = false;
+        handle.classList.remove("active");
+        try {
+          await store.saveBounds({ standaloneWidth: clampWidth(lastWidth) });
+        } catch {
+          /* 持久化失败不影响本次会话 */
+        }
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    }
+  };
+  bindWindowResize();
 
   // ---- 浏览器标签事件 → 实时刷新打开态（D8 联带修复）----
   // 刚 create 的标签 url 为 ""、真实地址在 pendingUrl，导航提交后才落 url；

@@ -13,7 +13,16 @@ function toolPageMatches(url) {
   return s === TOOL_PAGE || s.endsWith("/" + TOOL_PAGE);
 }
 
+// 独立窗口宽度记忆（2026-11-25）：默认 380，允许 300–720，越界 clamp。
+export function normalizeStandaloneWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 380;
+  return Math.max(300, Math.min(720, Math.round(n)));
+}
+
 async function openWindow(chromeApi = chrome) {
+  const saved = await loadAll(chromeApi).catch(() => ({}));
+  const width = normalizeStandaloneWidth(saved.lastBounds?.standaloneWidth);
   try {
     const wins =
       typeof chromeApi.windows?.getAll === "function"
@@ -22,8 +31,9 @@ async function openWindow(chromeApi = chrome) {
     for (const w of wins || []) {
       const toolTab = (w.tabs || []).find((t) => toolPageMatches(t && t.url));
       if (toolTab && w.id != null) {
-        // 已弹出实例：聚焦窗口 + 激活工具标签，只置前不新建
+        // 已弹出实例：聚焦窗口 + 激活工具标签，并按保存宽度更新一次（popup 类型若被浏览器限制则忽略）。
         await chromeApi.windows.update(w.id, { focused: true });
+        await chromeApi.windows.update(w.id, { width }).catch(() => {});
         if (toolTab.id != null && typeof chromeApi.tabs?.update === "function") {
           await chromeApi.tabs.update(toolTab.id, { active: true });
         }
@@ -36,7 +46,7 @@ async function openWindow(chromeApi = chrome) {
   return chromeApi.windows.create({
     url: TOOL_PAGE,
     type: "popup",
-    width: 380,
+    width,
     height: 720,
     focused: true,
   });

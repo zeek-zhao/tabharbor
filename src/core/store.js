@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS = {
     ...DEFAULT_HOMEPAGE,
     customEngines: [],
     sites: DEFAULT_HOMEPAGE.sites.map((s) => ({ ...s })),
+    wallpaper: { ...DEFAULT_HOMEPAGE.wallpaper },
   },
 };
 

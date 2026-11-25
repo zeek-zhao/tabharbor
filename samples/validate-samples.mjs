@@ -83,14 +83,14 @@ assert.ok(
 );
 
 // —— M3 演练 fixtures（issue #32）：合法导入 / 非法版本拒绝 / Netscape HTML 导入 ——
-const m3JsonPath = path.join(root, "datasets/tabharbor-m3-import.json");
-const m3InvalidPath = path.join(root, "datasets/tabharbor-m3-invalid.json");
-const m3BookmarksPath = path.join(root, "datasets/tabharbor-m3-bookmarks.html");
-const m3Json = JSON.parse(await fs.readFile(m3JsonPath, "utf8"));
-const m3Invalid = JSON.parse(await fs.readFile(m3InvalidPath, "utf8"));
-const m3BookmarksHtml = await fs.readFile(m3BookmarksPath, "utf8");
+const importJsonPath = path.join(root, "datasets/tabharbor-import.json");
+const invalidJsonPath = path.join(root, "datasets/tabharbor-invalid.json");
+const bookmarksHtmlPath = path.join(root, "datasets/tabharbor-bookmarks.html");
+const importJson = JSON.parse(await fs.readFile(importJsonPath, "utf8"));
+const invalidJson = JSON.parse(await fs.readFile(invalidJsonPath, "utf8"));
+const bookmarksHtml = await fs.readFile(bookmarksHtmlPath, "utf8");
 
-const importedM3 = await importJSON(m3Json, {});
+const importedM3 = await importJSON(importJson, {});
 assert.equal(importedM3.windows.length, 1, "M3 fixture: one window");
 assert.equal(importedM3.groups.length, 2, "M3 fixture: two groups");
 assert.equal(importedM3.tabs.length, 4, "M3 fixture: two tabs per group");
@@ -99,12 +99,12 @@ for (const tab of importedM3.tabs)
   assert.match(tab.url, /^https:\/\/example\.com\//, "M3 fixture: inert example.com URLs");
 
 await assert.rejects(
-  () => importJSON(m3Invalid, {}),
+  () => importJSON(invalidJson, {}),
   /版本不兼容/,
   "M3 invalid fixture must be rejected by importJSON (version mismatch)"
 );
 
-const importedM3Html = await importHTML(m3BookmarksHtml, {});
+const importedM3Html = await importHTML(bookmarksHtml, {});
 assert.equal(importedM3Html.windows.length, 1, "M3 bookmarks: imported into one virtual window");
 assert.equal(importedM3Html.groups.length, 3, "M3 bookmarks: three folders (2 top + 1 nested)");
 assert.equal(importedM3Html.tabs.length, 6, "M3 bookmarks: six links, entity decoded, deduped");

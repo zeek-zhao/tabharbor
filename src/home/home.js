@@ -36,6 +36,47 @@ async function persist() {
   settings = await store.saveSettings({ homepage: cfg }, chromeApi);
   renderEngines();
   renderSites();
+  renderWallpaper();
+}
+
+// 2026-11-25 壁纸：仅作用于内部主页 body；渐变/图片 + scrim 遮罩保证文字对比度。
+function renderWallpaper() {
+  const wp = cfg.wallpaper || hp.DEFAULT_WALLPAPER;
+  const body = document.body;
+  body.removeAttribute("data-wallpaper-mode");
+  body.style.removeProperty("--wp-image");
+  body.style.removeProperty("--wp-gradient");
+  body.style.removeProperty("--wp-scrim");
+  if (wp.mode === "none") return;
+  body.setAttribute("data-wallpaper-mode", wp.mode);
+  body.style.setProperty("--wp-scrim", String(wp.scrim));
+  if (wp.mode === "image" && wp.imageData) {
+    body.style.setProperty("--wp-image", `url("${wp.imageData}")`);
+  } else {
+    const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
+    body.style.setProperty("--wp-gradient", preset.css);
+  }
+}
+
+function renderWallpaperControls() {
+  const wp = cfg.wallpaper || hp.DEFAULT_WALLPAPER;
+  const presetSel = $("#wpPreset");
+  if (presetSel) {
+    presetSel.innerHTML = hp.WALLPAPER_PRESETS.map(
+      (p) =>
+        `<option value="${escapeHtml(p.id)}"${p.id === wp.preset ? " selected" : ""}>${escapeHtml(p.name)}</option>`
+    ).join("");
+  }
+  const mode = $("#wpMode");
+  if (mode) mode.value = wp.mode;
+  const scrim = $("#wpScrim");
+  if (scrim) scrim.value = String(wp.scrim);
+  const scrimVal = $("#wpScrimVal");
+  if (scrimVal) scrimVal.textContent = String(wp.scrim);
+  const presetRow = $("#wpPresetRow");
+  if (presetRow) presetRow.classList.toggle("hidden", wp.mode === "image");
+  const imageRow = $("#wpImageRow");
+  if (imageRow) imageRow.classList.toggle("hidden", wp.mode !== "image");
 }
 
 // 搜索引擎下拉：内置 + 自定义
@@ -134,6 +175,7 @@ function bind() {
   $("#homeSettings")?.addEventListener("click", () => {
     renderEngines();
     renderSiteEditList();
+    renderWallpaperControls();
     $("#homeCfgMask").hidden = false;
   });
   $("#homeCfgClose")?.addEventListener("click", () => {
@@ -176,11 +218,71 @@ function bind() {
     say("自定义引擎已添加");
   });
 
+  // 2026-11-25 壁纸控件
+  $("#wpMode")?.addEventListener("change", (e) => {
+    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, mode: e.target.value });
+    void persist();
+    renderWallpaperControls();
+    say("壁纸模式已更新");
+  });
+  $("#wpPreset")?.addEventListener("change", (e) => {
+    cfg.wallpaper = hp.normalizeWallpaper({
+      ...cfg.wallpaper,
+      mode: "gradient",
+      preset: e.target.value,
+    });
+    void persist();
+    say("渐变预设已更新");
+  });
+  $("#wpScrim")?.addEventListener("input", (e) => {
+    const val = $("#wpScrimVal");
+    if (val) val.textContent = e.target.value;
+  });
+  $("#wpScrim")?.addEventListener("change", (e) => {
+    cfg.wallpaper = hp.normalizeWallpaper({ ...cfg.wallpaper, scrim: Number(e.target.value) });
+    void persist();
+  });
+  $("#wpImage")?.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // 仅本地图片、≤1MB；非法/超大不入库（零出站、隐私可控）。
+    if (!/^image\/(png|jpeg|webp)$/i.test(file.type)) {
+      say("仅支持 png/jpeg/webp 图片");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 1024 * 1024) {
+      say("图片超过 1MB，已拒绝");
+      e.target.value = "";
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      cfg.wallpaper = hp.normalizeWallpaper({
+        ...cfg.wallpaper,
+        mode: "image",
+        imageData: String(reader.result || ""),
+      });
+      void persist();
+      say("本地壁纸已设置（仅存本机）");
+    };
+    reader.onerror = () => say("图片读取失败");
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  });
+  $("#wpRemoveImage")?.addEventListener("click", () => {
+    cfg.wallpaper = hp.normalizeWallpaper(null);
+    void persist();
+    renderWallpaperControls();
+    say("已移除图片并恢复默认壁纸");
+  });
+
   $("#resetHomeCfg")?.addEventListener("click", () => {
     cfg = hp.normalizeHomeConfig(null);
     void persist();
     renderEngineSelect();
     renderSiteEditList();
+    renderWallpaperControls();
     say("已恢复默认主页配置");
   });
 
@@ -250,6 +352,7 @@ function bind() {
       await persist();
       renderEngineSelect();
       renderSiteEditList();
+      renderWallpaperControls();
       say("主页配置已导入并整体覆盖");
     } catch (err) {
       say("主页配置导入失败：" + err.message);
@@ -271,6 +374,7 @@ async function boot() {
   renderEngineSelect();
   renderEngines();
   renderSites();
+  renderWallpaper();
   bind();
 }
 

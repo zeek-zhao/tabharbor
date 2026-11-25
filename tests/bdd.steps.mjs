@@ -3019,14 +3019,14 @@ step("那么", "主页路径常量为 home/home.html", () => {
 step("那么", "主页新建标签标题为主页", () => {
   if (homepage.HOME_TITLE !== "主页") throw new Error(`主页标题=${homepage.HOME_TITLE}`);
 });
-step("那么", "内置搜索引擎包含 {} 四个默认引擎", (need) => {
+step("那么", "内置搜索引擎包含 {} 九个默认引擎", (need) => {
   const names = homepage.BUILTIN_ENGINES.map((e) => e.name).join(",");
   for (const n of String(need).split(",")) {
     if (!homepage.BUILTIN_ENGINES.some((e) => e.name === n))
       throw new Error(`内置引擎缺 ${n}；现有 ${names}`);
   }
-  if (homepage.BUILTIN_ENGINES.length !== 4)
-    throw new Error(`内置引擎应恰为 4 个，实际 ${homepage.BUILTIN_ENGINES.length}`);
+  if (homepage.BUILTIN_ENGINES.length !== 9)
+    throw new Error(`内置引擎应恰为 9 个，实际 ${homepage.BUILTIN_ENGINES.length}`);
 });
 step("那么", "默认引擎为必应且含 %s 占位", () => {
   const bing = homepage.BUILTIN_ENGINES.find((e) => e.id === "bing");
@@ -3040,6 +3040,12 @@ step("那么", "引擎 {} 代入关键词 {} 得到 {}", (engineId, q, want) => 
 step("那么", "默认常用网址有 {} 个", (n) => {
   if (homepage.DEFAULT_SITES.length !== Number(n))
     throw new Error(`默认站点=${homepage.DEFAULT_SITES.length} ≠ ${n}`);
+});
+
+step("那么", "默认常用网址均为安全 http 协议", () => {
+  for (const s of homepage.DEFAULT_SITES) {
+    if (!/^https:\/\//i.test(s.url)) throw new Error(`站点 ${s.title} 非安全协议：${s.url}`);
+  }
 });
 step("那么", "主页配置规范化去重并按 %s 过滤引擎", () => {
   const cfg = homepage.normalizeHomeConfig({
@@ -3963,9 +3969,9 @@ step("那么", "明文快照不含加密信封字段", () => {
 });
 
 step("当", "从该文件内容恢复本地快照且不提供密码", async () => {
-  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
-  const entry = (got.localBackups || [])[0];
-  ctx.restored = await io.restoreBackup(entry.id, {}, ctx.mock.chrome, "");
+  // P2（2026-11-25）：明文快照不写扩展存储历史，直接从导出文件内容恢复。
+  ctx.restored = await io.importJSON(JSON.parse(ctx.localExport.content), {});
+  ctx.restored.settings = JSON.parse(ctx.localExport.content).settings;
 });
 
 step("那么", "恢复出的模型包含书签树回收站与设置", () => {
@@ -4205,4 +4211,340 @@ step("那么", "两份 HTML 均含本地 Gist HTML 三卡片的全部按钮 ID",
     "#btnRestoreGithub",
   ])
     if (!shell.includes(token)) throw new Error("shell 未接线：" + token);
+});
+
+/* ========== 2026-11-25 P0 导入分类（features/22）========== */
+step("假如", "一个含回收站与设置的主页完整快照数据", async () => {
+  ctx.m = model.buildModel();
+  const w = model.addWindow(ctx.m, "快照窗口", "w_snap");
+  const g = model.addGroup(ctx.m, "快照分组", w.id, "g_snap");
+  model.addTab(ctx.m, "快照标签", "https://example.com/snap", g.id, "t_snap");
+  ctx.m.trash = [{ id: "tr_snap", title: "已删快照节点", kind: "tab" }];
+  ctx.fullSnapshotSettings = {
+    theme: "light",
+    homepage: {
+      engine: "ddg",
+      customEngines: [{ id: "ce1", name: "My", url: "https://my.com/?q=%s" }],
+      sites: [{ title: "A", url: "https://a.com" }],
+    },
+  };
+  ctx.fullSnapshotData = await io.exportJSON(ctx.m, ctx.fullSnapshotSettings);
+  ctx.fullSnapshotObj = JSON.parse(ctx.fullSnapshotData);
+});
+
+step("当", "嗅探该完整快照文本", () => {
+  ctx.classifySniffed = io.sniffImport(ctx.fullSnapshotData);
+});
+
+step("当", "嗅探一份纯书签树 JSON", () => {
+  ctx.classifySniffed = io.sniffImport(
+    JSON.stringify({
+      version: 1,
+      windows: [{ id: "w", kind: "window", title: "W", collapsed: false }],
+      groups: [],
+      tabs: [],
+    })
+  );
+});
+
+step("那么", "分类嗅探结果为完整快照", () => {
+  if (ctx.classifySniffed.kind !== "full-snapshot")
+    throw new Error(`嗅探类型=${ctx.classifySniffed.kind}，应为 full-snapshot`);
+});
+
+step("那么", "分类嗅探结果为普通书签树", () => {
+  if (ctx.classifySniffed.kind !== "json")
+    throw new Error(`嗅探类型=${ctx.classifySniffed.kind}，应为 json`);
+});
+
+step("当", "从完整快照数据恢复模型", async () => {
+  ctx.classifyRestored = await io.importJSON(ctx.fullSnapshotObj, {});
+});
+
+step("那么", "恢复模型含快照的书签树回收站设置与主页配置", () => {
+  const r = ctx.classifyRestored;
+  if (r.windows.length !== 1 || r.tabs[0].title !== "快照标签") throw new Error("恢复缺书签树");
+  if (!r.trash || r.trash.length !== 1) throw new Error("恢复缺回收站");
+  if (r.settings.theme !== "light") throw new Error("恢复缺设置");
+  if (r.settings.homepage?.engine !== "ddg") throw new Error("恢复缺主页配置");
+});
+
+step("当", "构造缺少 trash 字段的非法完整快照", () => {
+  const bad = { ...ctx.fullSnapshotObj };
+  delete bad.trash;
+  ctx.badSnapshot = bad;
+});
+
+step("那么", "完整快照校验拒绝且错误归类为结构问题", async () => {
+  if (io.isFullSnapshot(ctx.badSnapshot)) throw new Error("非法快照不应被判为完整快照");
+  let err;
+  try {
+    // importJSON 是 async：缺字段会 reject，必须 await 才能捕获（不写库）。
+    await io.importJSON(ctx.badSnapshot, {});
+  } catch (e) {
+    err = e;
+  }
+  if (!err) throw new Error("非法快照未被拒绝");
+  if (io.classifyBackupError(err) !== "structure")
+    throw new Error("错误未归类为结构问题：" + err.message);
+});
+
+step("假如", "一个含手工窗口与回收站和设置的现有模型", () => {
+  ctx.m = model.buildModel();
+  model.addWindow(ctx.m, "手工窗口", "w_manual");
+  model.addTab(ctx.m, "现有标签", "https://example.com/exist", "w_manual", "t_exist");
+  ctx.m.trash = [{ id: "tr_manual", title: "现有回收站节点", kind: "tab" }];
+  ctx.m.settings = { theme: "dark", homepage: { engine: "bing" } };
+});
+
+step("当", "合并一份纯书签树 JSON 为导入窗口", async () => {
+  const tree = {
+    version: 1,
+    windows: [{ id: "w_imp", kind: "window", title: "导入源窗", collapsed: false }],
+    groups: [],
+    tabs: [
+      {
+        id: "t_imp",
+        kind: "tab",
+        title: "导入标签",
+        url: "https://example.com/imp",
+        parentId: "w_imp",
+      },
+    ],
+  };
+  // importJSON 要求完整字段；纯书签树合并场景补齐 settings/trash，但合并时不使用它们。
+  const parsed = await io.importJSON({ ...tree, settings: ctx.m.settings, trash: [] }, ctx.m);
+  ctx.mergeModel = JSON.parse(JSON.stringify(ctx.m));
+  ctx.importedWin = io.mergeAsImportedWindow(ctx.mergeModel, parsed);
+});
+
+step("当", "合并一份 LinkMap 数据为导入窗口", async () => {
+  const linkmap = {
+    version: "1.1.5",
+    rawData: [{ data: { nodeType: "window", alias: "LM 窗" }, children: [] }],
+  };
+  const parsed = await io.importLinkMap(linkmap);
+  ctx.mergeModel = JSON.parse(JSON.stringify(ctx.m));
+  ctx.importedWin = io.mergeAsImportedWindow(ctx.mergeModel, parsed);
+});
+
+step("那么", "现有窗口设置与回收站均保留且新增导入书签窗口", () => {
+  const mm = ctx.mergeModel;
+  if (!mm.windows.some((w) => w.id === "w_manual")) throw new Error("原手工窗口丢失");
+  if (!mm.tabs.some((t) => t.id === "t_exist")) throw new Error("原标签丢失");
+  if (!mm.trash || !mm.trash.some((t) => t.id === "tr_manual")) throw new Error("原回收站丢失");
+  if (!mm.windows.some((w) => w.title === "导入书签")) throw new Error("缺导入书签窗口");
+  if (ctx.importedWin.title !== "导入书签") throw new Error("导入窗口标题不符");
+});
+
+step("那么", "shell 对完整快照先校验再确认取消返回且全量写回", () => {
+  const src = repoFile("src/ui/shell.js");
+  const ioSrc = repoFile("src/core/import-export.js");
+  if (!ioSrc.includes("export function isFullSnapshot")) throw new Error("缺完整快照判定");
+  if (!src.includes('sniffed.kind === "full-snapshot"')) throw new Error("shell 未分流完整快照");
+  const anchor = src.indexOf('sniffed.kind === "full-snapshot"');
+  const seg = src.slice(anchor, anchor + 1400);
+  if (!seg.includes("io.importJSON")) throw new Error("完整快照未走结构校验");
+  if (!seg.includes("window.confirm")) throw new Error("完整快照缺覆盖确认");
+  if (!seg.includes("store.saveModel(restored)")) throw new Error("完整快照未全量写库");
+  if (!seg.includes("store.saveSettings(restored.settings)"))
+    throw new Error("完整快照未写回设置/主页配置");
+  // 取消确认后必须 return（不写库）
+  const confirmIdx = seg.indexOf("if (\n            !window.confirm");
+  if (confirmIdx < 0 || !seg.slice(confirmIdx, confirmIdx + 160).includes("return;"))
+    throw new Error("取消覆盖确认后未 return（可能污染模型）");
+});
+
+/* ========== 2026-11-25 独立窗口缩放（features/23）========== */
+step("当", "归一化独立窗口宽度 {}", async (v) => {
+  const sw = await import("../src/background/service-worker.js");
+  ctx.normWidth = sw.normalizeStandaloneWidth(v);
+});
+
+step("那么", "归一化宽度为 {}", (n) => {
+  if (ctx.normWidth !== Number(n)) throw new Error(`归一化宽度=${ctx.normWidth} ≠ ${n}`);
+});
+
+step("假如", "lastBounds 已保存 standaloneWidth 为 {}", async (w) => {
+  ctx.mock = makeChromeMock();
+  await ctx.mock.chrome.storage.local.set({ lastBounds: { standaloneWidth: Number(w) } });
+  globalThis.chrome = ctx.mock.chrome;
+});
+
+step("当", "执行打开独立窗口", async () => {
+  const sw = await import("../src/background/service-worker.js");
+  ctx.openWindowResult = await sw.openWindow?.(ctx.mock.chrome);
+  // openWindow 未导出则走点击图标命令路径（initServiceWorker + onCommand open-window）
+  if (!ctx.openWindowResult) {
+    sw.initServiceWorker(ctx.mock.chrome);
+    const listeners = ctx.mock.listeners || {};
+    // 直接触发命令监听
+    const cmdFns = listeners.command?.fns || [];
+    for (const fn of cmdFns) await fn("open-window");
+  }
+});
+
+step("那么", "windows.create 以 popup 类型且宽度为 520", () => {
+  const creates = ctx.mock.calls.windowsCreate || ctx.mock.calls.windows || [];
+  const hit = creates.find((c) => c.type === "popup" || c.options?.type === "popup");
+  if (!hit) throw new Error("未以 popup 类型创建独立窗口");
+  const width = hit.width ?? hit.options?.width;
+  if (width !== 520) throw new Error(`开窗宽度=${width} ≠ 520`);
+});
+
+step("那么", "拖拽手柄仅 winmode 绑定且用 windows.update 改宽并持久化 lastBounds", () => {
+  const shell = repoFile("src/ui/shell.js");
+  const css = repoFile("src/assets/m2.css");
+  const sw = repoFile("src/background/service-worker.js");
+  // 手柄仅 winmode：有 .winmode 判定 + data-winmode 标记 + CSS 仅 winmode 显示
+  if (!shell.includes('root.querySelector(".winmode")')) throw new Error("未检测 winmode");
+  if (!shell.includes("data-winmode")) throw new Error("手柄未标记 winmode");
+  if (!css.includes(".winmode.side") || !css.includes("max-width: none"))
+    throw new Error("winmode 未解除 max-width");
+  if (!css.includes(".win-resize-handle")) throw new Error("缺手柄样式");
+  // 拖拽实时更新 + 松手持久化
+  if (!shell.includes("chrome.windows.update(currentWindowId"))
+    throw new Error("拖拽未调用 windows.update");
+  if (!shell.includes("store.saveBounds({ standaloneWidth")) throw new Error("松手未持久化宽度");
+  // 开窗读保存宽度
+  if (!sw.includes("lastBounds?.standaloneWidth")) throw new Error("开窗未读保存宽度");
+  if (!sw.includes("normalizeStandaloneWidth")) throw new Error("缺宽度归一化");
+});
+
+/* ========== 2026-11-25 主页壁纸（features/24）========== */
+step("那么", "默认壁纸为 none 且有五套渐变预设", () => {
+  if (homepage.DEFAULT_WALLPAPER.mode !== "none") throw new Error("默认壁纸 mode 应为 none");
+  if (homepage.WALLPAPER_PRESETS.length !== 5) throw new Error("渐变预设应为 5 套");
+  for (const p of homepage.WALLPAPER_PRESETS)
+    if (!/^linear-gradient\(/.test(p.css)) throw new Error(`预设 ${p.id} 非渐变`);
+});
+
+step("当", "规范化壁纸配置 mode 为 flash preset 为 bad scrim 为 9", () => {
+  ctx.wp = homepage.normalizeWallpaper({ mode: "flash", preset: "bad", scrim: 9 });
+});
+
+step("那么", "规范化壁纸 mode 为 none preset 为 deep-blue scrim 为 0.85", () => {
+  if (ctx.wp.mode !== "none" || ctx.wp.preset !== "deep-blue" || ctx.wp.scrim !== 0.85)
+    throw new Error(`规范化结果异常：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "规范化壁纸配置 mode 为 image imageData 为 javascript 伪协议", () => {
+  ctx.wp = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "javascript:alert(1)",
+    preset: "teal-mist",
+  });
+});
+
+step("那么", "规范化壁纸 mode 为 gradient 且 imageData 为空", () => {
+  if (ctx.wp.mode !== "gradient" || ctx.wp.imageData !== "")
+    throw new Error(`非法图片未回退：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "保留合法 png data URL 壁纸配置", () => {
+  ctx.wp = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+  });
+});
+
+step("那么", "规范化壁纸 mode 为 image 且 imageData 以 data image png 开头", () => {
+  if (ctx.wp.mode !== "image" || !ctx.wp.imageData.startsWith("data:image/png;base64,"))
+    throw new Error(`合法图片被拒绝：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "导出含自定义壁纸的主页配置并重新导入", () => {
+  const cfg = homepage.normalizeHomeConfig({
+    engine: "bing",
+    sites: [{ title: "A", url: "https://a.com" }],
+    wallpaper: { mode: "gradient", preset: "warm-sand", scrim: 0.5 },
+  });
+  const exported = homepage.exportHomepageConfig(cfg);
+  ctx.wpImported = homepage.importHomepageConfig(exported);
+});
+
+step("那么", "导入配置壁纸 mode 为 gradient preset 为 warm-sand", () => {
+  if (
+    ctx.wpImported.wallpaper?.mode !== "gradient" ||
+    ctx.wpImported.wallpaper?.preset !== "warm-sand"
+  )
+    throw new Error(`导入壁纸异常：${JSON.stringify(ctx.wpImported.wallpaper)}`);
+});
+
+step("当", "规范化一份空主页配置", () => {
+  ctx.wpCfg = homepage.normalizeHomeConfig(null);
+});
+
+step("那么", "规范化配置含合法 wallpaper 字段", () => {
+  const wp = ctx.wpCfg.wallpaper;
+  if (!wp || !["none", "gradient", "image"].includes(wp.mode))
+    throw new Error("规范化配置缺合法 wallpaper");
+  if (!Number.isFinite(wp.scrim)) throw new Error("scrim 非法");
+});
+
+step("那么", "壁纸仅作用内部主页且无远程 URL 输入", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const homeCss = repoFile("src/home/home.css");
+  const hpSrc = repoFile("src/core/homepage.js");
+  if (!homeJs.includes("renderWallpaper")) throw new Error("主页未渲染壁纸");
+  if (!homeCss.includes("data-wallpaper-mode")) throw new Error("壁纸样式未限定内部主页");
+  // 零出站：壁纸仅接受 data:image/*；不接受远程 URL 输入
+  if (!/\^data:image\\?\/\(png\|jpeg\|webp\);base64,/.test(hpSrc))
+    throw new Error("缺 data URL 校验");
+  if (homeJs.includes("wallpaperUrl") || homeJs.includes("wpRemoteUrl"))
+    throw new Error("存在远程壁纸 URL 输入");
+  const homeHtml = repoFile("src/home/home.html");
+  if (!homeJs.includes("image/") && !homeHtml.includes("image/png,image/jpeg,image/webp"))
+    throw new Error("未限制本地图片类型");
+});
+
+/* ========== 2026-11-25 按钮扁平统一（features/17）========== */
+step("那么", "按钮统一扁平单行且文案与三端一致", () => {
+  const css = repoFile("src/assets/m2.css");
+  const homeCss = repoFile("src/home/home.css");
+  // 三类按钮统一高度/圆角/nowrap/无阴影
+  for (const src of [css, homeCss]) {
+    for (const token of [
+      "white-space: nowrap",
+      "flex: 0 0 auto",
+      "height: 32px",
+      "box-shadow: none",
+    ]) {
+      if (!src.includes(token)) throw new Error(`按钮样式缺 ${token}`);
+    }
+  }
+  if (!css.includes(".modal-actions") || !css.includes("flex-wrap: nowrap"))
+    throw new Error("操作行未约束 nowrap");
+  // 三端按钮 ID 一致 + 统一短文案
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    for (const id of [
+      "btnBackupNow",
+      "btnImportLocal",
+      "btnBackupGithub",
+      "btnRestoreGithub",
+      "btnExportBookmarksHtml",
+      "btnImportHtml",
+      "btnAuthorizeGithub",
+    ])
+      if (!s.includes(`id="${id}"`)) throw new Error(`${f} 缺 #${id}`);
+    for (const text of [
+      "导出本地",
+      "从本地导入",
+      "备份到 GitHub",
+      "从 GitHub 恢复",
+      "导出书签",
+      "导入书签",
+      "保存并校验",
+    ])
+      if (!s.includes(text)) throw new Error(`${f} 缺统一文案 ${text}`);
+  }
+  if (!repoFile("src/home/home.html").includes("+ 添加")) throw new Error("主页按钮文案异常");
+});
+
+/* ========== 2026-11-25 P2：明文快照不落扩展存储历史 ========== */
+step("那么", "明文快照未写入扩展存储历史", async () => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  if ((got.localBackups || []).length !== 0)
+    throw new Error("明文快照不应写入 localBackups 历史（含敏感信息）");
 });

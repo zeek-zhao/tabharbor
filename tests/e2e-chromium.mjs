@@ -634,27 +634,21 @@ try {
 
   console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
-  // —— #32/R2 M3 演练：真实文件导入（R2 合并为「导入书签」窗口，不再全量替换）——
-  win.on("dialog", (dialog) => void dialog.accept()); // 恢复备份等场景的确认弹窗兜底
-  const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-import.json");
-  const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-invalid.json");
-  const windowsBefore = await win.evaluate(
-    () => document.querySelectorAll('.node[data-kind="window"]').length
-  );
+  // —— 2026-11-25 P0：真实文件导入分类——
+  // 完整快照 JSON（含 settings/trash/exportedAt）走二次确认 → 全量覆盖（不再合并）。
+  win.on("dialog", (dialog) => void dialog.accept()); // 覆盖确认弹窗兜底
+  const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-import.json");
+  const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-invalid.json");
   await win.setInputFiles("#importFile", m3ImportPath);
   await win.waitForFunction(
-    (n) => document.querySelectorAll('.node[data-kind="window"]').length === n + 1,
-    windowsBefore,
+    () => document.querySelector("#dataStatus").textContent.includes("完整快照已恢复"),
+    undefined,
     { timeout: 5000 }
   );
-  const winNames = await win.evaluate(() =>
-    [...document.querySelectorAll(".win-name")].map((x) => x.textContent.trim())
-  );
-  assert.ok(winNames.includes("导入书签"), `导入书签窗口未新增: ${winNames.join(",")}`);
   const statusOk = await win.textContent("#dataStatus");
   assert.ok(
-    statusOk.includes("导入完成") && statusOk.includes("导入书签"),
-    `R2 合并导入提示缺失: ${statusOk}`
+    statusOk.includes("全量覆盖") && statusOk.includes("回收站"),
+    `完整快照覆盖恢复提示缺失: ${statusOk}`
   );
 
   await win.setInputFiles("#importFile", m3InvalidPath);
@@ -665,13 +659,24 @@ try {
   );
   const statusFail = await win.textContent("#dataStatus");
   assert.ok(statusFail.includes("版本不兼容"), `非法版本拒绝提示缺失: ${statusFail}`);
+  // 完整快照覆盖演练改写了模型（样例无 open/tabId 叶子）；重播种样例供后续 PiP/互转段使用。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(
+    () => !!document.querySelector('.node[data-id="w_work"] > .node-row'),
+    undefined,
+    { timeout: 10000 }
+  );
   // R8：行内图标放大（SVG width=14）
   const triW = await win.evaluate(() => {
     const svg = document.querySelector(".tri svg") || document.querySelector(".leaf svg");
     return svg ? svg.getAttribute("width") : null;
   });
   assert.equal(triW, "14", `R8 图标宽度异常: ${triW}`);
-  console.log("E2E 13/7 M3 导入演练（R2 合并导入 + 非法版本拒绝 + R8 图标）通过");
+  console.log("E2E 13/7 导入分类演练（完整快照覆盖恢复 + 非法版本拒绝 + R8 图标）通过");
 
   // —— D5：历史跳转 + 置顶真实实现（修复前：仅 toast 待实现）——
   await win.click("#btnHistory");
@@ -1179,7 +1184,7 @@ try {
 
   // Node 侧 fetch 不支持 chrome-extension:// scheme；直接用 fs 读取真实样例作为导入文本
   const bookmarkHtml = fs.readFileSync(
-    path.join(repoRoot, "samples/datasets/tabharbor-m3-bookmarks.html"),
+    path.join(repoRoot, "samples/datasets/tabharbor-bookmarks.html"),
     "utf8"
   );
   const imported = await win.evaluate(async (html) => {

@@ -46,6 +46,36 @@ body {
   height: 100vh;
   background: var(--bg1);
 }
+/* 2026-11-25：独立窗口左右拖拽缩放——解除侧边栏最大宽度约束，
+   仅 .winmode 显示左右 6px 手柄；侧边栏（无 .winmode）保持 420px 上限。 */
+.winmode.side {
+  max-width: none;
+}
+.win-resize-handle {
+  display: none;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 60;
+  touch-action: none;
+}
+.winmode ~ .win-resize-handle,
+.win-resize-handle[data-winmode="true"] {
+  display: block;
+}
+.win-resize-handle.left {
+  left: 0;
+}
+.win-resize-handle.right {
+  right: 0;
+}
+.win-resize-handle:hover,
+.win-resize-handle.active {
+  background: var(--accent);
+  opacity: 0.42;
+}
 .titlebar {
   display: flex;
   align-items: center;
@@ -663,8 +693,10 @@ body {
 .edit-input:focus {
   border-color: var(--accent);
 }
+/* 2026-11-25 统一按钮体系：扁平、无阴影、一致高度/圆角/padding/字号，单行不折行。 */
 .modal-actions {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 10px;
@@ -674,9 +706,16 @@ body {
   color: var(--fg1);
   border: 1px solid var(--line1);
   border-radius: 8px;
-  padding: 6px 13px;
+  padding: 7px 12px;
+  height: 32px;
+  box-shadow: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
   font-size: 12px;
+  line-height: 18px;
 }
 .btn.primary {
   background: var(--accent);
@@ -708,14 +747,22 @@ body {
   padding: 18px 8px;
   font-size: 12px;
 }
+/* mini-btn 与 btn 统一为扁平体系（2026-11-25）：同高 32px / 同圆角 8px / 同字号 12px，仅底色弱化。 */
 .mini-btn {
   background: transparent;
   color: var(--fg1);
   border: 1px solid var(--line1);
-  border-radius: 6px;
-  padding: 3px 9px;
+  border-radius: 8px;
+  padding: 7px 12px;
+  height: 32px;
+  box-shadow: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 18px;
 }
 .mini-btn.danger {
   color: var(--warn);
@@ -849,7 +896,9 @@ body {
   font-size: 11px;
   color: var(--fg2);
   opacity: 0.7;
-  transition: opacity 0.15s, border-color 0.15s;
+  transition:
+    opacity 0.15s,
+    border-color 0.15s;
 }
 .r1-dropzone.dragover {
   opacity: 1;
