@@ -35,6 +35,8 @@ import {
   topWindowOf,
   childrenOf,
   descendantsOf,
+  insertTabAfter,
+  leafByTabId,
 } from "../core/model.js";
 import { conversionRule, kindByMembership, rejection } from "../core/levels.js";
 import { menuHtml } from "./menu.js";
@@ -194,9 +196,19 @@ async function deriveOpenState(m) {
 async function queryOpenTabs() {
   if (typeof chrome === "undefined" || !chrome.tabs?.query) return [];
   const tabs = await chrome.tabs.query({});
+  // 2026-11-25 审计 P0-2：不再因 url 为空丢弃有 tabId 的标签（导航提交前地址在 pendingUrl）。
+  // 快照元数据统一携带 pendingUrl/index/active/windowId；绑定仍只按 tabId。
   return tabs
-    .filter((t) => String(t.url || "").trim().length > 0)
-    .map((t) => ({ id: t.id, title: t.title || t.url, url: t.url }));
+    .filter((t) => t.id != null && String(t.url || t.pendingUrl || "").trim().length > 0)
+    .map((t) => ({
+      id: t.id,
+      title: t.title || t.url || t.pendingUrl || "",
+      url: t.url,
+      pendingUrl: t.pendingUrl,
+      index: t.index,
+      active: !!t.active,
+      windowId: t.windowId,
+    }));
 }
 
 // F2（m11442）：真实浏览器窗口 → [{ id, focused, tabs }]；无 windows API 时返回 null
@@ -208,7 +220,14 @@ async function queryRealWindows() {
     return (wins || []).map((w) => ({
       id: w.id,
       focused: !!w.focused,
-      tabs: (w.tabs || []).map((t) => ({ id: t.id, title: t.title || t.url, url: t.url })),
+      tabs: (w.tabs || []).map((t) => ({
+        id: t.id,
+        title: t.title || t.url || t.pendingUrl || "",
+        url: t.url,
+        pendingUrl: t.pendingUrl,
+        index: t.index,
+        active: !!t.active,
+      })),
     }));
   } catch {
     return null;
@@ -679,7 +698,15 @@ export async function bootShell(root) {
       const tabId = created && created.id != null ? created.id : undefined;
       // L3：目标标签建好后清理 seed，避免残留新标签页 / 误关窗口
       if (seedId != null) await tabsOp.removeSeedTab(chrome, seedId, tabId);
-      const leaf = addTab(m, homepage.HOME_TITLE, homeUrl, container.id);
+      // 2026-11-25 审计 P0-1：模型叶子跟随激活锚点（按 tabId 查），跨容器则保留当前父级末尾。
+      const anchorLeaf = leafByTabId(m, insert.openerTabId);
+      const leaf = insertTabAfter(
+        m,
+        homepage.HOME_TITLE,
+        homeUrl,
+        container.id,
+        anchorLeaf ? anchorLeaf.id : null
+      );
       if (tabId != null) leaf.tabId = tabId;
       if (rebound && realWinId != null && topWin) topWin.windowId = realWinId;
       await store.saveModel(m);
@@ -1405,7 +1432,13 @@ export async function bootShell(root) {
       }
     }
     if (!target) {
-      toast("当前激活标签未归入书签树，且同步浏览器快照后仍无法归属");
+      // P0-2（2026-11-25 审计）：区分待导航标签与确无代表叶子，避免误报「不在书签树中」。
+      const pending = String(activeTab.pendingUrl || "").trim();
+      if (pending) {
+        toast("当前标签仍在导航中（地址尚未提交），请稍后重试定位");
+      } else {
+        toast("当前激活标签未归入书签树，且同步浏览器快照后仍无法归属");
+      }
       return;
     }
     // 命中后：按宿主写入选中态、展开祖链、渲染并滚动到可视区。
@@ -2054,7 +2087,8 @@ export async function bootShell(root) {
       if (field && host.doc.activeElement !== field) field.value = settings[key] || fallback;
     }
     const frequency = host.root.querySelector("#ghBackupFreq");
-    if (frequency) frequency.value = settings.ghBackupFreq || "off";
+    // P1（2026-11-25）：无人值守定时备份不可用，历史遗留频率一律显示「关闭」。
+    if (frequency) frequency.value = "off";
     const priv = host.root.querySelector("#ghPrivate");
     if (priv) priv.classList.toggle("on", settings.ghPrivate !== false);
   };

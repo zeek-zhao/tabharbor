@@ -1,6 +1,6 @@
 // TH2 service worker（FR-013/014/015/016）——点击图标按打开模式分支；右键图标开侧边栏；安装默认值；快捷键命令广播
 import { DEFAULT_SETTINGS, loadAll, saveSettings, saveModel } from "../core/store.js";
-import { registerAutoBackup, runAutoBackup } from "../core/import-export.js";
+import { registerAutoBackup } from "../core/import-export.js";
 import { syncBrowserSnapshot } from "../core/align.js";
 
 // U3 / Q3（2026-11-24 UI 审计）：点击图标/快捷键开窗时——
@@ -94,40 +94,18 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   });
   void syncAutoBackupAlarm(chromeApi);
 
-  // M8/Q2：GitHub Gist 加密定时备份；配置前/关闭时不触发网络请求。
-  // Q2 密码不落盘：alarm 无用户交互无法取得密码时，runAutoBackup 抛"需要密码"，
-  // 由下方 catch 写成 credential-free 结果提示用户手动备份（不保存密码、不写日志）。
+  // 2026-11-25 审计 P1：密码不落盘 → 不支持无人值守 GitHub 定时备份。
+  // 仅处理历史版本遗留的 alarm：清除并写入明确提示，绝不读取/持久化密码，不发起网络请求。
   chromeApi.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== "auto-backup") return;
-    const all = await loadAll(chromeApi);
-    const settings = all.settings || {};
-    if (settings.backupTarget !== "github" || !settings.ghToken) return;
-    const model = {
-      windows: all.windows,
-      groups: all.groups,
-      tabs: all.tabs,
-      trash: all.trash,
-      settings,
-    };
-    try {
-      await runAutoBackup(chromeApi, model, settings);
-      await chromeApi.storage.local.set({
-        backupLastResult: {
-          ok: true,
-          message: "加密快照已备份到私有 Gist",
-          at: new Date().toISOString(),
-        },
-      });
-    } catch (error) {
-      // Do not log settings/token. Persist a bounded, credential-free outcome for the UI.
-      await chromeApi.storage.local.set({
-        backupLastResult: {
-          ok: false,
-          message: String(error.message || "备份失败").slice(0, 180),
-          at: new Date().toISOString(),
-        },
-      });
-    }
+    if (chromeApi.alarms.clear) await chromeApi.alarms.clear("auto-backup");
+    await chromeApi.storage.local.set({
+      backupLastResult: {
+        ok: false,
+        message: "无人值守定时备份不可用（备份密码不落盘）；请在扩展内手动备份",
+        at: new Date().toISOString(),
+      },
+    });
   });
 
   // FR-016：快捷键命令 → 存储广播，两页面订阅 cmd 键响应
@@ -153,14 +131,29 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
             .map((w) => ({
               id: w.id,
               focused: !!w.focused,
-              tabs: w.tabs.map((t) => ({ id: t.id, url: t.url, title: t.title })),
+              tabs: w.tabs.map((t) => ({
+                id: t.id,
+                url: t.url,
+                pendingUrl: t.pendingUrl,
+                index: t.index,
+                active: !!t.active,
+                title: t.title || t.url || t.pendingUrl || "",
+              })),
             }));
           // L2（2026-11-24 UI 审计）：旧实现在无真实窗口时早退，导致浏览器标签全关后
           // 模型的失效 open/tabId 永远不清。改为空窗口列表也照常跑反向校验
           // （pairWindows 对空列表安全返回；syncBrowserSnapshot 的反向校验仍执行），
           // 仅当模型确有变更时才落盘，避免空转写盘。
           const allTabs = await chromeApi.tabs.query({});
-          const tabs = (allTabs || []).map((t) => ({ id: t.id, url: t.url, title: t.title }));
+          const tabs = (allTabs || []).map((t) => ({
+            id: t.id,
+            url: t.url,
+            pendingUrl: t.pendingUrl,
+            index: t.index,
+            active: !!t.active,
+            windowId: t.windowId,
+            title: t.title || t.url || t.pendingUrl || "",
+          }));
           const { windows, groups, tabs: modelTabs, trash, settings } = await loadAll(chromeApi);
           const model = {
             version: 1,

@@ -29,11 +29,11 @@
 | ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-10 | 双击打开 / 存活命中只聚焦 | `tabs-op.js` `openTab` | tabId 精确命中不重复开 | 已验证 | 07_ops；E2E D3 | — |
-| F-11 | **相邻插入**：新标签插到激活网页右侧 | `tabs-op.js` `queryInsertAnchor` | 单标签 index=锚点+1 且 openerTabId；无锚点省略 index | 已验证 | 19_adjacent_insert（6 场景）；E2E P0-1 容器加号 | 新建窗口/游离标签不指定索引 |
+| F-11 | **相邻插入**：新标签插到激活网页右侧，模型树新叶子跟随激活锚点 | `tabs-op.js` `queryInsertAnchor` + `model.js` `insertTabAfter` + `shell.js` | 浏览器 index=锚点+1 且 openerTabId；模型新叶子插到同父锚点之后；无锚点/跨父兜底末尾 | 已验证 | 19_adjacent_insert（6 场景）+ 20_leaf_order_pending_url；E2E P0-1（浏览器+模型树位次） | 新建窗口/游离标签不指定索引；锚点不同父时保持当前容器父级 |
 | F-12 | 批量打开：分桶各窗口、锚点右侧连续递增 | `tabs-op.js` `openAll` | 顺序与模型叶子一致；存活跳过不占游标 | 已验证 | 07_ops + 19 feature | 批量不聚焦（不打断用户） |
 | F-13 | 关闭叶子：只按 tabId 精确关一个 | `tabs-op.js` `closeLeaf` | 同 URL 多开不误关 | 已验证 | 07_ops；E2E D8 | — |
 | F-14 | 关闭节点子树 + 成功后清理绑定 | `tabs-op.js` `closeNode` | 关闭成功清 `open/tabId`；失败跳过不误清 | 已验证 | 11_trash 关闭链路场景 | — |
-| F-15 | 启动归类 / 窗口配对 / 打开态派生 | `src/core/align.js` | tabId-only，无 URL 兜底；pendingUrl 不点亮 | 已验证 | 05_align（15 场景）+ 18 feature | 打开态是派生态不入库 |
+| F-15 | 启动归类 / 窗口配对 / 打开态派生 | `src/core/align.js` | tabId-only，无 URL 兜底；快照以 `url || pendingUrl` 补入待导航标签；pendingUrl 不点亮 | 已验证 | 05_align（15 场景）+ 18/20 feature | 打开态是派生态不入库 |
 | F-16 | 加载期刷新（loading/complete/url） | `shell.js` onUpdated | 加载中与完成态均保持高亮 | 已验证 | 18_merge_audit 静态契约 | 真机 pendingUrl 瞬态难伪造，由 BDD 覆盖 |
 
 ## 3. 回收站（2026-11-24 口径反转）
@@ -59,7 +59,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | F-40 | 设置三分类（外观/备份/复制） | `shell.js` 设置面板 | 单击行即时保存并广播所有宿主 | 已验证 | 02_shell（25 场景）；E2E 4 | — |
 | F-41 | 本地加密备份（两步卡片） | `import-export.js` + `crypto.js` | 密码不落盘；快照最多 20；恢复四类失败提示 | 已验证 | 09/16 feature；E2E 13 | — |
-| F-42 | GitHub Gist 加密备份 | `import-export.js` | 私有 Gist、可选 `api.github.com` 授权、定时 alarm | 已实现 | 09/16 feature（mock） | **真实线上演练待正式版前** |
+| F-42 | GitHub Gist 加密备份 | `import-export.js` | 私有 Gist POST/PATCH、可选 `api.github.com` 授权、会话内手动备份 | 已实现 | 09/16 feature（mock） | **真实线上演练待完成；无人值守定时备份已停用（密码不落盘）** |
 | F-43 | JSON/HTML/LinkMap 导入导出 | `import-export.js` | 嗅探自动识别、非法版本拒绝 | 已验证 | 09 feature（24 场景）；E2E 13 | — |
 | F-44 | 内部主页 | `homepage.js` + `src/home/` | 搜索引擎/常用站点配置、容器加号开主页 | 已验证 | 15_homepage_audit（15 场景） | — |
 | F-45 | 浏览器原生书签一键导入 | — | — | **已废弃（红线）** | — | 需 `bookmarks` 权限违反 C05；替代：手动导入 HTML |
@@ -88,6 +88,18 @@
 
 ## 8. 版本状态
 
-- `main` @ `v0.2.0`（tag `v0.2.0`）：已发布基线。
-- `v0.3.0`（manifest `0.3.0`）：已发布，tag `v0.3.0`，详见 `docs/release/v0.3.0.md`。
+- `v0.2.0`（tag `v0.2.0`）：历史已发布基线。
+- `v0.3.0`（manifest `0.3.0`，main @ `1fe6ed3`）：当前已发布，tag `v0.3.0`，详见 `docs/release/v0.3.0.md`。
 - 早期立项的里程碑规划编号不再用于描述当前功能；历史教训见 `docs/history/resolved-issues.md`。
+
+## 9. 发布后审计修复（2026-11-25，待 v0.3.1 决策）
+
+> 以下修复已进入 `main` 后续提交，**未包含在已发布的 `v0.3.0` tag 内**；是否发布补丁版由用户决定，不重写已有 tag。
+
+| ID | 修复 | 源码 | 验收 | 状态 | 证据 |
+| --- | --- | --- | --- | --- | --- |
+| F-60 | 模型树新叶子相邻插入 | `model.js` `insertTabAfter` + `shell.js` + `align.js` | 同父锚点后插入；跨父/无锚点兜底末尾；既有叶子不自动重排 | 已验证 | 20_leaf_order_pending_url（6 场景）；本地真机 E2E P0-1 树内位次断言 |
+| F-61 | 待导航标签（空 URL + pendingUrl）按 tabId 补收与定位 | `shell.js` 快照映射 / `align.js` `pageAddressOf` / `service-worker.js` | 有 tabId 的空 URL 标签不被丢弃；定位失败区分内部页/导航中/未归入 | 已实现 | 20_leaf_order_pending_url；真机 pendingUrl 瞬态仍需手工复核 |
+| F-62 | GitHub 无人值守定时备份停用 | `import-export.js` `registerAutoBackup` + `service-worker.js` + 设置面板 | 不注册 alarm；遗留 alarm 清除并提示；UI 明确仅会话内手动备份 | 已实现 | 09_import_export 修订场景（3 项） |
+
+CI 证据链接：<https://github.com/zeek-zhao/tabharbor/actions/runs/45445426126>（main @ `1fe6ed3` test+e2e）、<https://github.com/zeek-zhao/tabharbor/actions/runs/45445619199>（release.yml，tag v0.3.0）。上述修复推送后由新 run 复验。

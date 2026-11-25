@@ -61,6 +61,25 @@ export function addTab(m, title, url, parentId, id) {
   return node;
 }
 
+// 2026-11-25 审计 P0-1：新叶子插到锚点叶子之后（模型位次与浏览器相邻插入对齐）。
+// 锚点不存在、锚点不属于同一父容器时一律追加到父容器末尾——绝不跨组乱挂、不改既有叶子顺序。
+export function insertTabAfter(m, title, url, parentId, anchorLeafId, id) {
+  const node = addTab(m, title, url, parentId, id);
+  if (anchorLeafId == null) return node;
+  const at = m.tabs.indexOf(node);
+  const anchor = m.tabs.find((t) => t.id === anchorLeafId && t.parentId === parentId);
+  if (at < 0 || !anchor) return node;
+  m.tabs.splice(at, 1);
+  m.tabs.splice(m.tabs.indexOf(anchor) + 1, 0, node);
+  return node;
+}
+
+// 按浏览器 tabId 精确查找模型叶子（tabId-only，不做 URL/标题兜底）。
+export function leafByTabId(m, tabId) {
+  if (tabId == null) return null;
+  return m.tabs.find((t) => t.tabId === tabId) || null;
+}
+
 export function findNode(m, id) {
   for (const k of ["windows", "groups", "tabs"]) {
     const hit = m[k].find((n) => n.id === id);

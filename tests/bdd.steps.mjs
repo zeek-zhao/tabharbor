@@ -2206,6 +2206,14 @@ step("那么", "auto-backup alarm 不存在", () => {
     throw new Error("关闭自动备份后 alarm 仍存在");
 });
 
+step("那么", "service-worker 对遗留 alarm 给出不可用提示", () => {
+  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
+  if (!src.includes("无人值守定时备份不可用（备份密码不落盘）"))
+    throw new Error("遗留 alarm 未给出密码不落盘提示");
+  if (src.includes("await runAutoBackup(chromeApi, model, settings)"))
+    throw new Error("遗留 alarm 仍尝试无人值守备份");
+});
+
 const gistConfig = (withId) => ({
   backupTarget: "github",
   ghToken: "fixture-token",
@@ -3710,4 +3718,167 @@ step("假如", "浏览器已打开 id 为 {} 的存活标签", (id) => {
     windowId: 1,
     active: true,
   });
+});
+
+/* ---------- 2026-11-25 审计 P0：模型叶子位次 / pendingUrl 补收 ---------- */
+step("假如", "模型含窗口与同父锚点叶子", () => {
+  ctx.m = model.buildModel();
+  ctx.named = {};
+  const win = model.addWindow(ctx.m, "W");
+  const group = model.addGroup(ctx.m, "G", win.id);
+  const anchor = model.addTab(ctx.m, "锚点", "https://example.com/a", group.id);
+  model.addTab(ctx.m, "尾部", "https://example.com/b", group.id);
+  model.addTab(ctx.m, "别组", "https://example.com/c", win.id);
+  ctx.named = { W: win, G: group, 锚点: anchor };
+});
+
+step("当", "在锚点叶子之后插入新叶子 {}", (title) => {
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.G.id,
+    ctx.named.锚点.id
+  );
+});
+
+step("当", "在窗口直属插入新叶子 {} 且锚点为 {}", (title, anchorTitle) => {
+  const anchor = ctx.named[anchorTitle];
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.W.id,
+    anchor ? anchor.id : null
+  );
+});
+
+step("当", "在锚点不存在时插入新叶子 {}", (title) => {
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.G.id,
+    "t_missing_anchor"
+  );
+});
+
+step("那么", "新叶子紧跟锚点叶子之后", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.G.id);
+  const i = tabs.findIndex((t) => t.id === ctx.inserted.id);
+  const a = tabs.findIndex((t) => t.id === ctx.named.锚点.id);
+  if (i !== a + 1) throw new Error(`新叶子位次=${i} ≠ 锚点后 ${a + 1}`);
+});
+
+step("那么", "新叶子位于窗口直属末尾且父级不变", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.W.id);
+  if (ctx.inserted.parentId !== ctx.named.W.id)
+    throw new Error(`新叶子父级=${ctx.inserted.parentId} ≠ 窗口 ${ctx.named.W.id}`);
+  if (tabs[tabs.length - 1].id !== ctx.inserted.id) throw new Error("新叶子未在窗口直属末尾");
+});
+
+step("那么", "新叶子追加到分组末尾", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.G.id);
+  if (tabs[tabs.length - 1].id !== ctx.inserted.id) throw new Error("新叶子未在分组末尾");
+});
+
+step("那么", "容器加号新建使用锚点位次插入", () => {
+  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/ui/shell.js"), "utf8");
+  if (
+    !src.includes("leafByTabId(m, insert.openerTabId)") ||
+    !/insertTabAfter\([\s\S]{0,200}anchorLeaf \? anchorLeaf\.id : null/.test(src)
+  )
+    throw new Error("容器加号未按 tabId 找锚点并使用 insertTabAfter");
+});
+
+step("那么", "align 快照补入携带 pendingUrl 与 index", () => {
+  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/core/align.js"), "utf8");
+  const sw = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
+  if (!src.includes("pageAddressOf") || !src.includes("insertTabAfter"))
+    throw new Error("align 未处理 pendingUrl 回退或锚点插入");
+  if (!sw.includes("pendingUrl: t.pendingUrl") || !sw.includes("index: t.index"))
+    throw new Error("后台快照未携带 pendingUrl/index");
+});
+
+step("假如", "浏览器激活标签只有 tabId 与 pendingUrl", () => {
+  ctx.m = model.buildModel();
+  model.addWindow(ctx.m, "Window", "w1", 1);
+  ctx.syncSnapshot = {
+    windows: [
+      {
+        id: 1,
+        focused: true,
+        tabs: [
+          {
+            id: 77,
+            url: "",
+            pendingUrl: "https://example.com/pending",
+            title: "",
+            active: true,
+            index: 0,
+          },
+        ],
+      },
+    ],
+    tabs: [
+      {
+        id: 77,
+        url: "",
+        pendingUrl: "https://example.com/pending",
+        title: "",
+        active: true,
+        index: 0,
+        windowId: 1,
+      },
+    ],
+  };
+});
+
+step("那么", "待导航叶子以 pendingUrl 标题补入且 tabId 精确绑定", () => {
+  const leaf = ctx.m.tabs.find((t) => t.tabId === 77);
+  if (!leaf) throw new Error("待导航标签未被补入模型");
+  if (leaf.title !== "https://example.com/pending") throw new Error(`标题=${leaf.title}`);
+  if (leaf.url !== "") throw new Error(`url 应保留空值待导航完成回写，实际 ${leaf.url}`);
+});
+
+step("假如", "窗口已有锚点叶子绑定 tabId 77 且浏览器激活", () => {
+  ctx.m = model.buildModel();
+  const win = model.addWindow(ctx.m, "Window", "w1", 1);
+  const group = model.addGroup(ctx.m, "G", win.id);
+  const anchor = model.addTab(ctx.m, "锚点", "https://example.com/a", group.id);
+  anchor.tabId = 77;
+  anchor.open = true;
+  ctx.anchorLeaf = anchor;
+  ctx.syncSnapshot = {
+    windows: [
+      {
+        id: 1,
+        focused: true,
+        tabs: [
+          { id: 77, url: "https://example.com/a", title: "锚点", active: true, index: 0 },
+          {
+            id: 88,
+            url: "",
+            pendingUrl: "https://example.com/new",
+            title: "",
+            active: false,
+            index: 1,
+          },
+        ],
+      },
+    ],
+    tabs: [],
+  };
+});
+
+step("假如", "浏览器新开待导航标签 tabId 88", () => {
+  ctx.syncSnapshot.tabs = [...ctx.syncSnapshot.windows[0].tabs];
+});
+
+step("那么", "新叶子补入窗口直属且绑定 tabId 88", () => {
+  const fresh = ctx.m.tabs.find((t) => t.tabId === 88);
+  if (!fresh) throw new Error("tabId 88 未补入模型");
+  const winTabs = ctx.m.tabs.filter((t) => t.parentId === ctx.m.windows[0].id);
+  if (winTabs[winTabs.length - 1].id !== fresh.id)
+    throw new Error("新叶子未在窗口直属末尾（锚点不同父时不得跨组乱挂）");
 });

@@ -357,11 +357,33 @@ try {
       const created = ts[ts.length - 1];
       return {
         ok: created.index === exp.anchorIndex + 1 && created.openerTabId === exp.anchorId,
+        createdId: created.id,
         why: `new.index=${created.index} opener=${created.openerTabId} anchor=${exp.anchorId}@${exp.anchorIndex}`,
       };
     }, pre);
     assert.ok(adj.ok, `容器加号相邻插入断言失败：${adj.why}`);
-    console.log(`E2E P0-1 容器加号相邻插入（${adj.why}）通过`);
+    // 2026-11-25 审计 P0-1：浏览器物理位次之外，还要断言模型树内位次。
+    // 锚点叶子与点击容器同父 → 紧跟锚点；不同父 → 保留当前容器父级并追加末尾。
+    const tree = await win.evaluate(
+      async (exp) => {
+        const { tabs } = await chrome.storage.local.get("tabs");
+        const leaf = (tabs || []).find((t) => t.tabId === exp.createdId);
+        if (!leaf) return { ok: false, why: `新建标签 tabId=${exp.createdId} 未写入模型` };
+        const anchorLeaf = (tabs || []).find((t) => t.tabId === exp.anchorId);
+        const siblings = (tabs || []).filter((t) => t.parentId === leaf.parentId);
+        const at = siblings.findIndex((t) => t.id === leaf.id);
+        const sameParent = anchorLeaf && anchorLeaf.parentId === leaf.parentId;
+        const anchorAt = sameParent ? siblings.findIndex((t) => t.id === anchorLeaf.id) : -1;
+        const ok = sameParent ? at === anchorAt + 1 : at === siblings.length - 1;
+        return {
+          ok,
+          why: `leaf@${at}/${siblings.length} anchor@${anchorAt} parent=${leaf.parentId}`,
+        };
+      },
+      { ...pre, createdId: adj.createdId }
+    );
+    assert.ok(tree.ok, `容器加号模型树位次断言失败：${tree.why}`);
+    console.log(`E2E P0-1 容器加号相邻插入（浏览器 ${adj.why}；模型树 ${tree.why}）通过`);
   }
   // 2026-11-24 行内按钮审计：叶子已无「打开」按钮，双击叶子打开网页
   assert.equal(

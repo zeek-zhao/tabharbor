@@ -1,8 +1,8 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24，v0.3.0 发布态复核。BDD 249 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，2026-11-25 发布后审计修复复核。BDD 255 场景 + 真机 Chromium E2E + 六项门禁。
 
-## 1. BDD 场景分布（共 249，`npm test` = bdd-runner + 样例校验）
+## 1. BDD 场景分布（共 255，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
 
 | feature | 场景数 | 覆盖域 |
 | --- | --- | --- |
@@ -22,6 +22,7 @@
 | 14_d1d21_cases | 8 | D1-D21 定稿验收 Case1-8 |
 | 13_window_lifecycle | 7 | 窗口↔分组互转、离线窗口 |
 | 19_adjacent_insert | 6 | **相邻插入**（锚点右侧、批量递增、跨窗口隔离） |
+| 20_leaf_order_pending_url | 6 | 模型树位次插入（同父锚点后/跨父兜底）、pendingUrl 补收、定时备份口径 |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
 | 03_storage | 6 | 存储读写、实时广播 |
 | 10_samples | 3 | 样例数据合法性、指南当前状态断言 |
@@ -50,7 +51,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 249/249 PASS |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 255/255 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -60,20 +61,21 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 249 场景 + JSON/HTML 样例校验 | PASS |
+| `npm test` | BDD 255 场景 + JSON/HTML 样例校验 | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |
 | `npm run committer` | 单一提交人 | 通过 |
 | `npm run contrast` | 深/浅色设计态对比度 | 全部达标 |
-| `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-24）；CI `e2e` job 随 push/PR 复验 |
+| `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-24 / 11-25 修复后复跑，含模型树位次断言）；CI `e2e` job 随 push/PR 复验 |
 
-> 以上门禁结果为 v0.3.0 发布基线（`0a091eb` + 版本定稿提交）的本地复跑记录（2026-11-24）；CI `test` + `e2e` 两 job 随 push/PR 复验（run 45439539945 及后续）。
+> 门禁结果为 2026-11-25 发布后审计修复态的本地复跑记录；已发布 v0.3.0 的 CI 证据：[main run 45445426126](https://github.com/zeek-zhao/tabharbor/actions/runs/45445426126)（test+e2e success）、[release run 45445619199](https://github.com/zeek-zhao/tabharbor/actions/runs/45445619199)（Release 打包 success）。修复推送后的新 run 链接见最终执行报告。
 
 CI（`.github/workflows/ci.yml`）：`test` job（语法/红线/合规/格式/提交人/contrast/BDD/打包）+ `e2e` job；push `main` 与所有 PR 触发。release（`release.yml`）：tag 触发，全量门禁 + E2E + 打包 + GitHub Release。
 
 ## 4. 已知环境缺口与说明
 
-- 真机 pendingUrl/loading 瞬态难以稳定伪造：加载期刷新由 18_merge_audit 静态契约 + align 运行时断言覆盖。
+- 真机 pendingUrl/loading 瞬态难以稳定伪造：补收链路由 20_leaf_order_pending_url BDD 覆盖，真机手工验收仍需复核。
+- GitHub 无人值守定时备份已停用（密码不落盘）：仅会话内手动备份；真实线上 Token 演练仍待完成。
 - GitHub 真实线上备份（专用最小权限 Token）未演练：全部 mock，正式版发布前完成。
 - 样例数据 URL 全部为 `example.com` 占位；测试全程不写真实 GitHub。
