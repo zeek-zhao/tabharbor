@@ -42,12 +42,15 @@ export const DEFAULT_SETTINGS = {
 
 export async function loadAll(chromeApi = globalThis.chrome) {
   const got = await chromeApi.storage.local.get(ALL_KEYS);
+  const settings = { ...DEFAULT_SETTINGS, ...(got.settings || {}) };
+  // 2026-11-25 备份重构：清除旧 ghBackupPassword（密码不落盘红线；login 派生密码已取代它）。
+  delete settings.ghBackupPassword;
   return {
     windows: got.windows || [],
     groups: got.groups || [],
     tabs: got.tabs || [],
     trash: got.trash || [],
-    settings: { ...DEFAULT_SETTINGS, ...(got.settings || {}) },
+    settings,
     lastBounds: got.lastBounds || {},
   };
 }

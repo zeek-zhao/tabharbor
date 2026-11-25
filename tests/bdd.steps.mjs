@@ -2206,12 +2206,55 @@ step("那么", "auto-backup alarm 不存在", () => {
     throw new Error("关闭自动备份后 alarm 仍存在");
 });
 
-step("那么", "service-worker 对遗留 alarm 给出不可用提示", () => {
-  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
-  if (!src.includes("无人值守定时备份不可用（备份密码不落盘）"))
-    throw new Error("遗留 alarm 未给出密码不落盘提示");
-  if (src.includes("await runAutoBackup(chromeApi, model, settings)"))
-    throw new Error("遗留 alarm 仍尝试无人值守备份");
+step("那么", "service-worker 对 alarm 用 Token 获取 login 派生密码备份", () => {
+  const sw = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
+  const io = fs.readFileSync(path.resolve(TEST_ROOT, "src/core/import-export.js"), "utf8");
+  if (!sw.includes("runAutoBackup(chromeApi, model, settings)"))
+    throw new Error("alarm 未触发实际备份");
+  if (!io.includes("fetchGitHubLogin") || !io.includes("const login = await fetchGitHubLogin"))
+    throw new Error("runAutoBackup 未用 login 派生密码");
+  if (/settings\??\.ghBackupPassword/.test(io))
+    throw new Error("备份链路仍读取 settings.ghBackupPassword");
+});
+
+step("假如", "GitHub 备份配置完整且含 daily 频率", async () => {
+  ctx.mock = makeChromeMock();
+  const settings = {
+    backupTarget: "github",
+    ghToken: "fixture-token",
+    ghGistId: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    ghDesc: "TabHarbor encrypted backup",
+    ghFileName: "tabharbor-backup.tbh",
+    ghPrivate: true,
+    ghBackupFreq: "daily",
+  };
+  await ctx.mock.chrome.storage.local.set({ settings });
+  ctx.githubSettings = settings;
+  ctx.fetchCalls = [];
+  ctx.fetchMock = async (url, options) => {
+    ctx.fetchCalls.push({ url, options });
+    if (url === "https://api.github.com/user")
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ login: "zeek-zhao" }),
+      };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: settings.ghGistId, html_url: "https://gist.github.com/x/y" }),
+    };
+  };
+  ctx.mock.chrome.permissions = { contains: async () => true };
+  ctx.mock.chrome.runtime.getManifest = () => ({ version: "0.3.0" });
+  ctx.mock.chrome.runtime.getURL = (path) => `chrome-extension://test/${path}`;
+  globalThis.chrome = ctx.mock.chrome;
+});
+
+step("那么", "auto-backup alarm 已注册且 periodInMinutes 为 1440", () => {
+  const a = ctx.mock.calls.alarms.find((x) => x.name === "auto-backup");
+  if (!a) throw new Error("auto-backup alarm 未注册");
+  if (a.periodInMinutes !== 1440) throw new Error(`periodInMinutes=${a.periodInMinutes} ≠ 1440`);
 });
 
 const gistConfig = (withId) => ({
@@ -3249,6 +3292,8 @@ step("那么", "完整快照打包书签与主页配置且本地/Gist 均加密"
     throw new Error("未走 api.github.com Gist");
 });
 step("那么", "备份 UI 仅本地与 Gist 两类且去 localFormat", () => {
+  // 2026-11-25 备份三分类重构：本步骤保留旧名（feature 场景已改写），
+  // 现校验三张卡片结构 + 无 localFormat 旧三格式。
   for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
     const s = repoFile(f);
     if (!s.includes('data-setting="backup" data-value="github"'))
@@ -3881,4 +3926,283 @@ step("那么", "新叶子补入窗口直属且绑定 tabId 88", () => {
   const winTabs = ctx.m.tabs.filter((t) => t.parentId === ctx.m.windows[0].id);
   if (winTabs[winTabs.length - 1].id !== fresh.id)
     throw new Error("新叶子未在窗口直属末尾（锚点不同父时不得跨组乱挂）");
+});
+
+/* ========== 2026-11-25 备份三分类（features/21）========== */
+step("假如", "一个含窗口分组标签与回收站的模型", () => {
+  ctx.m = model.buildModel();
+  const w = model.addWindow(ctx.m, "备份窗口", "w_bk");
+  const g = model.addGroup(ctx.m, "备份分组", w.id, "g_bk");
+  model.addTab(ctx.m, "MDN 备份标题", "https://example.com/bk", g.id, "t_bk");
+  ctx.m.trash = [{ id: "tr_bk", title: "已删节点", kind: "tab", savedAt: "2026-11-25T00:00:00Z" }];
+  ctx.mock = makeChromeMock();
+  ctx.settings = { theme: "dark", homepage: { engine: "ddg" } };
+});
+
+step("当", "导出明文本地快照", async () => {
+  ctx.localExport = await io.exportLocalSnapshot(ctx.m, ctx.settings, null, ctx.mock.chrome, {
+    encrypted: false,
+    password: "",
+  });
+});
+
+step("那么", "明文快照文件为 .json 且包含 windows groups tabs settings trash", () => {
+  if (!ctx.localExport.filename.endsWith(".json"))
+    throw new Error(`明文文件名=${ctx.localExport.filename}`);
+  const data = JSON.parse(ctx.localExport.content);
+  for (const key of ["windows", "groups", "tabs", "settings", "trash"])
+    if (!(key in data)) throw new Error(`明文快照缺字段 ${key}`);
+  if (ctx.localExport.encrypted !== false) throw new Error("明文快照被标记加密");
+  if (data.windows.length !== 1 || data.tabs.length !== 1) throw new Error("明文快照树节点数不符");
+});
+
+step("那么", "明文快照不含加密信封字段", () => {
+  if (crypto.isEnvelope(JSON.parse(ctx.localExport.content)))
+    throw new Error("明文快照误含加密信封字段");
+  if (/"ct"\s*:/.test(ctx.localExport.content)) throw new Error("明文快照含密文字段 ct");
+});
+
+step("当", "从该文件内容恢复本地快照且不提供密码", async () => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  const entry = (got.localBackups || [])[0];
+  ctx.restored = await io.restoreBackup(entry.id, {}, ctx.mock.chrome, "");
+});
+
+step("那么", "恢复出的模型包含书签树回收站与设置", () => {
+  if (!ctx.restored) throw new Error("未恢复出模型");
+  if (!ctx.restored.windows?.length || !ctx.restored.tabs?.length) throw new Error("恢复缺书签树");
+  if (ctx.restored.trash?.length !== 1) throw new Error("恢复缺回收站");
+  if (!ctx.restored.settings || ctx.restored.settings.theme !== "dark")
+    throw new Error("恢复缺设置");
+});
+
+step("当", "用密码 {} 导出加密本地快照", async (password) => {
+  ctx.localExport = await io.exportLocalSnapshot(ctx.m, ctx.settings, null, ctx.mock.chrome, {
+    encrypted: true,
+    password,
+  });
+});
+
+step("当", "用密码 {} 恢复该加密快照", async (password) => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  const entry = (got.localBackups || [])[0];
+  ctx.restored = await io.restoreBackup(entry.id, {}, ctx.mock.chrome, password);
+});
+
+step("当", "用错误密码 {} 恢复该加密快照", async (password) => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  const entry = (got.localBackups || [])[0];
+  try {
+    await io.restoreBackup(entry.id, {}, ctx.mock.chrome, password);
+    ctx.wrongPwdRejected = false;
+  } catch (err) {
+    ctx.wrongPwdRejected = true;
+    ctx.wrongPwdErr = err;
+  }
+});
+
+step("那么", "加密恢复被拒绝且错误归类为密码错误", () => {
+  if (!ctx.wrongPwdRejected) throw new Error("错误密码未被拒绝");
+  if (io.classifyBackupError(ctx.wrongPwdErr) !== "password")
+    throw new Error("错误未归类为密码错误");
+});
+
+step("假如", "Gist 恢复配置已就绪且 mock 返回 owner login", () => {
+  ctx.gistSettings = {
+    backupTarget: "github",
+    ghToken: "fixture-token",
+    ghGistId: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    ghFileName: "tabharbor-backup.tbh",
+    ghPrivate: true,
+    ghBackupFreq: "hourly",
+  };
+  ctx.gistChrome = {
+    permissions: { contains: async () => true },
+  };
+  ctx.gistCalls = [];
+  ctx.gistFileContent = "";
+});
+
+// 统一 mock：GET /user → login；GET /gists/{id} → ctx.gistFileContent + owner.login；
+// POST/PATCH /gists → 记录并返回 gist id。
+const makeThreeCatFetch =
+  () =>
+  async (url, options = {}) => {
+    ctx.gistCalls.push({ url, method: options.method || "GET", options });
+    const u = String(url);
+    if (u === "https://api.github.com/user")
+      return { ok: true, status: 200, json: async () => ({ login: "zeek-zhao" }) };
+    if (u.startsWith("https://api.github.com/gists/") && (options.method || "GET") === "GET")
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: ctx.gistSettings.ghGistId,
+          owner: { login: "zeek-zhao" },
+          files: { "tabharbor-backup.tbh": { content: ctx.gistFileContent } },
+        }),
+      };
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: ctx.gistSettings.ghGistId,
+        html_url: "https://gist.github.com/x/y",
+      }),
+    };
+  };
+
+step("当", "备份完整快照到 Gist", async () => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistBackupResult = await io.backupToGist(
+    ctx.gistChrome,
+    ctx.m,
+    ctx.gistSettings,
+    ctx.threeCatFetch
+  );
+});
+
+step("那么", "先请求 GET /user 获取 login 再上传", () => {
+  const methods = ctx.gistCalls.map((c) => `${c.method} ${c.url}`);
+  const userIdx = ctx.gistCalls.findIndex(
+    (c) => c.url === "https://api.github.com/user" && c.method === "GET"
+  );
+  const uploadIdx = ctx.gistCalls.findIndex((c) => c.method === "POST" || c.method === "PATCH");
+  if (userIdx < 0 || uploadIdx < 0 || userIdx > uploadIdx)
+    throw new Error("未先 GET /user 再上传：" + methods.join(" | "));
+});
+
+step("那么", "Gist 上传内容仅为密文且不含明文标签标题", () => {
+  const upload = ctx.gistCalls.find((c) => c.method === "POST" || c.method === "PATCH");
+  const body = JSON.parse(upload.options.body);
+  const content = Object.values(body.files)[0].content;
+  if (!content.includes('"ct"')) throw new Error("上传内容非加密信封");
+  if (content.includes("MDN 备份标题")) throw new Error("上传内容泄露明文标题");
+  if (content.includes("fixture-token") || content.includes("zeek-zhao"))
+    throw new Error("上传内容泄露 Token 或 login");
+});
+
+step("当", "用 login 加密一份快照放入 mock Gist", async () => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistFileContent = await io.sealSnapshot(ctx.m, ctx.settings, "zeek-zhao");
+  // 让 GET /user 返回同一个 login 已由 mock 保证
+});
+
+step("当", "用旧密码 {} 加密一份快照放入 mock Gist", async (password) => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistFileContent = await io.sealSnapshot(ctx.m, ctx.settings, password);
+});
+
+step("当", "从 Gist 恢复完整快照", async () => {
+  ctx.gistRestored = await io.restoreFromGist(ctx.gistChrome, ctx.gistSettings, ctx.threeCatFetch);
+});
+
+step("当", "从 Gist 恢复且 login 解密失败时提供旧密码 {}", async (password) => {
+  ctx.gistRestored = await io.restoreFromGist(
+    ctx.gistChrome,
+    ctx.gistSettings,
+    ctx.threeCatFetch,
+    password
+  );
+});
+
+step("那么", "GET Gist 被请求且用 owner.login 解密", () => {
+  if (!ctx.gistCalls.some((c) => c.method === "GET" && c.url.includes("/gists/")))
+    throw new Error("未请求 GET /gists/{id}");
+  if (!ctx.gistRestored || !ctx.gistRestored.windows?.length)
+    throw new Error("owner.login 解密后模型不完整");
+});
+
+step("那么", "从 Gist 恢复的模型包含书签树与设置", () => {
+  if (!ctx.gistRestored.windows?.length || !ctx.gistRestored.tabs?.length)
+    throw new Error("Gist 恢复缺书签树");
+  if (!ctx.gistRestored.settings) throw new Error("Gist 恢复缺设置");
+});
+
+step("那么", "从 Gist 恢复标记 usedFallback 且模型完整", () => {
+  if (ctx.gistRestored.usedFallback !== true) throw new Error("未标记 usedFallback");
+  if (!ctx.gistRestored.tabs?.length) throw new Error("兜底恢复模型不完整");
+});
+
+step("当", "导出书签 HTML", async () => {
+  ctx.bookmarksHtml = await io.exportHTML(ctx.m);
+});
+
+step("那么", "HTML 含 NETSCAPE 标记且不含设置与回收站字段", () => {
+  if (!/NETSCAPE/i.test(ctx.bookmarksHtml)) throw new Error("HTML 缺 NETSCAPE 标记");
+  if (/"trash"|"settings"|"homepage"/.test(ctx.bookmarksHtml))
+    throw new Error("HTML 含设置/回收站字段");
+  if (!ctx.bookmarksHtml.includes("MDN 备份标题")) throw new Error("HTML 缺书签标题");
+});
+
+step("那么", "备份核心不读取 ghBackupPassword 且 alarm 走 runAutoBackup", () => {
+  const ioSrc = repoFile("src/core/import-export.js");
+  const swSrc = repoFile("src/background/service-worker.js");
+  if (/settings\??\.ghBackupPassword/.test(ioSrc))
+    throw new Error("备份核心仍读取 ghBackupPassword");
+  if (!swSrc.includes("runAutoBackup(chromeApi, model, settings)"))
+    throw new Error("alarm 未走 runAutoBackup");
+  if (!ioSrc.includes("fetchGitHubLogin")) throw new Error("缺 login 派生密码");
+});
+
+step("当", "嗅探一份加密信封文本", async () => {
+  const env = await crypto.encryptText("完整快照", "p");
+  ctx.sniffedBackup = io.sniffImport(JSON.stringify(env));
+});
+
+step("那么", "嗅探类型为 encrypted-backup", () => {
+  if (ctx.sniffedBackup.kind !== "encrypted-backup")
+    throw new Error(`嗅探类型=${ctx.sniffedBackup.kind}`);
+});
+
+step(
+  "那么",
+  "manifest 权限无 bookmarks cookies webRequest all_urls 且出站仅 api.github.com",
+  () => {
+    const mf = JSON.parse(repoFile("src/manifest.json"));
+    const allPerms = [...(mf.permissions || []), ...(mf.optional_host_permissions || [])];
+    for (const bad of ["bookmarks", "cookies", "webRequest", "all_urls", "<all_urls>"])
+      if (allPerms.some((p) => p.includes(bad))) throw new Error("新增了禁止权限：" + bad);
+    const hosts = mf.optional_host_permissions || [];
+    if (!hosts.includes("https://api.github.com/*"))
+      throw new Error("缺 api.github.com 可选主机权限");
+    if (hosts.some((h) => h !== "https://api.github.com/*"))
+      throw new Error("存在非 api.github.com 出站：" + hosts.join(","));
+  }
+);
+
+step("那么", "两份 HTML 均含本地 Gist HTML 三卡片的全部按钮 ID", () => {
+  const ids = [
+    "localEncrypt",
+    "localPwdRow",
+    "localBackupPwd",
+    "btnBackupNow",
+    "btnImportLocal",
+    "backupList",
+    "btnRestoreBackup",
+    "ghToken",
+    "ghGistId",
+    "ghBackupFreq",
+    "btnAuthorizeGithub",
+    "btnBackupGithub",
+    "btnRestoreGithub",
+    "btnExportBookmarksHtml",
+    "btnImportHtml",
+    "importFile",
+  ];
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    for (const id of ids) if (!s.includes(`id="${id}"`)) throw new Error(`${f} 缺 #${id}`);
+    if (s.includes("ghBackupPwd")) throw new Error(`${f} 仍含 ghBackupPwd 密码框`);
+    if (/\bid="ghBackupFreq"[\s\S]{0,120}disabled/.test(s))
+      throw new Error(`${f} 的 ghBackupFreq 仍被禁用`);
+  }
+  const shell = repoFile("src/ui/shell.js");
+  for (const token of [
+    "exportLocalSnapshot",
+    "backupToGist",
+    "restoreFromGist",
+    "#btnRestoreGithub",
+  ])
+    if (!shell.includes(token)) throw new Error("shell 未接线：" + token);
 });

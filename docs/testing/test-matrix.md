@@ -1,8 +1,8 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24，2026-11-25 发布后审计修复复核。BDD 255 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，2026-11-25 备份三分类重构复核。BDD 267 场景 + 真机 Chromium E2E + 六项门禁。
 
-## 1. BDD 场景分布（共 255，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
+## 1. BDD 场景分布（共 267，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
 
 | feature | 场景数 | 覆盖域 |
 | --- | --- | --- |
@@ -23,6 +23,7 @@
 | 13_window_lifecycle | 7 | 窗口↔分组互转、离线窗口 |
 | 19_adjacent_insert | 6 | **相邻插入**（锚点右侧、批量递增、跨窗口隔离） |
 | 20_leaf_order_pending_url | 6 | 模型树位次插入（同父锚点后/跨父兜底）、pendingUrl 补收、定时备份口径 |
+| 21_backup_three_categories | 12 | 本地明文/加密、Gist login 加密与 owner.login 解密、旧 Gist 兜底、HTML、alarm、权限红线、三宿主 UI |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
 | 03_storage | 6 | 存储读写、实时广播 |
 | 10_samples | 3 | 样例数据合法性、指南当前状态断言 |
@@ -51,7 +52,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 255/255 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 267/267 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -61,7 +62,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 255 场景 + JSON/HTML 样例校验 | PASS |
+| `npm test` | BDD 267 场景 + JSON/HTML 样例校验 | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |
@@ -76,6 +77,7 @@ CI（`.github/workflows/ci.yml`）：`test` job（语法/红线/合规/格式/�
 ## 4. 已知环境缺口与说明
 
 - 真机 pendingUrl/loading 瞬态难以稳定伪造：补收链路由 20_leaf_order_pending_url BDD 覆盖，真机手工验收仍需复核。
-- GitHub 无人值守定时备份已停用（密码不落盘）：仅会话内手动备份；真实线上 Token 演练仍待完成。
+- GitHub 定时备份已恢复（login 派生密码，不落盘）：真机 service worker 重启后自动备份与真实线上 Token 演练仍待完成。
+- 备份三分类（本地明文/加密、Gist 恢复、HTML、三宿主 UI）由 21 feature 覆盖；真实文件选择器与跨设备导入待真机复核。
 - GitHub 真实线上备份（专用最小权限 Token）未演练：全部 mock，正式版发布前完成。
 - 样例数据 URL 全部为 `example.com` 占位；测试全程不写真实 GitHub。

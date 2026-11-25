@@ -489,7 +489,14 @@ export async function unsealSnapshot(sealedText, password) {
     throw new Error("备份内容损坏，无法解析加密信封");
   }
   if (!crypto.isEnvelope(envelope)) throw new Error("备份不是合法的加密快照");
-  const plain = await crypto.decryptText(envelope, password);
+  // WebCrypto 的认证失败是英文泛化消息（AES-GCM 篡改/错密码同错）；统一包装为可读中文，
+  // 使 classifyBackupError 能归入 password 类并给出明确提示（2026-11-25 备份重构）。
+  let plain;
+  try {
+    plain = await crypto.decryptText(envelope, password);
+  } catch {
+    throw new Error("密码错误或备份已被篡改，无法解密");
+  }
   let data;
   try {
     data = JSON.parse(plain);
@@ -542,8 +549,37 @@ export function describeRestoreError(error) {
 }
 
 /**
- * 手动备份（M7/B2）：本地快照与下载文件都存加密完整快照；密码由调用方临时提供。
- * 返回 { filename, content }（content 为密文信封）。
+ * 本地快照导出（2026-11-25 备份三分类）：完整快照落本机文件，加密可选。
+ * - encrypted=false：明文 .json（含 windows/groups/tabs/settings/trash），不要求密码；
+ * - encrypted=true：用临时密码生成 .tbh 加密信封，密码不落盘、不写日志。
+ * 两种情况都把条目写入本机历史列表并带 encrypted 标记；返回 { filename, content, encrypted }。
+ */
+export async function exportLocalSnapshot(
+  model,
+  settings,
+  downloadApi,
+  chromeApi = globalThis.chrome,
+  { encrypted = false, password = "" } = {}
+) {
+  let content;
+  let filename;
+  if (encrypted) {
+    if (!password) throw new Error("本地加密备份需要输入密码");
+    content = await sealSnapshot(model, settings, password);
+    filename = "tabharbor-backup-" + formatTimestamp() + ".tbh";
+  } else {
+    content = JSON.stringify(buildFullSnapshot(model, settings), null, 2);
+    filename = "tabharbor-snapshot-" + formatTimestamp() + ".json";
+  }
+  if (chromeApi?.storage?.local)
+    await saveLocalBackup(chromeApi, content, model, { encrypted, filename });
+  if (downloadApi) await triggerDownload(filename, content, downloadApi);
+  return { filename, content, encrypted };
+}
+
+/**
+ * 手动备份（M7/B2 兼容入口）：默认仍走加密完整快照，密码由调用方临时提供。
+ * 新 UI 的「可选加密」直接调 exportLocalSnapshot；本函数保留供既有调用/测试兼容。
  */
 export async function manualBackup(
   model,
@@ -552,12 +588,10 @@ export async function manualBackup(
   chromeApi = globalThis.chrome,
   password
 ) {
-  if (!password) throw new Error("备份密码不能为空");
-  const sealed = await sealSnapshot(model, settings, password);
-  const filename = "tabharbor-backup-" + formatTimestamp() + ".tbh";
-  if (chromeApi?.storage?.local) await saveLocalBackup(chromeApi, sealed, model, password);
-  if (downloadApi) await triggerDownload(filename, sealed, downloadApi);
-  return { filename, content: sealed };
+  return exportLocalSnapshot(model, settings, downloadApi, chromeApi, {
+    encrypted: true,
+    password,
+  });
 }
 
 /** 明文 HTML 书签导出（Q5：独立于加密备份，可导入其他浏览器）。 */
@@ -569,27 +603,69 @@ export async function exportBookmarksHtml(model, downloadApi) {
 }
 
 /**
+ * 获取 GitHub 登录名，作为 Gist 加密密码（2026-11-25 备份重构）。
+ * login 不是秘密，仅用于派生轻量混淆密码；绝不写入日志/备份元信息/设置。
+ * 只请求用户已授权的 api.github.com，不新增任何出站域名。
+ */
+export async function fetchGitHubLogin(chrome, settings, fetchImpl = globalThis.fetch) {
+  if (
+    !chrome?.permissions?.contains ||
+    !(await chrome.permissions.contains({ origins: ["https://api.github.com/*"] }))
+  ) {
+    throw new Error("尚未授予 api.github.com 可选权限");
+  }
+  if (!settings?.ghToken) throw new Error("GitHub Token 不能为空");
+  const response = await fetchImpl("https://api.github.com/user", {
+    method: "GET",
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${settings.ghToken}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403)
+      throw new Error("GitHub Token 无效或权限不足（HTTP " + response.status + "）");
+    throw new Error("获取 GitHub 登录名失败（HTTP " + response.status + "）");
+  }
+  const data = await response.json();
+  const login = String(data?.login || "").trim();
+  if (!login) throw new Error("未能从 GitHub 获取登录名，无法派生加密密码");
+  return login;
+}
+
+/**
  * 注册自动备份 alarm（仅 GitHub Gist 目标；频率来自 settings.ghBackupFreq）。
+ * 2026-11-25 备份重构：加密密码改为 Token 对应的 GitHub login（alarm 触发时可重新获取），
+ * 不再依赖落盘密码，因此恢复无人值守定时备份。Token 缺失或频率 off 时清除 alarm。
  */
 export async function registerAutoBackup(chrome, settings = {}) {
-  // 2026-11-25 审计 P1：密码不落盘红线与无人值守定时备份不可兼得——
-  // MV3 service worker 重启后无法取得用户临时输入的密码，持久化密码又会违反红线。
-  // 产品口径：GitHub Gist 仅支持会话内手动备份；任何历史遗留 alarm 一律清除。
-  if (chrome?.alarms?.clear) await chrome.alarms.clear("auto-backup");
-  return { registered: false, reason: "密码不落盘，GitHub Gist 仅支持会话内手动备份" };
+  const freq = settings.backupTarget === "github" ? settings.ghBackupFreq || "off" : "off";
+  if (freq === "off" || !settings.ghToken) {
+    if (chrome?.alarms?.clear) await chrome.alarms.clear("auto-backup");
+    return {
+      registered: false,
+      reason: !settings.ghToken ? "未配置 GitHub Token" : "定时备份已关闭",
+    };
+  }
+  const periods = { every10m: 10, every30m: 30, hourly: 60, daily: 1440 };
+  const periodInMinutes = periods[freq];
+  if (!periodInMinutes) throw new Error("不支持的 GitHub 自动备份频率：" + freq);
+  if (chrome?.alarms?.create) await chrome.alarms.create("auto-backup", { periodInMinutes });
+  return { registered: true, periodInMinutes };
 }
 
 /**
  * 执行自动备份（alarm 触发时调用，M8/Q3）：加密完整快照上传私有 Gist。
- * Q2：密码不落盘——自动备份场景要求 settings.ghBackupPassword 由用户在配置时提供于内存会话；
- * 若无可用密码则抛错提示（第一版不做会话暂存，定时备份需 session 内密码）。
+ * 2026-11-25：先用 Token 调 GET /user 取 login，再以 login 为密码加密；
+ * 不读取、不落盘任何 ghBackupPassword。Token 缺失时不发网络请求。
  */
 export async function runAutoBackup(chrome, model, settings, fetchImpl = globalThis.fetch) {
   if (!settings?.ghToken) throw new Error("GitHub Gist 备份缺少 Token");
-  if (!settings?.ghBackupPassword) throw new Error("自动备份需要备份密码（密码不落盘）");
-  const sealed = await sealSnapshot(model, settings, settings.ghBackupPassword);
+  const login = await fetchGitHubLogin(chrome, settings, fetchImpl);
+  const sealed = await sealSnapshot(model, settings, login);
   const result = await uploadGist(chrome, settings, sealed, fetchImpl);
-  return { ...result, format: "encrypted", bytes: sealed.length };
+  return { ...result, format: "encrypted", bytes: sealed.length, loginKnown: true };
 }
 
 /**
@@ -637,21 +713,112 @@ export async function uploadGist(chrome, settings, content, fetchImpl = globalTh
 }
 
 /**
+ * GitHub Gist 完整备份（2026-11-25）：Token 取 login → login 派生密码加密 → 上传私有 Gist。
+ * 复用 runAutoBackup 的全部校验；返回对象不含密码，login 不写日志/设置。
+ */
+export async function backupToGist(chrome, model, settings, fetchImpl = globalThis.fetch) {
+  return runAutoBackup(chrome, model, settings, fetchImpl);
+}
+
+/**
+ * 从 GitHub Gist 恢复完整快照（2026-11-25，补齐此前缺失的 GET 恢复链路）。
+ * GET /gists/{id} → 按 ghFileName/特征定位 TabHarbor 文件 → owner.login 解密 →
+ * 结构校验（restoreSealedSnapshot 内含 importJSON/validateTree，失败抛错不写库）。
+ * login 解密失败且提供 fallbackPassword 时兜底一次（兼容旧自定义密码 Gist）；密码不落盘。
+ * 返回 { ...model, usedFallback }；全量覆盖由 UI 二次确认后写库。
+ */
+export async function restoreFromGist(
+  chrome,
+  settings,
+  fetchImpl = globalThis.fetch,
+  fallbackPassword = ""
+) {
+  if (
+    !chrome?.permissions?.contains ||
+    !(await chrome.permissions.contains({ origins: ["https://api.github.com/*"] }))
+  ) {
+    throw new Error("尚未授予 api.github.com 可选权限");
+  }
+  if (!settings?.ghToken) throw new Error("GitHub Token 不能为空");
+  const gistId = String(settings.ghGistId || "").trim();
+  if (!/^[0-9a-f]{20,}$/i.test(gistId)) throw new Error("Gist ID 无效或未配置，无法恢复");
+  const headers = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${settings.ghToken}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const response = await fetchImpl(`https://api.github.com/gists/${encodeURIComponent(gistId)}`, {
+    method: "GET",
+    headers,
+  });
+  if (response.status === 404) throw new Error("Gist 不存在或无权访问（HTTP 404）");
+  if (response.status === 401 || response.status === 403)
+    throw new Error("GitHub Token 无效或权限不足（HTTP " + response.status + "）");
+  if (!response.ok) throw new Error("读取 GitHub Gist 失败（HTTP " + response.status + "）");
+  const info = await response.json();
+  const files = info.files || {};
+  const wanted = String(settings.ghFileName || "").trim();
+  const keys = Object.keys(files);
+  const key =
+    keys.find((k) => wanted && k === wanted) ||
+    keys.find((k) => /tabharbor|\.tbh$/i.test(k)) ||
+    keys[0];
+  const content = String(files[key]?.content || "");
+  if (!content) throw new Error("Gist 中未找到 TabHarbor 备份文件");
+  const sniffed = sniffImport(content);
+  if (sniffed.kind !== "encrypted-backup") throw new Error("Gist 备份文件不是合法的加密信封");
+
+  const ownerLogin = String(info.owner?.login || "").trim();
+  let login = ownerLogin;
+  if (!login) {
+    try {
+      login = await fetchGitHubLogin(chrome, settings, fetchImpl);
+    } catch {
+      login = "";
+    }
+  }
+  let model;
+  let usedFallback = false;
+  if (login) {
+    try {
+      model = await restoreSealedSnapshot(content, login, {});
+    } catch {
+      model = null;
+    }
+  }
+  if (!model) {
+    if (!fallbackPassword)
+      throw new Error("GitHub 登录名无法解密该 Gist，请输入此备份的旧密码重试");
+    model = await restoreSealedSnapshot(content, fallbackPassword, {});
+    usedFallback = true;
+  }
+  return { ...model, usedFallback };
+}
+
+/**
  * 恢复备份
  */
 const BACKUP_STORAGE_KEY = "localBackups";
 const MAX_LOCAL_BACKUPS = 20;
 
-/** 保存可恢复的本地加密快照（B2：content 为加密信封，密码不落盘；元信息保留时间/节点数）。 */
-export async function saveLocalBackup(chrome, sealed, model, _password) {
+/**
+ * 保存可恢复的本地快照（2026-11-25：明文/加密两种，绝不保存任何密码字段）。
+ * 兼容旧签名 saveLocalBackup(chrome, sealed, model, password)：opts 为字符串时视为加密信封。
+ */
+export async function saveLocalBackup(chrome, content, model, opts = {}) {
+  const legacyPassword = typeof opts === "string" ? opts : "";
+  const options = typeof opts === "string" ? { encrypted: true } : opts;
+  const encrypted = options.encrypted !== false;
   const entry = {
     id: `backup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    filename: `tabharbor-backup-${formatTimestamp()}.tbh`,
+    filename: options.filename || `tabharbor-backup-${formatTimestamp()}.tbh`,
     createdAt: new Date().toISOString(),
-    content: sealed,
-    encrypted: true,
+    content,
+    encrypted,
     count: model?.tabs?.length || 0,
   };
+  // 防御：即使调用方误传密码，也不写入条目（密码不落盘红线）。
+  void legacyPassword;
   const got = await chrome.storage.local.get([BACKUP_STORAGE_KEY]);
   const backups = [entry, ...(got[BACKUP_STORAGE_KEY] || [])].slice(0, MAX_LOCAL_BACKUPS);
   await chrome.storage.local.set({ [BACKUP_STORAGE_KEY]: backups });
@@ -681,17 +848,19 @@ export async function restoreBackup(backupId, _currentModel, chrome, password) {
     (item) => item.id === backupId || item.filename === backupId
   );
   if (!backup) throw new Error("本地备份不存在或已被清理");
-  if (!password) throw new Error("恢复加密备份需要输入备份密码");
-  // 兼容旧明文快照（encrypted 未标记）：仍按 JSON 解析；新快照走解密
+  // 2026-11-25：明文条目（encrypted===false 显标记）无需密码；加密条目必须输密码。
+  // 兼容旧条目：encrypted 未标记时按内容嗅探（信封→解密，纯 JSON→明文本地快照）。
   let data;
-  if (backup.encrypted) {
-    data = await unsealSnapshot(backup.content, password);
-  } else {
+  if (backup.encrypted === false) {
     try {
       data = JSON.parse(backup.content);
     } catch {
       throw new Error("本地备份内容损坏，无法恢复");
     }
+  } else {
+    // 加密条目（含旧 encrypted:true 与未标记的旧信封）：要求密码并解密
+    if (!password) throw new Error("恢复加密备份需要输入备份密码");
+    data = await unsealSnapshot(backup.content, password);
   }
   // importJSON 内含 validateTree：结构非法会在写库前抛错（B9）
   const model = await importJSON(data, _currentModel);

@@ -162,7 +162,7 @@ try {
     undefined,
     { timeout: 5000 }
   );
-  // M8/B5/Q3：Gist 配置字段（去 repo/branch/path，加 gistId/desc/fileName/private）
+  // 2026-11-25 备份三分类：Gist 配置字段 + login 派生密码（无密码框）+ GET Gist 恢复入口
   const ghFields = await win.evaluate(() =>
     [
       "#ghToken",
@@ -171,12 +171,16 @@ try {
       "#ghFileName",
       "#ghPrivate",
       "#ghBackupFreq",
-      "#ghBackupPwd",
       "#btnAuthorizeGithub",
       "#btnBackupGithub",
+      "#btnRestoreGithub",
     ].every((s) => !!document.querySelector(s))
   );
-  assert.ok(ghFields, "Gist 配置字段/两步按钮缺失（Q3）");
+  assert.ok(ghFields, "Gist 配置字段/恢复入口缺失（三分类）");
+  const noPwdField = await win.evaluate(() => !document.querySelector("#ghBackupPwd"));
+  assert.ok(noPwdField, "GitHub 卡片仍存在 ghBackupPwd 密码框（应改用 login 派生密码）");
+  const freqEnabled = await win.evaluate(() => !document.querySelector("#ghBackupFreq").disabled);
+  assert.ok(freqEnabled, "定时频率选项仍被禁用（login 派生密码后应恢复可用）");
   const noOldFields = await win.evaluate(
     () => !document.querySelector("#ghRepo") && !document.querySelector("#ghBranch")
   );
@@ -201,10 +205,22 @@ try {
     await win.evaluate(() => document.querySelector("#ghBackupSub").classList.contains("hidden")),
     "展开本地卡片后 GitHub 配置区应折叠"
   );
+  // 2026-11-25：本地加密开关默认关闭（明文），密码框默认隐藏；三分类按钮齐全
+  const localThreeCat = await win.evaluate(() => {
+    const sw = document.querySelector("#localEncrypt");
+    return (
+      !!sw &&
+      !sw.classList.contains("on") &&
+      document.querySelector("#localPwdRow").classList.contains("hidden") &&
+      !!document.querySelector("#btnImportLocal") &&
+      !!document.querySelector("#btnImportHtml")
+    );
+  });
+  assert.ok(localThreeCat, "本地加密开关默认应关闭、密码框隐藏，且三分类导入按钮齐全");
   await win.click('[data-modal-close="modalSetting"]');
   const closed = await win.evaluate(() => document.querySelector("#modalSetting").hidden);
   assert.ok(closed, "设置弹窗未关闭");
-  console.log("E2E 4/7 设置弹窗三分类 / 主页入口 / 备份两步卡片切换通过");
+  console.log("E2E 4/7 设置弹窗三分类 / 主页入口 / 备份三卡片切换通过");
 
   const kvCount = await win.evaluate(() => {
     document.querySelector("#btnKeys").click();

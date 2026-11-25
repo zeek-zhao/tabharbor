@@ -58,8 +58,8 @@
 | ID | 功能 | 源码 | 验收标准 | 状态 | 测试 | 限制 |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-40 | 设置三分类（外观/备份/复制） | `shell.js` 设置面板 | 单击行即时保存并广播所有宿主 | 已验证 | 02_shell（25 场景）；E2E 4 | — |
-| F-41 | 本地加密备份（两步卡片） | `import-export.js` + `crypto.js` | 密码不落盘；快照最多 20；恢复四类失败提示 | 已验证 | 09/16 feature；E2E 13 | — |
-| F-42 | GitHub Gist 加密备份 | `import-export.js` | 私有 Gist POST/PATCH、可选 `api.github.com` 授权、会话内手动备份 | 已实现 | 09/16 feature（mock） | **真实线上演练待完成；无人值守定时备份已停用（密码不落盘）** |
+| F-41 | 本地文件备份（明文/加密可选） | `import-export.js` `exportLocalSnapshot` + `crypto.js` | 默认明文 .json / 可选加密 .tbh；密码不落盘；快照最多 20、条目区分明文/加密；恢复四类失败提示 | 已验证 | 09/16/21 feature；E2E 13 | 明文文件含敏感信息，UI 已明示 |
+| F-42 | GitHub Gist 加密备份与恢复 | `import-export.js` `backupToGist`/`restoreFromGist` + `service-worker.js` | 私有 Gist POST/PATCH；密码 = `GET /user` 的 login（不落盘）；GET Gist + `owner.login` 解密恢复；旧 Gist 手动密码兜底；定时 alarm 用 Token 取 login 无人值守备份 | 已实现 | 09/16/21 feature（mock）；真机 E2E | **真实线上 Token 演练待完成；login 非强密码（UI 已明示）** |
 | F-43 | JSON/HTML/LinkMap 导入导出 | `import-export.js` | 嗅探自动识别、非法版本拒绝 | 已验证 | 09 feature（24 场景）；E2E 13 | — |
 | F-44 | 内部主页 | `homepage.js` + `src/home/` | 搜索引擎/常用站点配置、容器加号开主页 | 已验证 | 15_homepage_audit（15 场景） | — |
 | F-45 | 浏览器原生书签一键导入 | — | — | **已废弃（红线）** | — | 需 `bookmarks` 权限违反 C05；替代：手动导入 HTML |
@@ -100,6 +100,6 @@
 | --- | --- | --- | --- | --- | --- |
 | F-60 | 模型树新叶子相邻插入 | `model.js` `insertTabAfter` + `shell.js` + `align.js` | 同父锚点后插入；跨父/无锚点兜底末尾；既有叶子不自动重排 | 已验证 | 20_leaf_order_pending_url（6 场景）；本地真机 E2E P0-1 树内位次断言 |
 | F-61 | 待导航标签（空 URL + pendingUrl）按 tabId 补收与定位 | `shell.js` 快照映射 / `align.js` `pageAddressOf` / `service-worker.js` | 有 tabId 的空 URL 标签不被丢弃；定位失败区分内部页/导航中/未归入 | 已实现 | 20_leaf_order_pending_url；真机 pendingUrl 瞬态仍需手工复核 |
-| F-62 | GitHub 无人值守定时备份停用 | `import-export.js` `registerAutoBackup` + `service-worker.js` + 设置面板 | 不注册 alarm；遗留 alarm 清除并提示；UI 明确仅会话内手动备份 | 已实现 | 09_import_export 修订场景（3 项） |
+| F-62 | GitHub 无人值守定时备份（口径反转） | `import-export.js` `registerAutoBackup`/`runAutoBackup` + `service-worker.js` | 2026-11-25 二次重构：改由 login 派生密码消除冲突，恢复 alarm 注册；Token 缺失不发请求、不读 ghBackupPassword | 已实现 | 09 + 21 feature（alarm/login 场景） | 真机 service worker 重启后自动备份待复核 |
 
 CI 证据链接：<https://github.com/zeek-zhao/tabharbor/actions/runs/45445426126>（main @ `1fe6ed3` test+e2e）、<https://github.com/zeek-zhao/tabharbor/actions/runs/45445619199>（release.yml，tag v0.3.0）。上述修复推送后由新 run 复验。

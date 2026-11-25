@@ -112,11 +112,11 @@
   当 执行 GitHub 自动备份
   那么 不发送网络请求
 
-场景: 无人值守定时备份因密码不落盘不注册 alarm
-  假如 GitHub 频率选项内容为 "daily"
+场景: 无人值守定时备份用 login 派生密码并注册 alarm
+  假如 GitHub 备份配置完整且含 daily 频率
   当 插件启动时注册 alarms
-  那么 auto-backup alarm 不存在
-  并且 service-worker 对遗留 alarm 给出不可用提示
+  那么 auto-backup alarm 已注册且 periodInMinutes 为 1440
+  并且 service-worker 对 alarm 用 Token 获取 login 派生密码备份
 
 场景: M7/B9 恢复备份 - 密码解密后全量恢复并校验树
   假如 本地备份仓库含 "1" 个标签的加密快照
@@ -130,10 +130,10 @@
   那么 恢复被拒绝并提示密码错误或解密失败
   并且 树模型保持原样未被污染
 
-场景: 切换备份目标后不产生 GitHub alarm
-  假如 GitHub 频率选项内容为 "daily"
+场景: 切换备份目标为本地后清除 GitHub alarm
+  假如 GitHub 备份配置完整且含 daily 频率
   当 插件启动时注册 alarms
-  那么 auto-backup alarm 不存在
+  那么 auto-backup alarm 已注册且 periodInMinutes 为 1440
   当 当前备份目标切换为 local
   那么 auto-backup alarm 不存在
 

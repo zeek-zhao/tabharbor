@@ -2087,10 +2087,16 @@ export async function bootShell(root) {
       if (field && host.doc.activeElement !== field) field.value = settings[key] || fallback;
     }
     const frequency = host.root.querySelector("#ghBackupFreq");
-    // P1（2026-11-25）：无人值守定时备份不可用，历史遗留频率一律显示「关闭」。
-    if (frequency) frequency.value = "off";
+    // 2026-11-25 备份重构：定时备份恢复可用（login 派生密码，不落盘）——显示真实配置值。
+    if (frequency && host.doc.activeElement !== frequency)
+      frequency.value = settings.ghBackupFreq || "off";
     const priv = host.root.querySelector("#ghPrivate");
     if (priv) priv.classList.toggle("on", settings.ghPrivate !== false);
+    // 本地加密开关：从备份目标派生（默认明文），并同步密码框显隐。
+    const enc = host.root.querySelector("#localEncrypt");
+    if (enc) enc.classList.toggle("on", settings.localBackupEncrypted === true);
+    const pwdRow = host.root.querySelector("#localPwdRow");
+    if (pwdRow) pwdRow.classList.toggle("hidden", settings.localBackupEncrypted !== true);
   };
   const refreshBackups = async (host = mainHost) => {
     const list = host.root.querySelector("#backupList");
@@ -2100,7 +2106,8 @@ export async function bootShell(root) {
       ...backups.map((item) => {
         const option = host.doc.createElement("option");
         option.value = item.id;
-        option.textContent = `${item.ts} · ${item.count} 条 · ${item.filename}`;
+        const kind = item.encrypted === false ? "明文" : "加密";
+        option.textContent = `${item.ts} · ${item.count} 条 · ${kind} · ${item.filename}`;
         return option;
       })
     );
@@ -2119,9 +2126,31 @@ export async function bootShell(root) {
         if (sibling) sibling.classList.add("hidden");
       });
     });
-    // D6：导入入口（自动嗅探）通过隐藏文件输入
+    // D6：导入入口（自动嗅探）通过隐藏文件输入。
+    // 2026-11-25：btnImportLocal / btnImportHtml 复用同一文件输入 + 内容嗅探，
+    // 用 data-import 属性标记来源，但后端始终按内容识别，不让用户先选格式。
     r.querySelectorAll("[data-import]").forEach((btn) => {
       btn.addEventListener("click", () => r.querySelector("#importFile")?.click());
+    });
+    r.querySelector("#btnImportLocal")?.addEventListener("click", () => {
+      r.querySelector("#importFile")?.click();
+    });
+    r.querySelector("#btnImportHtml")?.addEventListener("click", () => {
+      r.querySelector("#importFile")?.click();
+    });
+    // 本地加密开关：切换密码框显隐，并记录偏好（仅开关状态，不存密码）。
+    r.querySelector("#localEncrypt")?.addEventListener("click", async (event) => {
+      const sw = event.currentTarget;
+      sw.classList.toggle("on");
+      const on = sw.classList.contains("on");
+      const pwdRow = r.querySelector("#localPwdRow");
+      if (pwdRow) pwdRow.classList.toggle("hidden", !on);
+      try {
+        settings = await store.saveSettings({ localBackupEncrypted: on });
+        m.settings = settings;
+      } catch {
+        /* 开关状态仅影响本次会话，不阻断备份 */
+      }
     });
     r.querySelector("#importFile")?.addEventListener("change", async (event) => {
       const file = event.target.files?.[0];
@@ -2196,17 +2225,25 @@ export async function bootShell(root) {
     // 点「本地备份」确认后才执行；密码不落盘、不进文件、不写日志、不做会话暂存。
     r.querySelector("#btnBackupNow")?.addEventListener("click", async () => {
       try {
+        const encrypted = r.querySelector("#localEncrypt")?.classList.contains("on") === true;
         const password = r.querySelector("#localBackupPwd")?.value || "";
-        if (!password) {
-          say("请先在配置项中填写备份密码");
+        if (encrypted && !password) {
+          say("请先填写本地备份密码，或关闭加密导出明文快照");
           return;
         }
-        // M7/B2：本地加密完整快照（模型+回收站+设置含主页配置一起打包）
-        await io.manualBackup(m, settings, chrome.downloads, chrome, password);
+        // 2026-11-25：本地完整快照，加密可选（明文 .json / 加密 .tbh）。
+        const result = await io.exportLocalSnapshot(m, settings, chrome.downloads, chrome, {
+          encrypted,
+          password,
+        });
         const pwdInput = r.querySelector("#localBackupPwd");
         if (pwdInput) pwdInput.value = ""; // 用完即清，不暂存
         await refreshBackups();
-        say("已创建加密快照并下载（.tbh，恢复需输入密码）");
+        say(
+          encrypted
+            ? "已创建加密快照并下载（.tbh，恢复需输入密码）"
+            : `已导出明文完整快照：${result.filename}（含敏感标题与网址，请妥善保存）`
+        );
       } catch (error) {
         say("备份失败：" + io.describeRestoreError(error));
       }
@@ -2219,23 +2256,58 @@ export async function bootShell(root) {
           say("请先在配置卡片点击「保存并校验配置」并完成授权");
           return;
         }
-        const password = r.querySelector("#ghBackupPwd")?.value || "";
-        if (!password) {
-          say("请填写备份密码后再确认备份");
-          return;
-        }
-        const gistSettings = { ...settings, ghBackupPassword: password };
-        const result = await io.runAutoBackup(chrome, m, gistSettings);
-        const pwdInput = r.querySelector("#ghBackupPwd");
-        if (pwdInput) pwdInput.value = ""; // 密码用完即清
+        // 2026-11-25：加密密码自动取 GitHub login（GET /user），无需手动填写、不落盘。
+        const result = await io.backupToGist(chrome, m, settings);
         if (result.gistId && result.gistId !== settings.ghGistId) {
           settings = await store.saveSettings({ ghGistId: result.gistId });
           m.settings = settings;
-          syncBackupFields();
+          syncBackupFields(host);
         }
-        say(`加密快照已备份到私有 Gist：${result.gistId}`);
+        say(`加密快照已备份到私有 Gist：${result.gistId}（密码自动使用 GitHub 登录名）`);
       } catch (error) {
         say("备份失败：" + io.describeRestoreError(error));
+      }
+    });
+    // 2026-11-25：从 GitHub Gist 恢复——GET Gist → owner.login 解密 → 校验 → 全量覆盖确认。
+    r.querySelector("#btnRestoreGithub")?.addEventListener("click", async () => {
+      try {
+        if (!settings.ghToken || !settings.ghGistId) {
+          say("请先完成 Gist 配置（Token 与 Gist ID）");
+          return;
+        }
+        let restored;
+        try {
+          restored = await io.restoreFromGist(chrome, settings);
+        } catch (err) {
+          if (String(err?.message || "").includes("旧密码")) {
+            const old = window.prompt("GitHub 登录名无法解密该 Gist，请输入此备份的旧密码：");
+            if (!old) {
+              say("已取消恢复");
+              return;
+            }
+            restored = await io.restoreFromGist(chrome, settings, globalThis.fetch, old);
+          } else {
+            throw err;
+          }
+        }
+        if (
+          !window.confirm(
+            "解密校验通过。恢复将全量覆盖当前书签树、回收站、设置和主页配置，是否继续？"
+          )
+        )
+          return;
+        await store.saveModel(restored);
+        m = restored;
+        if (restored.settings) settings = await store.saveSettings(restored.settings);
+        await applyOpenState();
+        await refreshOpen();
+        say(
+          restored.usedFallback
+            ? "已从 Gist 恢复（旧密码兜底，全量覆盖）"
+            : "已从 Gist 恢复（全量覆盖）"
+        );
+      } catch (error) {
+        say("从 GitHub 恢复失败：" + io.describeRestoreError(error));
       }
     });
     // Q5：独立明文 HTML 书签导出（不属于加密备份，方便导入其他浏览器）
@@ -2257,12 +2329,10 @@ export async function bootShell(root) {
         say("设置保存失败：" + error.message);
       }
     };
-    root
-      .querySelector("#ghBackupFreq")
-      ?.addEventListener(
-        "change",
-        (event) => void saveGitHubSettings({ ghBackupFreq: event.target.value })
-      );
+    r.querySelector("#ghBackupFreq")?.addEventListener(
+      "change",
+      (event) => void saveGitHubSettings({ ghBackupFreq: event.target.value })
+    );
     r.querySelector("#btnAuthorizeGithub")?.addEventListener("click", async () => {
       try {
         const patch = {
@@ -2285,10 +2355,10 @@ export async function bootShell(root) {
           return;
         }
         await saveGitHubSettings(patch);
-        // Q3：第一步只保存并校验配置，不上传；上传由「确认备份」单独触发。
+        // 2026-11-25：第一步只保存并校验配置；加密密码自动取 GitHub login，无需手填。
         // B10/R8：明确提示 Token 明文保存在本机扩展存储。
         say(
-          "Gist 配置已保存并校验通过（Token 以明文保存在本机，请勿在公用设备使用）；现在可填密码点「确认备份」"
+          "Gist 配置已保存并校验通过（Token 以明文保存在本机，请勿在公用设备使用）；加密密码自动使用 GitHub 登录名，现在可点「备份到 GitHub」"
         );
       } catch (error) {
         say("GitHub 配置校验失败：" + io.describeRestoreError(error));
@@ -2301,11 +2371,16 @@ export async function bootShell(root) {
         return;
       }
       if (!window.confirm("恢复会全量替换当前树数据与设置（含主页配置），是否继续？")) return;
-      // Q2：恢复加密快照要求输入密码，不落盘、不暂存
-      const password = window.prompt("输入该备份的密码以解密恢复：");
-      if (!password) {
-        say("已取消恢复（密码不能为空）");
-        return;
+      // 2026-11-25：按条目 encrypted 决定是否要密码——明文条目直接恢复，加密条目才提示。
+      // 先读列表元信息判断；密码不落盘、不暂存。
+      let password = "";
+      const meta = (await io.getBackupList(chrome)).find((b) => b.id === backupId);
+      if (meta && meta.encrypted !== false) {
+        password = window.prompt("该快照为加密备份，请输入密码以解密恢复：") || "";
+        if (!password) {
+          say("已取消恢复（密码不能为空）");
+          return;
+        }
       }
       try {
         // B9：restoreBackup 内部先解密 + importJSON/validateTree，失败即抛错、不写库

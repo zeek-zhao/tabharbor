@@ -299,15 +299,16 @@
           </div>
           <div class="cat-panel" data-panel="backup" hidden>
             <div class="sec-title">备份</div>
-            <!-- U6/Q3（2026-11-24 UI 审计）：本地 / GitHub 两张配置卡片——
-                 点「配置备份」先展开配置项，填好后再点确认；不再有即时弹密码的单一按钮。 -->
+            <!-- 2026-11-25 备份三分类：本地文件 / GitHub Gist / 书签 HTML 三张卡片——
+                 侧边栏、独立窗口、PiP 克隆共用同一套按钮 ID（三端结构一致）。 -->
             <div class="backup-card">
               <div class="opt-row" data-setting="backup" data-value="local">
                 <span class="radio"></span>
                 <div>
-                  <div class="t">本地备份</div>
+                  <div class="t">本地文件</div>
                   <div class="d">
-                    加密完整快照（书签+回收站+设置+主页配置）保存到本机，可下载 .tbh
+                    导出完整快照（书签树+回收站+设置+主页配置）到本机文件。加密可选；明文 .json
+                    含敏感标题与网址，请妥善保存。
                   </div>
                 </div>
                 <span class="ops"
@@ -317,21 +318,31 @@
                 >
               </div>
               <div class="sub-block hidden" id="localBackupSub">
-                <div class="field-row">
-                  <label for="localBackupPwd">备份密码</label>
+                <div class="switch-row">
+                  <div>
+                    <div class="t">加密本地文件</div>
+                    <div class="d">关闭导出明文 .json（无需密码）；开启导出 .tbh 加密信封</div>
+                  </div>
+                  <button class="switch" id="localEncrypt" type="button"></button>
+                </div>
+                <div class="field-row hidden" id="localPwdRow">
+                  <label for="localBackupPwd">本地备份密码</label>
                   <input
                     class="edit-input"
                     id="localBackupPwd"
                     type="password"
                     autocomplete="new-password"
-                    placeholder="输入密码加密完整快照"
+                    placeholder="输入本地备份密码"
                   />
                 </div>
-                <p>密码不保存、不写入文件、不写日志；恢复时需再次输入。</p>
+                <p>密码不保存、不写入文件、不写日志；恢复加密文件时需再次输入。</p>
                 <div class="modal-actions">
-                  <button class="btn primary" id="btnBackupNow" type="button">本地备份</button>
+                  <button class="btn primary" id="btnBackupNow" type="button">
+                    导出到本地文件
+                  </button>
+                  <button class="btn" id="btnImportLocal" type="button">从本地文件导入</button>
                 </div>
-                <div class="sec-title" style="margin-top: 14px">恢复快照（最多保留 20 份）</div>
+                <div class="sec-title" style="margin-top: 14px">本机快照历史（最多保留 20 份）</div>
                 <div class="field-row">
                   <label for="backupList">快照</label>
                   <select class="edit-input" id="backupList"></select>
@@ -345,8 +356,10 @@
               <div class="opt-row" data-setting="backup" data-value="github">
                 <span class="radio"></span>
                 <div>
-                  <div class="t">GitHub 备份</div>
-                  <div class="d">加密完整快照上传私有 Gist，Token 仅请求 api.github.com 权限</div>
+                  <div class="t">GitHub Gist</div>
+                  <div class="d">
+                    完整快照加密后上传私有 Gist，加密密码自动使用当前 GitHub 登录名，无需手动填写
+                  </div>
                 </div>
                 <span class="ops"
                   ><button class="mini-btn" data-backup-expand="github" type="button">
@@ -401,55 +414,56 @@
                   <button class="switch on" id="ghPrivate" type="button"></button>
                 </div>
                 <div class="field-row">
-                  <label for="ghBackupFreq">定时备份（不可用）</label>
-                  <select
-                    class="edit-input"
-                    id="ghBackupFreq"
-                    disabled
-                    title="密码不落盘，暂不支持无人值守定时备份"
-                  >
-                    <option value="off">关闭 · 仅会话内手动备份</option>
+                  <label for="ghBackupFreq">定时备份</label>
+                  <select class="edit-input" id="ghBackupFreq">
+                    <option value="off">关闭</option>
+                    <option value="every10m">每 10 分钟</option>
+                    <option value="every30m">每 30 分钟</option>
+                    <option value="hourly">每小时</option>
+                    <option value="daily">每天</option>
                   </select>
                 </div>
-                <div class="field-row">
-                  <label for="ghBackupPwd">备份密码</label>
-                  <input
-                    class="edit-input"
-                    id="ghBackupPwd"
-                    type="password"
-                    autocomplete="new-password"
-                    placeholder="输入密码加密完整快照"
-                  />
-                </div>
+                <p>加密密码：当前 GitHub 登录名（GET /user 自动获取，不保存、不写日志）。</p>
                 <p>
-                  Q2：密码不落盘、不写入
-                  Gist、不写日志；仅会话内手动备份，暂不支持无人值守定时备份。
+                  GitHub 登录名不是强密码；请保持 Gist 私有、Token 仅申请 gist
+                  权限、勿在公用设备使用；敏感书签建议同时保留本地加密备份。恢复时全量覆盖当前树、回收站、设置与主页配置。
                 </p>
-                <p>R8：Token 以明文保存在本机扩展存储，请勿在公用设备使用。</p>
+                <p>Token 以明文保存在本机扩展存储，请勿在公用设备使用。</p>
                 <div class="modal-actions" style="margin-top: 10px">
                   <button class="btn" id="btnAuthorizeGithub" type="button">保存并校验配置</button>
-                  <button class="btn primary" id="btnBackupGithub" type="button">确认备份</button>
+                  <button class="btn primary" id="btnBackupGithub" type="button">
+                    备份到 GitHub
+                  </button>
+                  <button class="btn" id="btnRestoreGithub" type="button">从 GitHub 恢复</button>
                 </div>
               </div>
             </div>
-            <div class="sec-title" style="margin-top: 18px">导出 / 导入</div>
-            <div class="sub-block">
+            <div class="backup-card" style="margin-top: 12px">
               <div class="opt-row">
                 <div>
-                  <div class="t">导出 HTML</div>
-                  <div class="d">标准书签文件，可导入其他浏览器；独立导出方式，不属于加密备份</div>
+                  <div class="t">书签 HTML</div>
+                  <div class="d">
+                    标准 Netscape
+                    书签文件，只交换文件夹与书签层级；不加密，不含设置、回收站与主页配置
+                  </div>
                 </div>
                 <span class="ops"
                   ><button class="mini-btn" id="btnExportBookmarksHtml" type="button">
-                    导出 HTML
+                    导出书签 HTML
+                  </button>
+                  <button class="mini-btn" id="btnImportHtml" type="button">
+                    导入书签 HTML
                   </button></span
                 >
               </div>
+            </div>
+            <div class="sec-title" style="margin-top: 18px">通用导入</div>
+            <div class="sub-block">
               <div class="opt-row">
                 <div>
-                  <div class="t">导入数据</div>
+                  <div class="t">导入数据（自动识别）</div>
                   <div class="d">
-                    放入文件后自动识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份，无需选格式
+                    放入文件后按内容识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份，无需选格式
                   </div>
                 </div>
                 <span class="ops"

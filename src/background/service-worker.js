@@ -1,6 +1,6 @@
 // TH2 service worker（FR-013/014/015/016）——点击图标按打开模式分支；右键图标开侧边栏；安装默认值；快捷键命令广播
 import { DEFAULT_SETTINGS, loadAll, saveSettings, saveModel } from "../core/store.js";
-import { registerAutoBackup } from "../core/import-export.js";
+import { registerAutoBackup, runAutoBackup } from "../core/import-export.js";
 import { syncBrowserSnapshot } from "../core/align.js";
 
 // U3 / Q3（2026-11-24 UI 审计）：点击图标/快捷键开窗时——
@@ -94,18 +94,49 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   });
   void syncAutoBackupAlarm(chromeApi);
 
-  // 2026-11-25 审计 P1：密码不落盘 → 不支持无人值守 GitHub 定时备份。
-  // 仅处理历史版本遗留的 alarm：清除并写入明确提示，绝不读取/持久化密码，不发起网络请求。
+  // 2026-11-25 备份重构：无人值守定时备份恢复可用——加密密码由 Token 对应的 GitHub login
+  // 在 alarm 触发时实时派生，不读取、不持久化任何 ghBackupPassword（密码不落盘红线保持）。
+  // 仅请求已授权的 api.github.com；Token 缺失时不发网络请求并写入可读结果。
   chromeApi.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== "auto-backup") return;
-    if (chromeApi.alarms.clear) await chromeApi.alarms.clear("auto-backup");
-    await chromeApi.storage.local.set({
-      backupLastResult: {
-        ok: false,
-        message: "无人值守定时备份不可用（备份密码不落盘）；请在扩展内手动备份",
-        at: new Date().toISOString(),
-      },
-    });
+    const all = await loadAll(chromeApi);
+    const settings = all.settings || {};
+    if (settings.backupTarget !== "github" || !settings.ghToken) {
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: false,
+          message: "定时备份未配置 GitHub Token，已跳过",
+          at: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+    const model = {
+      windows: all.windows,
+      groups: all.groups,
+      tabs: all.tabs,
+      trash: all.trash,
+      settings,
+    };
+    try {
+      const result = await runAutoBackup(chromeApi, model, settings);
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: true,
+          message: `加密快照已定时备份到私有 Gist：${result.gistId}`,
+          at: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      // 不记录 settings/token/login/密码；只写有界、去凭证的结果供 UI 展示。
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: false,
+          message: String(error?.message || "定时备份失败").slice(0, 180),
+          at: new Date().toISOString(),
+        },
+      });
+    }
   });
 
   // FR-016：快捷键命令 → 存储广播，两页面订阅 cmd 键响应
