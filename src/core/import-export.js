@@ -572,15 +572,11 @@ export async function exportBookmarksHtml(model, downloadApi) {
  * 注册自动备份 alarm（仅 GitHub Gist 目标；频率来自 settings.ghBackupFreq）。
  */
 export async function registerAutoBackup(chrome, settings = {}) {
-  const freq = settings.backupTarget === "github" ? settings.ghBackupFreq || "off" : "off";
-  if (freq === "off") {
-    if (chrome.alarms.clear) await chrome.alarms.clear("auto-backup");
-    return;
-  }
-  const periods = { every10m: 10, every30m: 30, hourly: 60, daily: 1440 };
-  const periodInMinutes = periods[freq];
-  if (!periodInMinutes) throw new Error("不支持的 GitHub 自动备份频率：" + freq);
-  await chrome.alarms.create("auto-backup", { periodInMinutes });
+  // 2026-11-25 审计 P1：密码不落盘红线与无人值守定时备份不可兼得——
+  // MV3 service worker 重启后无法取得用户临时输入的密码，持久化密码又会违反红线。
+  // 产品口径：GitHub Gist 仅支持会话内手动备份；任何历史遗留 alarm 一律清除。
+  if (chrome?.alarms?.clear) await chrome.alarms.clear("auto-backup");
+  return { registered: false, reason: "密码不落盘，GitHub Gist 仅支持会话内手动备份" };
 }
 
 /**

@@ -38,7 +38,7 @@
 2. 单独填写备份密码，点「确认备份」。远端保存的是加密完整快照：
    - 已填 Gist ID → `PATCH https://api.github.com/gists/{id}` 更新；
    - 未填 → `POST https://api.github.com/gists` 新建私有 Gist。
-3. 定时频率：关闭 / 每 10 分钟 / 每 30 分钟 / 每小时 / 每天（alarm 仅在目标为 GitHub 且频率非关闭时注册；切走即清除）。
+3. **定时备份已停用**：备份密码不落盘、MV3 service worker 重启后无法取得会话密码，因此 GitHub Gist 仅支持**会话内手动备份**。设置面板的定时频率选项已禁用；遗留 alarm 会被清除并提示「无人值守定时备份不可用」。
 4. **不使用**仓库 / 分支 / 路径 / Contents API；`api.github.com` 是全扩展唯一出站地址，且仅 backup 模块使用。
 5. Token 以明文保存在本机扩展存储，界面不回显；请勿在公用设备使用，不要把 Token 粘贴到 issue、日志或截图。撤销可选主机权限或切回本地备份即停止远端同步。
 
