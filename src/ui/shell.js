@@ -130,7 +130,8 @@ function buildShellSkeleton(mode = "pip") {
 
 const KEYS_TABLE = [
   ["上 / 下选择标签", "↑ / ↓"],
-  ["打开选中标签（也可双击）", "Enter"],
+  ["后台打开选中标签（焦点留插件，也可双击）", "Enter"],
+  ["显式聚焦网页到浏览器", "Ctrl+Shift+Enter"],
   ["打开整组已关闭标签", "Ctrl + O"],
   ["定位当前标签", "Ctrl + L"],
   ["展开 / 收起全部", "Ctrl + E"],
@@ -156,7 +157,7 @@ const GUIDE_HTML = `
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；主页入口已并入设置「外观」分类，也可从主页右上角齿轮进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
-  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter 跳转打开选中网页。</li>
+  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter（或双击）在浏览器<b>后台</b>打开选中网页、焦点留在插件，可继续用 ↑↓/Delete 操作；需要跳到网页时按 Ctrl+Shift+Enter 显式聚焦。</li>
   <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页脚「快速上手指南」图标右侧的 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
@@ -601,7 +602,9 @@ export async function bootShell(root) {
   // 绑定失效）时自动新建一个真实浏览器窗口，并把新窗口句柄回填到窗口节点。
   // O4（2026-11-23 UI 审计）：叶子级「打开中」标记，按钮双击 / 双击事件冒泡不并发新建多个标签。
   const openingLeafIds = new Set();
-  const openLeafById = async (id) => {
+  // 2026-11-26 P0（口径确认）：opts.focus=true 表示用户显式"聚焦网页"动作才激活标签+聚焦窗口；
+  // 否则按 settings.openTabsInBackground（默认 true）后台打开，焦点留在插件宿主。
+  const openLeafById = async (id, opts = {}) => {
     if (openingLeafIds.has(id)) return;
     const node = findNode(m, id);
     if (!node?.url) return;
@@ -609,10 +612,13 @@ export async function bootShell(root) {
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
       const winId = boundWindowId(m, id);
+      const background = !opts.focus && settings.openTabsInBackground !== false;
       const res = await tabsOp.openTab(chrome, node, urls, {
         windowId: winId,
         topWindow: topWindowOf(m, id),
         m,
+        background,
+        focus: !!opts.focus,
       });
       let dirty = false;
       if (res.created && res.tabId != null && node.tabId !== res.tabId) {
@@ -645,7 +651,21 @@ export async function bootShell(root) {
       }
       if (dirty) await store.saveModel(m);
       await refreshOpen();
-      toast(res.focused ? "已聚焦已打开网页" : res.rebound ? "已新建窗口并打开网页" : "已打开网页");
+      // 2026-11-26 P0：后台打开时保持焦点留在插件宿主——refreshOpen 重渲染后重新标记选中叶子
+      // 并滚动到可见位置；不调用 window.focus（浏览器焦点本就未被网页抢走）。
+      if (res.backgrounded && selectedId) {
+        const el = body.querySelector(`.leaf[data-id="${selectedId}"]`);
+        if (el) el.scrollIntoView({ block: "nearest" });
+      }
+      toast(
+        res.focused
+          ? "已聚焦已打开网页"
+          : res.backgrounded
+            ? "已在后台打开网页（焦点仍在插件）"
+            : res.rebound
+              ? "已新建窗口并打开网页"
+              : "已打开网页"
+      );
     } catch (err) {
       say("打开失败：" + err.message);
     } finally {
@@ -1229,7 +1249,8 @@ export async function bootShell(root) {
     const cur = leaves.findIndex((el) => el.dataset.id === selectedId);
     if (e.key === "Enter" && selectedId) {
       e.preventDefault();
-      await openLeafById(selectedId);
+      // Ctrl/Cmd+Shift+Enter = 显式聚焦网页（唯一允许激活标签+聚焦窗口的入口）。
+      await openLeafById(selectedId, { focus: e.shiftKey });
     } else if (e.key === "Delete" && selectedId) {
       e.preventDefault();
       const node = findNode(m, selectedId);
@@ -1890,7 +1911,7 @@ export async function bootShell(root) {
         }
       } else if (e.key === "Enter" && id) {
         e.preventDefault();
-        void openLeafById(id);
+        void openLeafById(id, { focus: e.shiftKey });
       } else if (e.key === "Delete" && id) {
         e.preventDefault();
         await runMenuAct("del", id, "leaf", host);

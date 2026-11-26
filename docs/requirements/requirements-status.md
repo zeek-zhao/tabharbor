@@ -81,7 +81,8 @@
 | --- | --- |
 | 只信 tabId，禁 URL/标题兜底绑定或重新点亮 | `tools/check-constraints.mjs` + BDD 静态契约 |
 | 不申请 bookmarks/cookies/webRequest/all_urls 等额外权限 | constraints C05/C09 |
-| 代码主动出站仅 `api.github.com`（backup）；用户主动输入的 https 图片壁纸链接为运行时资源例外（非代码请求，经校验拒绝伪协议） | constraints C11/C12 + 24 feature |
+| `geolocation` 仅用于天气卡片用户显式定位（一次调用、不后台监听），与 PRIVACY 权限表一致 | 21/34 feature + manifest 权限断言 |
+| 代码主动出站仅 `api.github.com`（backup）+ 天气模块 Open-Meteo（`api.open-meteo.com` / `geocoding-api.open-meteo.com`，C11/C12 白名单）；用户主动输入的 https 图片壁纸链接与外链音乐 iframe 为运行时资源例外（非代码请求，经校验拒绝伪协议） | constraints C11/C12 + 24/33/34 feature |
 | 备份密码不落盘/不进备份文件/不写日志 | constraints + 09 feature |
 | 加密备份整体原子还原（树+回收站+设置+主页配置） | 16 feature |
 | 不改浏览器全局新标签页配置 | constraints |
@@ -139,3 +140,36 @@ CI 证据：本轮推送后新 run 见最终执行报告；已发布 v0.3.0 的�
 BDD 场景总数：301/301 PASS（基线 285 → 本轮 +16）。**未取得真机/CI E2E 证据前，本轮状态均为「已实现」而非「已验证」。**
 
 > 回归修复（同轮）：容错解析初版把「带完整快照标记但版本不符」的 JSON 降级为纯书签树合并，导致真机 E2E 的"版本不兼容"提示丢失；已在 `parseBookmarkTree` 加快照标记守卫并补 27 号场景（E2E 现已全段通过）。
+
+## 12. 浏览器历史接入评审（2026-11-26，任务 7，仅评审不实现）
+
+> 依据《TabHarbor 口径确认与外链音乐方案更新-2026-11-26》任务 7 结论。本轮**不申请 `history` 权限、不实现历史接入**，仅记录评审结论；`docs/PRIVACY.md` 已声明不读取浏览历史。
+
+| 项 | 评审结论 |
+| --- | --- |
+| 本轮是否接入 | **否**。默认不申请 `chrome.history` 权限，无历史读取/监听/删除代码 |
+| 红线对照 | C01（`history.delete*`）/ C02（`history.onVisited`）仍为静态门禁红线，保持禁止 |
+| 若后续产品要求接入 | 走独立口径变更 + 红线评审，且限定为**可选** history 权限：仅 `chrome.history.search` 最近 N 条供用户手动挑选 |
+| 明确禁止（即使未来接入） | 禁止 `history.onVisited` 后台持续监听；禁止任何历史删除 API；历史检索结果进「临时区」，**不自动并入常用网址 sites**（须用户逐条确认） |
+| 隐私影响 | 历史属高敏感数据；接入会改变当前「不读浏览历史」的隐私承诺，须同步 `docs/PRIVACY.md` 与用户授权文案 |
+
+结论：本轮保持零 `history` 权限；评审记录归档，无代码改动、无门禁口径变更。
+
+## 13. 口径确认与主页功能增补（2026-11-26，基于 `faf7d5e`，任务 1–6/8）
+
+> 依据《TabHarbor 口径确认与外链音乐方案更新-2026-11-26》。本轮 8 项任务已落库于 `refactor/backup-three-categories`，**未包含在已发布 `v0.3.0` tag**。未取得真机/CI 证据前一律「已实现」而非「已验证」。
+
+| ID | 任务 | 源码 | 验收 | 状态 | 证据/缺口 |
+| --- | --- | --- | --- | --- | --- |
+| F-83 | P0 打开网页后焦点留插件 | `store.js` `openTabsInBackground`（默认 true）+ `tabs-op.js` `openTab` background/focus 参数 + `shell.js`/`home.js`/快捷键表 | 普通双击/Enter 后台打开；Ctrl+Shift+Enter 显式聚焦；主页搜索/站点后台打开；快捷键表 14→15 项 | 已实现 | 30 feature（6 场景）+ E2E 快捷键表 15 项断言 |
+| F-84 | 常用网址改普通跳转 + 分类置顶 | `homepage.js` `SITE_CATEGORIES`/`normalizeSite`/`inferSiteCategory` + `home.js`/配置面板 | 站点点击普通跳转；按分类分组渲染、置顶优先；配置面板支持分类/置顶/排序/删除；不调用 `chrome.bookmarks` | 已实现 | 31 feature（4 场景）；真机分类渲染待手工验收 |
+| F-85 | 离线主页装饰 | `homepage.js` `decorations`/`notes` schema + `home.js`/`home.html`/`home.css` | 时钟/日期/星期/问候语、快捷操作条、本地便签、快捷键提示卡；默认仅时钟+快捷条；纯本地不出站 | 已实现 | 32 feature（3 场景）；真机渲染待手工验收 |
+| F-86 | 外链音乐播放器（阶段 1） | `homepage.js` `music` schema/`normalizeMusicUrl`/`parseMusicEmbed`/`MUSIC_PROVIDERS` + `home.js` + `docs/PRIVACY.md` | SoundCloud/Spotify/Archive/网易云外链/自定义 embed；仅安全 https、拒绝伪协议与注入；iframe 懒加载、不自动播、8 秒超时兜底；local 阶段 2 仅预留 | 已实现 | 33 feature（4 场景）；平台 CSP/真机 iframe 待手工验收 |
+| F-87 | 天气卡片 | `weather.js` + `homepage.js` `weather` schema + `home.js`/`home.html`/`home.css` + manifest 可选主机 + C11/C12 白名单 | 默认手动城市、不主动定位；用户点击后一次定位、主页打开请求一次；Open-Meteo 白名单；失败隐藏 + 署名；无后台轮询 | 已实现 | 34 feature（3 场景）；真机 Open-Meteo 请求/定位待手工验收 |
+| F-88 | 精选壁纸画廊与壁纸修复 | `homepage.js` `FEATURED_WALLPAPERS`/元数据 + `home.js`/`home.html`/`home.css` + `docs/operations/wallpaper-assessment.md` | 10 张原创 CC0 壁纸 + 作者/来源/许可元数据；远程模式清本地元信息；远程图 8 秒超时回退；在线图库仅评估不接入 | 已实现 | 35 feature（4 场景）；MV3 CSP 远程图片待真机确认 |
+| F-89 | 历史接入评审 | 本台账 §12 | 默认不申请 history 权限、本轮不实现；记录未来接入红线与「临时区不并入 sites」约束 | 已实现（评审） | 文档记录，无代码/门禁改动 |
+| F-90 | 文档与门禁 | 本台账 + `test-matrix.md` + `PRIVACY.md` + `backup-guide.md` + `wallpaper-assessment.md` | BDD 325 场景；六项门禁 + E2E；未真机证据一律「已实现」 | 已实现 | 本轮门禁全绿；见执行报告 |
+
+BDD 场景总数：325/325 PASS（基线 301 → 本轮 +24）。**未取得真机/CI E2E 证据前，本轮状态均为「已实现」而非「已验证」。**
+
+**待用户拍板的隐私/红线口径（延续 §11 F-79）**：F-86 外链音乐 iframe、F-87 天气 Open-Meteo 为本轮新增的两类运行时出站（非代码 fetch 标签数据；音乐为平台 iframe 资源，天气为白名单域名单次请求）。二者均不写源码字面量（协议常量 P 拼接 / C12 白名单域名），但会向第三方暴露网络环境信息，需产品/用户确认后决定是否正式纳入红线白名单。

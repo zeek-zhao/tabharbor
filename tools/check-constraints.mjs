@@ -42,16 +42,16 @@ const RULES = [
   {
     id: "C11",
     re: /\bfetch\s*\(|XMLHttpRequest\b/g,
-    desc: "代码主动网络出站（红线 7 修订白名单：仅 GitHub 备份模块）",
-    allowFiles: ["src/core/import-export.js"],
+    desc: "代码主动网络出站（白名单：GitHub 备份 + 天气 Open-Meteo）",
+    allowFiles: ["src/core/import-export.js", "src/core/weather.js"],
   },
   {
     id: "C12",
-    re: /https?:\/\/(?!api\.github\.com)/g,
-    // 2026-11-25 红线例外：用户主动输入的 https 图片壁纸链接（运行时数据，不落源码字面量）
-    // 由 home.js 经 normalizeWallpaperUrl 校验后以 CSS url() 加载，不是代码硬编码出站；
-    // 本规则继续禁止源码中出现任何非 GitHub 的协议字面量，故无需为该例外开 allowFiles。
-    desc: "源码出站 URL 必须是 https://api.github.com（红线 7 修订）",
+    // 2026-11-26 出站白名单新增 Open-Meteo（仅天气模块使用）：api.open-meteo.com /
+    // geocoding-api.open-meteo.com。manifest.json 的可选主机权限字符串由此豁免。
+    // 远程壁纸/外链音乐均为用户运行时输入的 URL，不落源码字面量，仍被本规则禁止硬编码。
+    re: /https?:\/\/(?!api\.github\.com|api\.open-meteo\.com|geocoding-api\.open-meteo\.com)/g,
+    desc: "源码出站 URL 白名单：GitHub 备份 + Open-Meteo 天气",
     allowFiles: ["src/core/import-export.js"],
   },
 ];
@@ -105,5 +105,7 @@ for (const h of hits) {
   console.log(h.file.padEnd(46) + String(h.line).padEnd(6) + h.rule.padEnd(7) + h.desc);
   console.log("    > " + h.code);
 }
-console.log("\n受限例外：fetch/XHR 仅限 src/core/backup-core.js；书签 API 无例外。");
+console.log(
+  "\n受限例外：fetch/XHR 仅限 src/core/import-export.js（GitHub 备份）与 src/core/weather.js（Open-Meteo 天气）；书签 API 无例外。"
+);
 process.exit(1);

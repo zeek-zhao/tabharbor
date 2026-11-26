@@ -108,9 +108,19 @@ export async function removeSeedTab(chromeApi, seedId, keepTabId) {
 // D17：只信 tabId，无 URL 兜底；导入/未绑定叶子无 tabId 时一律新建独立标签页（D18）。
 // D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
+  // 2026-11-26 P0（口径确认）：openTabsInBackground=true 时后台打开，焦点留在插件。
+  // - 命中已开标签：不 tabs.update(active) / windows.update(focused)，返回 backgrounded:true；
+  // - 新建标签：tabs.create 显式 active:false（后台）；
+  // 仅当用户显式"聚焦网页"动作（opts.focus === true）时才激活+聚焦（旧行为）。
+  // opts.background 默认 false 保持底层单测旧契约；UI 层按 settings.openTabsInBackground 传入。
+  const background = opts.background === true && opts.focus !== true;
   const tabs = await chromeApi.tabs.query({});
   const hit = node.tabId != null ? tabs.find((t) => t.id === node.tabId) : undefined;
   if (hit) {
+    if (background) {
+      // 后台模式：已开标签仅确保存在，不抢焦点、不切换浏览器激活标签与窗口。
+      return { backgrounded: true, tabId: hit.id };
+    }
     await chromeApi.tabs.update(hit.id, { active: true });
     await chromeApi.windows.update(hit.windowId, { focused: true });
     return { focused: true };
@@ -130,10 +140,11 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       host.seedId =
         made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
     }
+    const activeOpt = background ? { active: false } : {};
     const created =
       host.windowId != null
-        ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
-        : await chromeApi.tabs.create({ url: node.url });
+        ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId, ...activeOpt })
+        : await chromeApi.tabs.create({ url: node.url, ...activeOpt });
     const tabId = created && created.id != null ? created.id : undefined;
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
     return {
@@ -147,10 +158,16 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
   // P0-1：复用已有真实窗口（非 rebound）时，查该窗口激活标签作为锚点插到右侧；
   // 新建窗口（rebound）只有 seed 空白页，不指定索引，保持自然追加后清理 seed。
   const insert = host.rebound ? {} : await queryInsertAnchor(chromeApi, host.windowId);
+  const activeOpt = background ? { active: false } : {};
   const created =
     host.windowId != null
-      ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId, ...insert })
-      : await chromeApi.tabs.create({ url: node.url, ...insert });
+      ? await chromeApi.tabs.create({
+          url: node.url,
+          windowId: host.windowId,
+          ...insert,
+          ...activeOpt,
+        })
+      : await chromeApi.tabs.create({ url: node.url, ...insert, ...activeOpt });
   const tabId = created && created.id != null ? created.id : undefined;
   // O3/D24：目标标签建好后再清理新窗口自带的空白 seed，避免误关窗口/误删目标标签
   if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);

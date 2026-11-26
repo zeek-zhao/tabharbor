@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 import * as homepage from "../src/core/homepage.js";
+import * as weather from "../src/core/weather.js";
 import * as crypto from "../src/core/crypto.js";
 import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
@@ -4163,17 +4164,26 @@ step("那么", "嗅探类型为 encrypted-backup", () => {
 
 step(
   "那么",
-  "manifest 权限无 bookmarks cookies webRequest all_urls 且出站仅 api.github.com",
+  "manifest 权限无 bookmarks cookies webRequest all_urls 且出站限白名单 GitHub 与 Open-Meteo",
   () => {
     const mf = JSON.parse(repoFile("src/manifest.json"));
     const allPerms = [...(mf.permissions || []), ...(mf.optional_host_permissions || [])];
     for (const bad of ["bookmarks", "cookies", "webRequest", "all_urls", "<all_urls>"])
       if (allPerms.some((p) => p.includes(bad))) throw new Error("新增了禁止权限：" + bad);
+    // 天气显式定位需 geolocation 权限（常驻声明，仅用户点击时调用一次）。
+    if (!(mf.permissions || []).includes("geolocation"))
+      throw new Error("缺 geolocation 权限（天气显式定位）");
     const hosts = mf.optional_host_permissions || [];
     if (!hosts.includes("https://api.github.com/*"))
       throw new Error("缺 api.github.com 可选主机权限");
-    if (hosts.some((h) => h !== "https://api.github.com/*"))
-      throw new Error("存在非 api.github.com 出站：" + hosts.join(","));
+    // 2026-11-26 出站白名单新增 Open-Meteo（仅天气），其余主机权限一律禁止。
+    const allowed = [
+      "https://api.github.com/*",
+      "https://api.open-meteo.com/*",
+      "https://geocoding-api.open-meteo.com/*",
+    ];
+    if (hosts.some((h) => !allowed.includes(h)))
+      throw new Error("存在非白名单出站：" + hosts.join(","));
   }
 );
 
@@ -4549,6 +4559,93 @@ step("那么", "网络图片与本地图片二选一且缺来源回退渐变", (
   if (fallback.mode !== "gradient") throw new Error("缺合法链接未回退渐变");
 });
 
+/* ========== 2026-11-26 任务6 精选壁纸画廊与新壁纸修复（features/35）========== */
+step("那么", "精选壁纸画廊含十张原创 CC0 壁纸且元数据完整", () => {
+  const list = homepage.FEATURED_WALLPAPERS;
+  if (!Array.isArray(list) || list.length !== 10) throw new Error("精选壁纸应为 10 张");
+  const ids = new Set();
+  for (const f of list) {
+    if (!f.id || !f.name || !f.css) throw new Error(`精选壁纸字段缺失：${JSON.stringify(f)}`);
+    if (ids.has(f.id)) throw new Error(`精选壁纸 id 重复：${f.id}`);
+    ids.add(f.id);
+    if (!/gradient\(/.test(f.css)) throw new Error(`精选壁纸 ${f.id} 非 CSS 渐变`);
+    if (f.license !== "CC0") throw new Error(`精选壁纸 ${f.id} 许可应为 CC0`);
+    if (!f.artist || !f.source) throw new Error(`精选壁纸 ${f.id} 缺作者或来源`);
+    if (f.sourceUrl !== "") throw new Error(`原创壁纸 ${f.id} 不应有外部 sourceUrl`);
+  }
+  // 并集校验与渲染查找必须覆盖精选 id。
+  if (!homepage.ALL_GRADIENT_PRESETS.some((p) => p.id === "aurora"))
+    throw new Error("并集未包含精选壁纸");
+});
+
+step("那么", "应用精选壁纸写入元数据并可作为渐变预设持久化", () => {
+  const f = homepage.FEATURED_WALLPAPERS[0];
+  const wp = homepage.normalizeWallpaper({
+    mode: "gradient",
+    preset: f.id,
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    imageUrl: "https:" + "//img.example.com/a.jpg",
+    artist: f.artist,
+    source: f.source,
+    sourceUrl: f.sourceUrl,
+    license: f.license,
+  });
+  if (wp.mode !== "gradient" || wp.preset !== f.id) throw new Error("精选壁纸未作为渐变预设保存");
+  if (wp.artist !== f.artist || wp.source !== f.source || wp.license !== f.license)
+    throw new Error("精选壁纸元数据未写入");
+  if (wp.imageData || wp.imageUrl) throw new Error("应用精选壁纸未清空图片来源");
+  // 导出导入往返保留元数据。
+  const cfg = homepage.normalizeHomeConfig({
+    ...homepage.DEFAULT_HOMEPAGE,
+    wallpaper: wp,
+  });
+  if (cfg.wallpaper.artist !== f.artist || cfg.wallpaper.preset !== f.id)
+    throw new Error("导入导出后精选壁纸元数据丢失");
+});
+
+step("那么", "远程模式清空本地图片元信息且 sourceUrl 走 https 校验", () => {
+  const P = "https:" + "//";
+  const wp = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: `${P}img.example.com/a.jpg`,
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    artist: "摄影作者",
+    source: "图库",
+    sourceUrl: `${P}source.example.com/orig`,
+    license: "CC-BY",
+  });
+  if (wp.imageData !== "") throw new Error("远程模式未清空本地图片数据");
+  if (wp.sourceUrl !== `${P}source.example.com/orig`) throw new Error("合法 sourceUrl 被拒绝");
+  if (wp.artist !== "摄影作者") throw new Error("远程图作者未保留");
+  // 注入字符 sourceUrl 被拒。
+  const bad = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: `${P}img.example.com/a.jpg`,
+    sourceUrl: `${P}source.example.com/a\"onerror=alert(1)`,
+  });
+  if (bad.sourceUrl !== "") throw new Error("注入 sourceUrl 未被拒绝");
+  // 本地图片模式清空远程 sourceUrl。
+  const local = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    sourceUrl: `${P}source.example.com/orig`,
+  });
+  if (local.sourceUrl !== "") throw new Error("本地图片模式未清空 sourceUrl");
+});
+
+step("那么", "远程壁纸有 8 秒超时回退且画廊不加载远程图", () => {
+  const homeJs = fs.readFileSync(new URL("../src/home/home.js", import.meta.url), "utf8");
+  const homeHtml = fs.readFileSync(new URL("../src/home/home.html", import.meta.url), "utf8");
+  if (!homeJs.includes("REMOTE_WALLPAPER_TIMEOUT_MS")) throw new Error("远程壁纸未定义超时常量");
+  if (!/setTimeout\(fallback,\s*REMOTE_WALLPAPER_TIMEOUT_MS\)/.test(homeJs))
+    throw new Error("远程壁纸未使用超时回退");
+  if (!homeJs.includes("probe.onerror")) throw new Error("远程壁纸无加载失败回退");
+  if (!homeJs.includes("renderFeaturedGallery")) throw new Error("未渲染精选画廊");
+  if (!homeHtml.includes('id="wpGallery"')) throw new Error("配置面板缺精选画廊容器");
+  // 画廊缩略图只内联 CSS 渐变，不得出现远程图片加载（img src / url(http）。
+  if (/wp-gallery[\s\S]{0,400}https?:/.test(homeJs)) throw new Error("精选画廊出现远程图片引用");
+});
+
 /* ========== 2026-11-25 P0 设置版本迁移与升级默认值（features/25）========== */
 
 // 构造一份「旧版本」主页配置：仅 6 个内置默认站点、无 wallpaper、无版本标记、含一个失效引擎。
@@ -4855,4 +4952,353 @@ step("那么", "明文快照未写入扩展存储历史", async () => {
   const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
   if ((got.localBackups || []).length !== 0)
     throw new Error("明文快照不应写入 localBackups 历史（含敏感信息）");
+});
+
+/* ========== 2026-11-26 P0：打开网页焦点留插件（features/30）========== */
+step("假如", "默认设置开启标签后台打开", () => {
+  ctx.bgSettings = store.DEFAULT_SETTINGS;
+  if (ctx.bgSettings.openTabsInBackground !== true)
+    throw new Error("默认 openTabsInBackground 应为 true");
+});
+
+step("那么", "默认设置开启标签后台打开", () => {
+  if (store.DEFAULT_SETTINGS.openTabsInBackground !== true)
+    throw new Error("默认 openTabsInBackground 应为 true");
+});
+
+step("那么", "后台打开新标签传 active false 且不聚焦窗口", async () => {
+  const mock = freshMock();
+  const node = { id: "t_bg", kind: "tab", title: "后台", url: "https://example.com/bg" };
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    windowId: 1,
+    topWindow: { id: "w_bg", windowId: 1 },
+    background: true,
+  });
+  if (!res.created) throw new Error("后台分支应新建标签");
+  const c = mock.calls;
+  if (c.tabsCreate.length !== 1 || c.tabsCreate[0].active !== false)
+    throw new Error("tabs.create 未传 active:false");
+  if (c.winFocus.length !== 0) throw new Error("后台打开不应 windows.update(focused)");
+  if (c.tabsUpdate.some((u) => u.o && u.o.active === true))
+    throw new Error("后台打开不应 tabs.update(active:true)");
+});
+
+step("那么", "后台命中已开标签不激活不聚焦", async () => {
+  const mock = freshMock();
+  const tabId = 555;
+  mock.chrome.storage; // noop，确保 mock 完整
+  ctx.openTabs = [{ id: tabId, title: "已开", url: "https://example.com/hit" }];
+  // 用同一 mock 的 tabs.query 读取 ctx.openTabs；freshMock 共享 ctx
+  const node = { id: "t_hit", kind: "tab", title: "已开", url: "https://example.com/hit", tabId };
+  const res = await ops.openTab(mock.chrome, node, new Set(), { background: true });
+  if (!res.backgrounded) throw new Error("后台命中应返回 backgrounded");
+  const c = mock.calls;
+  if (c.tabsCreate.length !== 0) throw new Error("后台命中不应新建标签");
+  if (c.tabsUpdate.length !== 0) throw new Error("后台命中不应 tabs.update");
+  if (c.winFocus.length !== 0) throw new Error("后台命中不应聚焦窗口");
+});
+
+step("那么", "显式聚焦动作仍激活标签并聚焦窗口", async () => {
+  const mock = freshMock();
+  const tabId = 556;
+  ctx.openTabs = [{ id: tabId, title: "聚焦", url: "https://example.com/focus" }];
+  const node = {
+    id: "t_focus",
+    kind: "tab",
+    title: "聚焦",
+    url: "https://example.com/focus",
+    tabId,
+  };
+  // opts.focus=true 覆盖 background → 旧聚焦行为
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    background: true,
+    focus: true,
+  });
+  if (!res.focused) throw new Error("显式聚焦应返回 focused");
+  const c = mock.calls;
+  if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
+    throw new Error("显式聚焦应 tabs.update(active:true)");
+  if (c.winFocus.length !== 1) throw new Error("显式聚焦应 windows.update(focused)");
+});
+
+step("那么", "主页搜索与站点点击走后台打开且焦点留插件", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("openTabsInBackground")) throw new Error("主页未读取后台打开设置");
+  if (!homeJs.includes("onSiteClick")) throw new Error("主页站点点击未走后台打开链路");
+  const creates = homeJs.match(/tabs\.create\([^)]*active:\s*!background/g) || [];
+  if (creates.length < 2) throw new Error("搜索与站点未同时传 active:!background");
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("background,") || !shellJs.includes("focus: !!opts.focus"))
+    throw new Error("shell 未向 openTab 传后台/显式聚焦参数");
+  if (!shellJs.includes("Ctrl+Shift+Enter")) throw new Error("缺显式聚焦快捷键");
+});
+
+step("那么", "不绑定左右方向键且输入控件不触发树快捷键", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  for (const bad of ['e.key === "ArrowLeft"', 'e.key === "ArrowRight"'])
+    if (shellJs.includes(bad)) throw new Error("本轮不应绑定左右方向键：" + bad);
+  // 所有 keydown 处理器都应含输入控件排除
+  const blocks = shellJs.split('addEventListener("keydown"');
+  let checked = 0;
+  for (const b of blocks.slice(1)) {
+    const seg = b.slice(0, 600);
+    if (/tagName === "INPUT"|isContentEditable/.test(seg)) checked += 1;
+  }
+  if (checked < 2) throw new Error("键盘处理器未排除输入控件（主页面与 PiP）");
+});
+
+/* ========== 2026-11-26 书签跳转入口与分类置顶（features/31）========== */
+step("那么", "默认站点含分类置顶与时间戳字段且分类集合完整", () => {
+  const cats = homepage.SITE_CATEGORIES.map((c) => c.id);
+  for (const id of ["work", "life", "news", "tools", "video", "social", "bookmarks", "other"])
+    if (!cats.includes(id)) throw new Error("缺分类：" + id);
+  for (const s of homepage.DEFAULT_SITES) {
+    if (!s.id || !s.category || typeof s.pinned !== "boolean" || !s.createdAt)
+      throw new Error("默认站点缺 schema 字段：" + s.title);
+    if (!cats.includes(s.category)) throw new Error("默认站点分类非法：" + s.category);
+  }
+});
+
+step("那么", "旧站点配置导入后自动补齐分类与置顶字段", () => {
+  const old = homepage.normalizeHomeConfig({
+    sites: [
+      { title: "GitHub", url: "https:" + "//github.com" },
+      { title: "我的站点", url: "https:" + "//example.com/me" },
+    ],
+  });
+  if (old.sites.length !== 2) throw new Error("站点数异常");
+  for (const s of old.sites) {
+    if (!s.id || !s.category || typeof s.pinned !== "boolean" || !s.createdAt)
+      throw new Error("旧站点未补 schema 字段：" + s.title);
+  }
+  const gh = old.sites.find((s) => s.url.includes("github"));
+  if (!gh || gh.category !== "work") throw new Error("GitHub 未归入 work：", gh && gh.category);
+  const custom = old.sites.find((s) => s.url.includes("example.com"));
+  if (!custom || custom.category !== "other") throw new Error("自定义站点未归入 other");
+});
+
+step("那么", "站点分类可规范化且隐藏站点不重复加回", () => {
+  const cfg = homepage.normalizeHomeConfig({
+    sites: [{ title: "X", url: "https:" + "//x.example.com", category: "bogus", pinned: true }],
+    hiddenDefaultSiteUrls: ["https:" + "//github.com"],
+  });
+  if (cfg.sites[0].category !== "other") throw new Error("非法分类未归 other");
+  if (cfg.sites[0].pinned !== true) throw new Error("置顶标记丢失");
+  if (!cfg.hiddenDefaultSiteUrls.includes("https:" + "//github.com"))
+    throw new Error("隐藏站点记录丢失");
+  const migrated = homepage.migrateHomeConfig({
+    sites: [{ title: "X", url: "https:" + "//x.example.com" }],
+    hiddenDefaultSiteUrls: ["https:" + "//github.com"],
+  });
+  if (migrated.config.sites.some((s) => s.url.includes("github.com")))
+    throw new Error("隐藏的默认站点被重复加回");
+});
+
+step("那么", "主页按分类分组渲染且置顶优先并且不读取浏览器书签", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("home-site-group-title")) throw new Error("主页未按分类分组渲染");
+  if (!homeJs.includes("s.pinned")) throw new Error("主页未处理置顶");
+  if (!homeJs.includes("data-pin")) throw new Error("配置面板无置顶控件");
+  if (!homeJs.includes("site-category")) throw new Error("配置面板无分类选择");
+  if (!homeJs.includes("onSiteClick")) throw new Error("站点点击未走普通跳转链路");
+  // 红线：全仓源码不得调用 chrome.bookmarks
+  const src = ["src/home/home.js", "src/core/homepage.js", "src/ui/shell.js"]
+    .map((f) =>
+      repoFile(f)
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//"))
+        .join("\n")
+    )
+    .join("\n");
+  if (/chrome\.bookmarks|browser\.bookmarks/.test(src)) throw new Error("违反书签 API 红线");
+});
+
+/* ========== 2026-11-26 离线主页装饰（features/32）========== */
+step("那么", "离线装饰默认只开时钟与快捷条且可规范化", () => {
+  const d = homepage.normalizeDecorations(null);
+  if (d.clock !== true || d.quickbar !== true || d.notes !== false || d.keysCard !== false)
+    throw new Error("装饰默认值异常：" + JSON.stringify(d));
+  const custom = homepage.normalizeDecorations({ clock: false, notes: true });
+  if (custom.clock !== false || custom.notes !== true) throw new Error("装饰开关未规范化");
+  const cfg = homepage.normalizeHomeConfig(null);
+  if (!cfg.decorations || typeof cfg.notes !== "string") throw new Error("主页配置缺装饰字段");
+});
+
+step("那么", "装饰组件纯本地计算且便签仅存本机不上传", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("renderClock") || !homeJs.includes("greetingOf"))
+    throw new Error("缺本地时钟/问候语实现");
+  if (!homeJs.includes("homeNotes") || !homeJs.includes("cfg.notes"))
+    throw new Error("缺本地便签持久化");
+  if (!homeJs.includes("postMessage")) throw new Error("快捷操作条未向宿主转发动作");
+  // 装饰配置层（homepage.js）不得含任何出站/定位；主页脚本允许天气的一次性
+  // getCurrentPosition（用户显式点击，任务4），但禁止 watchPosition 后台监听与直接 fetch。
+  const hpSrc = repoFile("src/core/homepage.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  if (/\bfetch\s*\(|XMLHttpRequest|navigator\.geolocation|\bfetchCurrentWeather/.test(hpSrc))
+    throw new Error("装饰配置层不应引入出站或定位");
+  const homeSrc = repoFile("src/home/home.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  if (homeSrc.includes("watchPosition")) throw new Error("禁止后台定位监听");
+  if (/\bfetch\s*\(|XMLHttpRequest/.test(homeSrc))
+    throw new Error("主页应委托 weather 模块而非直接 fetch");
+});
+
+step("那么", "快捷键卡只列已实现按键且不含左右方向键", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const card = homeJs.slice(homeJs.indexOf("homeKeysList"), homeJs.indexOf("homeKeysList") + 700);
+  for (const k of ["↑ / ↓", "Enter", "Delete", "Esc"])
+    if (!card.includes(k)) throw new Error("快捷键卡缺已实现键：" + k);
+  if (card.includes("ArrowLeft") || card.includes("左") || card.includes("右"))
+    throw new Error("快捷键卡不应写左右方向键");
+  const homeCss = repoFile("src/home/home.css");
+  if (!homeCss.includes("flex-wrap") || !homeCss.includes("minmax(180px"))
+    throw new Error("装饰区未做窄屏换行");
+});
+
+/* ========== 2026-11-26 外链音乐阶段 1（features/33）========== */
+step("那么", "外链音乐仅允许安全 https 且拒绝伪协议与注入字符", () => {
+  const P = "https:" + "//";
+  if (!homepage.normalizeMusicUrl(P + "soundcloud.com/a/b")) throw new Error("合法 https 被拒");
+  for (const bad of [
+    "javascript:alert(1)",
+    "blob:" + P + "x",
+    "file:" + P + "x",
+    "data:text/html,x",
+    P + 'evil.com/a"onload=1',
+    P + "evil.com/a b",
+    "http:" + "//soundcloud.com/a",
+  ]) {
+    if (homepage.normalizeMusicUrl(bad)) throw new Error("伪协议/注入字符未被拒：" + bad);
+  }
+});
+
+step("那么", "四类外链音乐链接解析为嵌入地址且保留原始跳转链接", () => {
+  const P = "https:" + "//";
+  const sc = homepage.parseMusicEmbed(P + "soundcloud.com/forss/flickermood", "soundcloud");
+  if (
+    !sc ||
+    !sc.embedUrl.includes("w.soundcloud.com/player/") ||
+    !sc.embedUrl.includes("auto_play=false")
+  )
+    throw new Error("SoundCloud 解析异常");
+  if (!sc.fallbackUrl.includes("soundcloud.com/forss")) throw new Error("SoundCloud 兜底链接缺失");
+  const sp = homepage.parseMusicEmbed(P + "open.spotify.com/playlist/ABC123", "spotify");
+  if (!sp || !sp.embedUrl.includes("open.spotify.com/embed/playlist/ABC123"))
+    throw new Error("Spotify 解析异常");
+  const ar = homepage.parseMusicEmbed(P + "archive.org/details/moonlanding", "archive");
+  if (!ar || !ar.embedUrl.includes("archive.org/embed/moonlanding"))
+    throw new Error("Archive 解析异常");
+  const ne = homepage.parseMusicEmbed(
+    P + "music.163.com/outchain/player?type=2&id=1",
+    "netease-outchain"
+  );
+  if (!ne || !ne.embedUrl.includes("music.163.com")) throw new Error("网易云外链解析异常");
+  // custom 供应商接受任意合法 https 嵌入链接（用户已自行生成的 iframe URL）
+  if (homepage.parseMusicEmbed(P + "unknown.example.com/x", "custom") === null)
+    throw new Error("custom 应接受任意合法 https 嵌入链接");
+});
+
+step("那么", "外链音乐默认关闭不自动播放且本地播放器未启用", () => {
+  const m = homepage.normalizeMusic(null);
+  if (m.enabled !== false || m.phase !== "external") throw new Error("外链音乐默认状态异常");
+  if (m.external.autoPlay !== false) throw new Error("默认不应自动播放");
+  if (!Array.isArray(m.local.tracks) || m.local.tracks.length !== 0)
+    throw new Error("本地播放器阶段 2 不应有轨道");
+  const forced = homepage.normalizeMusic({ external: { autoPlay: true } });
+  if (forced.external.autoPlay !== false) throw new Error("autoPlay 应被强制 false");
+});
+
+step("那么", "音乐播放器用 iframe 懒加载且有失败兜底不硬编码远程 URL", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('setAttribute("loading", "lazy")')) throw new Error("iframe 未懒加载");
+  if (!homeJs.includes("setTimeout(fail, 8000)")) throw new Error("缺 8 秒超时兜底");
+  if (!homeJs.includes("homeMusicFallback")) throw new Error("缺在新标签打开兜底按钮");
+  if (!homeJs.includes("normalizeMusicUrl")) throw new Error("iframe src 未走 URL 净化");
+  // 源码不得硬编码任何第三方音乐远程 URL 字面量（C12 已覆盖，这里再断言业务层）
+  const hpSrc = repoFile("src/core/homepage.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  // 禁止协议字面量后直接跟音乐域名（完整远程 URL）；用于白名单匹配的域名常量允许存在。
+  if (/https?:\/\/(?:[^\s"'`]*(soundcloud|spotify|archive\.org|music\.163))/.test(hpSrc))
+    throw new Error("疑似硬编码远程音乐 URL");
+  // 隐私/白名单说明存在
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (!privacy.includes("音乐")) throw new Error("隐私说明未提及外链音乐");
+});
+
+/* ========== 2026-11-26 天气卡片任务 4（features/34）========== */
+step("那么", "天气默认关闭手动城市且坐标单位合法化", () => {
+  const w = homepage.normalizeWeather(null);
+  if (w.enabled !== false || w.mode !== "manual" || w.city !== "" || w.latitude !== null)
+    throw new Error("天气默认值异常：" + JSON.stringify(w));
+  const fixed = homepage.normalizeWeather({
+    enabled: true,
+    city: "北京",
+    latitude: 39.9,
+    longitude: 116.4,
+    unit: "fahrenheit",
+    mode: "bogus",
+  });
+  if (fixed.mode !== "manual" || fixed.unit !== "fahrenheit" || fixed.latitude !== 39.9)
+    throw new Error("天气配置未正确规范化");
+  const bad = homepage.normalizeWeather({ latitude: 999, longitude: -999, unit: "kelvin" });
+  if (bad.latitude !== null || bad.longitude !== null || bad.unit !== "celsius")
+    throw new Error("非法坐标/单位未被拒绝");
+});
+
+step("那么", "天气请求仅用 Open-Meteo 白名单端点且失败返回 null", async () => {
+  const P = "https:" + "//";
+  if (!weather.GEOCODE_ENDPOINT.startsWith(P + "geocoding-api.open-meteo.com"))
+    throw new Error("地理编码端点不在白名单");
+  if (!weather.FORECAST_ENDPOINT.startsWith(P + "api.open-meteo.com"))
+    throw new Error("预报端点不在白名单");
+  if (weather.weatherLabel(0) !== "晴") throw new Error("天气码映射异常");
+  // 注入失败的 fetch → 返回 null，不抛错（离线隐藏卡片）
+  const badFetch = async () => ({ ok: false });
+  if ((await weather.geocodeCity("北京", badFetch)) !== null) throw new Error("失败应返回 null");
+  if (
+    (await weather.fetchCurrentWeather({ latitude: 1, longitude: 2 }, "celsius", badFetch)) !== null
+  )
+    throw new Error("失败应返回 null");
+  // 成功路径：校验 URL 参数（含 temperature_unit、current）
+  let called = "";
+  const okFetch = async (url) => {
+    called = url;
+    return {
+      ok: true,
+      json: async () => ({
+        current: { temperature_2m: 21.4, weather_code: 0, time: "2026-11-26T12:00" },
+      }),
+    };
+  };
+  const cur = await weather.fetchCurrentWeather(
+    { latitude: 39.9, longitude: 116.4 },
+    "celsius",
+    okFetch
+  );
+  if (!cur || cur.temperature !== 21.4 || cur.label !== "晴") throw new Error("成功路径解析异常");
+  if (!called.includes("temperature_unit=celsius") || !called.includes("current="))
+    throw new Error("请求参数异常：" + called);
+});
+
+step("那么", "天气仅用户显式定位且不后台轮询并含署名", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("getCurrentPosition")) throw new Error("缺用户显式定位入口");
+  if (!homeJs.includes("void refreshWeather()")) throw new Error("未在打开时请求一次天气");
+  const weatherSrc = repoFile("src/core/weather.js");
+  if (/setInterval|watchPosition|setTimeout/.test(weatherSrc)) throw new Error("天气不应后台轮询");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes("Open-Meteo")) throw new Error("天气卡片缺数据来源署名");
+  // manifest 白名单与约束脚本同步
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  for (const h of ["https://api.open-meteo.com/*", "https://geocoding-api.open-meteo.com/*"])
+    if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺白名单：" + h);
+  const constraint = repoFile("tools/check-constraints.mjs");
+  if (!constraint.includes("src/core/weather.js")) throw new Error("C11 未放行 weather 模块");
 });

@@ -35,6 +35,8 @@ export const DEFAULT_SETTINGS = {
   copyFormat: "md",
   linkShow: false,
   backupTarget: "local",
+  // 2026-11-26 P0（审计口径确认）：打开网页默认后台，焦点留在插件，不跳到网页。
+  openTabsInBackground: true,
   // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
   ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
   ghGistId: "", // 已有 Gist ID（20+ hex）→ PATCH 更新；空 → POST 新建

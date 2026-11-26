@@ -10,9 +10,14 @@
     "contextMenus",
     "alarms",
     "commands",
-    "downloads"
+    "downloads",
+    "geolocation"
   ],
-  "optional_host_permissions": ["https://api.github.com/*"],
+  "optional_host_permissions": [
+    "https://api.github.com/*",
+    "https://api.open-meteo.com/*",
+    "https://geocoding-api.open-meteo.com/*"
+  ],
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"

@@ -226,7 +226,7 @@ try {
     document.querySelector("#btnKeys").click();
     return document.querySelectorAll("#keysList .kv").length;
   });
-  assert.equal(kvCount, 14, `快捷键表条目数异常: ${kvCount}`);
+  assert.equal(kvCount, 15, `快捷键表条目数异常: ${kvCount}`);
   await win.evaluate(() => {
     document.querySelector('[data-modal-close="modalKeys"]').click();
     document.querySelector("#btnGuide").click();
@@ -238,7 +238,7 @@ try {
   await win.waitForFunction(() => document.querySelector("#modalGuide").hidden, undefined, {
     timeout: 5000,
   });
-  console.log("E2E 5/7 快捷键表（14 项）与上手指南弹窗通过");
+  console.log("E2E 5/7 快捷键表（15 项）与上手指南弹窗通过");
 
   // 回收站角标：追加一条 trash 记录 → onChanged 实时更新角标；弹窗渲染空态/条目
   await win.evaluate(() =>

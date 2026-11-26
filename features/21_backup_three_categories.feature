@@ -68,7 +68,7 @@
 
   # 8.1-10 权限红线：不新增出站域名与额外权限
   场景: 备份重构未新增出站地址与额外权限
-    那么 manifest 权限无 bookmarks cookies webRequest all_urls 且出站仅 api.github.com
+    那么 manifest 权限无 bookmarks cookies webRequest all_urls 且出站限白名单 GitHub 与 Open-Meteo
 
   # 8.2 三宿主 UI 结构一致
   场景: 侧边栏独立窗口与 PiP 备份面板三卡片结构一致

@@ -1,8 +1,8 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24，2026-11-25 第三轮审计修复复核。BDD 301 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，2026-11-26 口径确认与主页功能增补复核。BDD 325 场景 + 真机 Chromium E2E + 六项门禁。
 
-## 1. BDD 场景分布（共 301，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
+## 1. BDD 场景分布（共 325，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
 
 | feature | 场景数 | 覆盖域 |
 | --- | --- | --- |
@@ -32,6 +32,12 @@
 | 27_bookmark_tree_tolerance | 3 | 纯书签树 JSON 容错解析、shell 分流、版本不符快照不静默合并 |
 | 28_local_image_interaction | 2 | 本地图片选择/预览/移除拆分、导入确认文案含壁纸 |
 | 29_bounds_merge_and_drag_guard | 2 | saveBounds 合并写入、拖拽监听解绑与失焦兜底 |
+| 30_background_open_focus | 6 | 后台打开焦点留插件（默认后台、Ctrl+Shift+Enter 显式聚焦、主页搜索/站点后台） |
+| 31_bookmark_navigation_categories | 4 | 常用网址普通跳转 + 分类置顶（不调用 chrome.bookmarks、分类分组、置顶排序） |
+| 32_offline_home_decorations | 3 | 离线主页装饰（时钟/日期/问候、快捷条、本地便签、快捷键提示卡，纯本地） |
+| 33_external_music | 4 | 外链音乐播放器阶段 1（iframe 卡片、供应商白名单、安全 https、失败兜底、懒加载不自动播） |
+| 34_weather_card | 3 | 天气卡片（手动城市优先、Open-Meteo 白名单单次请求、显式定位、失败隐藏+署名） |
+| 35_featured_wallpaper_gallery | 4 | 精选壁纸画廊（10 张原创 CC0 + 元数据、远程模式清本地元信息、8 秒超时回退） |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
 | 03_storage | 6 | 存储读写、实时广播 |
 | 10_samples | 3 | 样例数据合法性、指南当前状态断言 |
@@ -50,7 +56,10 @@
 | 13/7 | 导入演练（合并导入 + 非法拒绝） |
 | 合并审计 PiP 宿主化 | PiP 内设置分类/备份卡片/主题广播/回收站/重命名 |
 | 14/7 | 历史跳转 + PiP 置顶同构树 |
+| 5/7（快捷键表 15 项） | 快捷键表随「后台打开/显式聚焦」更新为 15 项，与上手指南弹窗一致（任务 1） |
 | N1/N3/F2/F4–F6/P0-B/D2/D4/D5/D12/D11/D18/D14 | 窗口互转四连、favicon、windowId 持久化、类型判定、折叠悬展、升窗、HTML 导入、打开态防串绑 |
+
+**本轮（2026-11-26）BDD 静态契约覆盖**（E2E 未逐项真机，一律「已实现」）：后台打开与 Ctrl+Shift+Enter 显式聚焦（30）、常用网址普通跳转 + 分类置顶且不调用 `chrome.bookmarks`（31）、离线装饰纯本地（32）、外链音乐白名单与 iframe 懒加载（33）、天气 Open-Meteo 白名单单次请求与显式定位（34）、精选壁纸画廊与远程 8 秒超时回退（35）。真机逐项交互待手工验收。
 
 环境要求：`npx playwright install chromium --with-deps`。CI 的 `e2e` job 与 release 工作流均已覆盖。
 
@@ -60,7 +69,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 301/301 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 325/325 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -70,7 +79,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 301 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 325 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |

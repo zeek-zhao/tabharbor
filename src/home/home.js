@@ -3,6 +3,7 @@
 // 配置（引擎 / 自定义引擎 / 常用网址增删改排序）改动即持久化，主题跟随插件深/浅色。
 import * as store from "../core/store.js";
 import * as hp from "../core/homepage.js";
+import * as weather from "../core/weather.js";
 
 const $ = (sel) => document.querySelector(sel);
 const chromeApi = globalThis.chrome;
@@ -52,9 +53,12 @@ async function persist() {
 // 2026-11-25 壁纸：仅作用于内部主页 body；渐变/本地图片/用户主动输入的 https 图片 + scrim 遮罩。
 // 远程图片是用户显式输入的 https 例外（非代码硬编码、非 fetch/XHR）；加载失败时回退渐变。
 function wallpaperGradient(wp) {
-  const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
+  const preset = hp.ALL_GRADIENT_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
   return preset.css;
 }
+
+// 远程图片 8 秒超时未完成加载则回退渐变（失败兜底，避免长时间空白/悬挂请求）。
+const REMOTE_WALLPAPER_TIMEOUT_MS = 8000;
 
 function renderWallpaper() {
   const wp = cfg.wallpaper || hp.DEFAULT_WALLPAPER;
@@ -72,19 +76,42 @@ function renderWallpaper() {
   } else if (wp.mode === "url-image" && wp.imageUrl) {
     // 链接在 normalizeWallpaperUrl 已拒绝引号/反斜杠/空白/括号/尖括号，避免 CSS 注入。
     body.style.setProperty("--wp-image", `url("${wp.imageUrl}")`);
-    // 远程图片可能 404/被墙：预加载失败回退内置渐变，并给出可读提示。
+    // 远程图片可能 404/被墙/悬挂：预加载失败或 8 秒超时回退内置渐变，并给出可读提示。
     const probe = new Image();
-    probe.onerror = () => {
+    let settled = false;
+    const fallback = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(remoteTimer);
       if ((cfg.wallpaper || {}).mode !== "url-image") return;
       body.setAttribute("data-wallpaper-mode", "gradient");
       body.style.removeProperty("--wp-image");
       body.style.setProperty("--wp-gradient", wallpaperGradient(wp));
-      say("网络壁纸加载失败，已回退内置渐变");
+      say("网络壁纸加载失败或超时，已回退内置渐变");
     };
+    const remoteTimer = setTimeout(fallback, REMOTE_WALLPAPER_TIMEOUT_MS);
+    probe.onload = () => {
+      settled = true;
+      clearTimeout(remoteTimer);
+    };
+    probe.onerror = fallback;
     probe.src = wp.imageUrl;
   } else {
     body.style.setProperty("--wp-gradient", wallpaperGradient(wp));
   }
+}
+
+// 精选壁纸画廊：每张缩略图为纯 CSS 渐变（不加载远程图），点击即应用并携带作者/来源/许可元数据。
+function renderFeaturedGallery(wp) {
+  const gallery = $("#wpGallery");
+  if (!gallery) return;
+  gallery.innerHTML = hp.FEATURED_WALLPAPERS.map((f) => {
+    const active = wp.mode === "gradient" && wp.preset === f.id;
+    return `<button type="button" role="listitem" class="wp-gallery-item${active ? " active" : ""}" data-wp-id="${escapeHtml(f.id)}" aria-label="应用壁纸 ${escapeHtml(f.name)}" title="${escapeHtml(f.name)} · ${escapeHtml(f.artist)} · ${escapeHtml(f.license)}">
+      <span class="wp-gallery-thumb" style="background:${f.css}"></span>
+      <span class="wp-gallery-name">${escapeHtml(f.name)}</span>
+    </button>`;
+  }).join("");
 }
 
 function renderWallpaperControls() {
@@ -96,6 +123,7 @@ function renderWallpaperControls() {
         `<option value="${escapeHtml(p.id)}"${p.id === wp.preset ? " selected" : ""}>${escapeHtml(p.name)}</option>`
     ).join("");
   }
+  renderFeaturedGallery(wp);
   const shownMode = wpEditMode || wp.mode;
   const mode = $("#wpMode");
   if (mode) mode.value = shownMode;
@@ -106,6 +134,9 @@ function renderWallpaperControls() {
   const presetRow = $("#wpPresetRow");
   if (presetRow)
     presetRow.classList.toggle("hidden", shownMode === "image" || shownMode === "url-image");
+  const galleryRow = $("#wpGalleryRow");
+  if (galleryRow)
+    galleryRow.classList.toggle("hidden", shownMode === "image" || shownMode === "url-image");
   const imageRow = $("#wpImageRow");
   if (imageRow) imageRow.classList.toggle("hidden", shownMode !== "image");
   const urlRow = $("#wpUrlRow");
@@ -117,25 +148,39 @@ function renderWallpaperControls() {
   renderWallpaperPreview(wp);
 }
 
-// 壁纸预览块：显示当前来源（渐变名 / 本地图片 / 远程链接），不加载远程图到设置面板本身。
+// 壁纸预览块：显示当前来源（渐变名 / 本地图片 / 远程链接）与元数据，不加载远程图到设置面板本身。
 function renderWallpaperPreview(wp) {
   const box = $("#wpPreview");
   const label = $("#wpPreviewLabel");
+  const metaEl = $("#wpPreviewMeta");
   if (!box || !label) return;
   let text = "未设置（跟随主题）";
   let bg = "";
+  let meta = "";
   if (wp.mode === "gradient") {
-    const preset = hp.WALLPAPER_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
+    const preset =
+      hp.ALL_GRADIENT_PRESETS.find((p) => p.id === wp.preset) || hp.WALLPAPER_PRESETS[0];
     text = `内置渐变：${preset.name}`;
     bg = preset.css;
+    // 精选壁纸显示作者/来源/许可；基础预设作者为空则只显示来源。
+    const bits = [];
+    if (wp.artist) bits.push(wp.artist);
+    if (wp.source) bits.push(wp.source);
+    if (wp.license) bits.push(wp.license);
+    meta = bits.join(" · ");
   } else if (wp.mode === "image" && wp.imageData) {
     text = "本地图片（仅存本机）";
     bg = `url("${wp.imageData}") center/cover`;
   } else if (wp.mode === "url-image" && wp.imageUrl) {
     text = "网络图片链接";
     bg = `url("${wp.imageUrl}") center/cover`;
+    const bits = [];
+    if (wp.artist) bits.push(`作者 ${wp.artist}`);
+    if (wp.sourceUrl) bits.push("含原始链接");
+    meta = bits.join(" · ");
   }
   label.textContent = text;
+  if (metaEl) metaEl.textContent = meta;
   box.style.background = bg;
   box.classList.toggle("has-image", !!bg);
   box.hidden = wp.mode === "none";
@@ -177,7 +222,8 @@ function renderEngines() {
     .join("");
 }
 
-// 常用网址网格（图标 + 标题；点击新标签打开）
+// 常用网址网格（图标 + 标题；点击后台新标签打开）。
+// 2026-11-26：先渲染置顶站点，再按分类分组（SITE_CATEGORIES 顺序），组内保持用户排序。
 function renderSites() {
   const box = $("#homeSites");
   if (!box) return;
@@ -186,12 +232,23 @@ function renderSites() {
     box.innerHTML = `<div class="home-empty"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="t">还没有常用网址</span><span class="d">点击「+ 添加」或在设置里管理常用站点</span></div>`;
     return;
   }
-  box.innerHTML = sites
-    .map(
-      (s, i) =>
-        `<a class="home-site" data-idx="${i}" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(s.url)}"><span class="home-site-icon">${initialOf(s.title)}</span><span class="home-site-title">${escapeHtml(s.title)}</span></a>`
-    )
-    .join("");
+  const siteHtml = (s) =>
+    `<a class="home-site${s.pinned ? " pinned" : ""}" data-idx="${cfg.sites.indexOf(s)}" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(s.url)}"><span class="home-site-icon">${initialOf(s.title)}</span><span class="home-site-title">${escapeHtml(s.title)}</span></a>`;
+  const parts = [];
+  const pinned = sites.filter((s) => s.pinned);
+  if (pinned.length) {
+    parts.push(
+      `<div class="home-site-group"><div class="home-site-group-title">置顶</div><div class="home-sites">${pinned.map(siteHtml).join("")}</div></div>`
+    );
+  }
+  for (const cat of hp.SITE_CATEGORIES) {
+    const inCat = sites.filter((s) => !s.pinned && (s.category || "other") === cat.id);
+    if (!inCat.length) continue;
+    parts.push(
+      `<div class="home-site-group"><div class="home-site-group-title">${escapeHtml(cat.name)}</div><div class="home-sites">${inCat.map(siteHtml).join("")}</div></div>`
+    );
+  }
+  box.innerHTML = parts.join("");
 }
 
 // 配置面板里的可编辑站点列表（编辑/删除/上移/下移）
@@ -203,9 +260,15 @@ function renderSiteEditList() {
     .map((s, i) => {
       const up = i === 0 ? "disabled" : "";
       const down = i === sites.length - 1 ? "disabled" : "";
+      const catOptions = hp.SITE_CATEGORIES.map(
+        (c) =>
+          `<option value="${c.id}"${(s.category || "other") === c.id ? " selected" : ""}>${escapeHtml(c.name)}</option>`
+      ).join("");
       return `<div class="home-cfg-row" data-idx="${i}">
         <input class="edit-input site-title" value="${escapeHtml(s.title)}" aria-label="名称" />
         <input class="edit-input site-url" value="${escapeHtml(s.url)}" aria-label="网址" />
+        <select class="edit-input site-category" aria-label="分类">${catOptions}</select>
+        <button class="mini${s.pinned ? " on" : ""}" data-pin title="${s.pinned ? "取消置顶" : "置顶"}">${s.pinned ? "★" : "☆"}</button>
         <button class="mini" data-move="up" ${up} title="上移">↑</button>
         <button class="mini" data-move="down" ${down} title="下移">↓</button>
         <button class="mini" data-del-site title="删除">✕</button>
@@ -222,12 +285,351 @@ function onSearch(e) {
   const isUrl = /^https?:\/\//i.test(q) || /^file:\/\//i.test(q);
   const engine = hp.findEngine(cfg, cfg.engine);
   const url = isUrl ? q : hp.engineSearchUrl(engine, q);
-  if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url });
+  // 2026-11-26 P0（口径确认）：主页搜索/站点点击复用后台打开规则，焦点留在主页。
+  // openTabsInBackground 默认 true → active:false；关闭该设置时才前台打开。
+  const background = settings?.openTabsInBackground !== false;
+  if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active: !background });
   else window.location.href = url;
+}
+
+// 常用网址点击：有 chrome.tabs 时拦截默认跳转，按后台规则用 tabs.create 打开。
+function onSiteClick(e) {
+  const a = e.target.closest("a.home-site");
+  if (!a) return;
+  const url = a.getAttribute("href");
+  if (!url || !chromeApi?.tabs?.create) return; // 无扩展 API 时回退 <a target=_blank> 原行为
+  e.preventDefault();
+  const background = settings?.openTabsInBackground !== false;
+  void chromeApi.tabs.create({ url, active: !background });
+}
+
+// ===== 2026-11-26 离线装饰（纯本地计算，不出站、不申请权限）=====
+const WEEKDAYS = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+function greetingOf(hour) {
+  if (hour < 6) return "夜深了，注意休息";
+  if (hour < 11) return "早上好";
+  if (hour < 14) return "中午好";
+  if (hour < 18) return "下午好";
+  return "晚上好";
+}
+function renderClock() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const clock = $("#homeClock");
+  if (clock) clock.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const date = $("#homeDateLine");
+  if (date)
+    date.textContent = `${now.getFullYear()} 年 ${now.getMonth() + 1} 月 ${now.getDate()} 日 · ${WEEKDAYS[now.getDay()]}`;
+  const greet = $("#homeGreeting");
+  if (greet) greet.textContent = greetingOf(now.getHours());
+}
+function renderDecorations() {
+  const d = cfg.decorations || hp.DEFAULT_HOMEPAGE.decorations;
+  const show = (id, on) => {
+    const el = $(id);
+    if (el) el.hidden = !on;
+  };
+  show("#homeHero", d.clock);
+  show("#homeQuickbar", d.quickbar);
+  show("#homeNotesWrap", d.notes);
+  show("#homeKeysCard", d.keysCard);
+  const notes = $("#homeNotes");
+  if (notes) notes.value = cfg.notes || "";
+  const keysList = $("#homeKeysList");
+  if (keysList && !keysList.childElementCount) {
+    keysList.innerHTML = [
+      ["↑ / ↓", "选择标签"],
+      ["Enter", "后台打开"],
+      ["Ctrl+Shift+Enter", "聚焦网页"],
+      ["Delete", "删除到回收站"],
+      ["Esc", "关闭菜单/弹窗"],
+    ]
+      .map(([k, label]) => `<div class="kv"><kbd>${k}</kbd><span>${label}</span></div>`)
+      .join("");
+  }
+  const toggles = [
+    ["#decoClock", "clock"],
+    ["#decoQuickbar", "quickbar"],
+    ["#decoNotes", "notes"],
+    ["#decoKeys", "keysCard"],
+  ];
+  for (const [sel, key] of toggles) {
+    const el = $(sel);
+    if (el) el.checked = d[key] === true;
+  }
+  if (d.clock) renderClock();
+}
+// ===== 2026-11-26 天气卡片（任务 4）：手动城市、单次请求、失败隐藏 =====
+function renderWeatherControls() {
+  const w = cfg.weather || hp.DEFAULT_HOMEPAGE.weather;
+  const enabled = $("#weatherEnabled");
+  if (enabled) enabled.checked = w.enabled === true;
+  const city = $("#weatherCity");
+  if (city) city.value = w.city || "";
+  const unit = $("#weatherUnit");
+  if (unit) unit.value = w.unit || "celsius";
+}
+
+// 仅主页打开时请求一次；成功显示，失败/离线隐藏卡片（不写敏感日志）。
+async function refreshWeather() {
+  const card = $("#homeWeather");
+  if (!card) return;
+  const w = cfg.weather || hp.DEFAULT_HOMEPAGE.weather;
+  if (!w.enabled) {
+    card.hidden = true;
+    return;
+  }
+  let coords = { latitude: w.latitude, longitude: w.longitude };
+  // 手动城市但无坐标：先把城市名 geocode 成坐标（仍是一次性、用户配置驱动）。
+  if (w.mode === "manual" && w.city && (coords.latitude == null || coords.longitude == null)) {
+    const geo = await weather.geocodeCity(w.city, globalThis.fetch);
+    if (geo) {
+      coords = { latitude: geo.latitude, longitude: geo.longitude };
+      w.latitude = geo.latitude;
+      w.longitude = geo.longitude;
+    }
+  }
+  const cur = await weather.fetchCurrentWeather(coords, w.unit, globalThis.fetch);
+  if (!cur) {
+    card.hidden = true; // 离线/失败隐藏，仅保留时钟日期
+    return;
+  }
+  const cityEl = $("#homeWeatherCity");
+  const tempEl = $("#homeWeatherTemp");
+  const descEl = $("#homeWeatherDesc");
+  if (cityEl) cityEl.textContent = w.city || (w.mode === "location" ? "当前位置" : "");
+  if (tempEl)
+    tempEl.textContent = `${Math.round(cur.temperature)}°${cur.unit === "fahrenheit" ? "F" : "C"}`;
+  if (descEl) descEl.textContent = cur.label;
+  card.hidden = false;
+}
+
+function onWeatherAction(e) {
+  const id = e.target.id;
+  if (id === "weatherEnabled") {
+    cfg.weather = hp.normalizeWeather({ ...(cfg.weather || {}), enabled: e.target.checked });
+    void persist().then(refreshWeather);
+  } else if (id === "weatherUnit" || id === "weatherCity") {
+    const patch = { ...(cfg.weather || {}) };
+    if (id === "weatherUnit") patch.unit = e.target.value;
+    else patch.city = e.target.value;
+    cfg.weather = hp.normalizeWeather(patch);
+    void persist();
+  } else if (id === "weatherTest") {
+    const city = $("#weatherCity")?.value || "";
+    cfg.weather = hp.normalizeWeather({
+      ...(cfg.weather || {}),
+      enabled: true,
+      mode: "manual",
+      city,
+      latitude: null,
+      longitude: null,
+    });
+    void persist().then(async () => {
+      await refreshWeather();
+      const hint = $("#weatherHint");
+      if (hint) {
+        const ok = !$("#homeWeather")?.hidden;
+        hint.textContent = ok ? "天气已就绪。" : "获取失败，将隐藏天气卡片（可稍后重试）。";
+      }
+    });
+  } else if (id === "weatherUseLocation") {
+    if (!navigator.geolocation) {
+      const hint = $("#weatherHint");
+      if (hint) hint.textContent = "当前环境不支持定位，请改用手动城市。";
+      return;
+    }
+    // 仅用户显式点击后才调用定位，且只取一次（不 watchPosition）。
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        cfg.weather = hp.normalizeWeather({
+          ...(cfg.weather || {}),
+          enabled: true,
+          mode: "location",
+          city: "",
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        });
+        await store.saveSettings({ homepage: cfg }, chromeApi);
+        settings = await store.loadAll(chromeApi).then((a) => a.settings || settings);
+        renderWeatherControls();
+        await refreshWeather();
+      },
+      () => {
+        const hint = $("#weatherHint");
+        if (hint) hint.textContent = "定位失败或未授权，请改用手动城市。";
+      },
+      { timeout: 8000 }
+    );
+  }
+}
+
+// ===== 2026-11-26 外链音乐（阶段 1）：iframe 卡片，默认不自动播放 =====
+function renderMusic() {
+  const card = $("#homeMusicCard");
+  const frame = $("#homeMusicFrame");
+  const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
+  if (!card) return;
+  card.hidden = !(music.enabled && music.external?.embedUrl);
+  if (frame) frame.innerHTML = "";
+  const fallback = $("#homeMusicFallback");
+  if (fallback) fallback.classList.add("hidden");
+  if (card.hidden || !frame) return;
+  // iframe 用 JS 创建：src 经 normalizeMusicUrl 净化（仅 https、拒绝注入字符）。
+  const embedUrl = hp.normalizeMusicUrl(music.external.embedUrl);
+  if (!embedUrl) {
+    card.hidden = true;
+    return;
+  }
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("src", embedUrl);
+  iframe.setAttribute("loading", "lazy");
+  iframe.setAttribute("title", music.external.title || "外链音乐播放器");
+  iframe.setAttribute("allow", "autoplay; encrypted-media");
+  iframe.setAttribute("referrerpolicy", "no-referrer");
+  iframe.style.width = "100%";
+  iframe.style.height = `${music.external.height || 166}px`;
+  iframe.style.border = "0";
+  iframe.style.borderRadius = "10px";
+  // 超时/加载失败：隐藏 iframe，显示"在新标签打开"兜底（8 秒无 load 事件视为失败）。
+  let settled = false;
+  const fail = () => {
+    if (settled) return;
+    settled = true;
+    iframe.remove();
+    if (fallback) fallback.classList.remove("hidden");
+  };
+  const timer = window.setTimeout(fail, 8000);
+  iframe.addEventListener("load", () => {
+    settled = true;
+    window.clearTimeout(timer);
+  });
+  iframe.addEventListener("error", fail);
+  frame.appendChild(iframe);
+  const openBtn = $("#homeMusicOpen");
+  if (openBtn) openBtn.dataset.url = music.external.fallbackUrl || embedUrl;
+  if (fallback) fallback.dataset.url = music.external.fallbackUrl || embedUrl;
+}
+
+function renderMusicControls() {
+  const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
+  const enabled = $("#musicEnabled");
+  if (enabled) enabled.checked = music.enabled === true;
+  const provider = $("#musicProvider");
+  if (provider && !provider.childElementCount) {
+    provider.innerHTML = hp.MUSIC_PROVIDERS.map(
+      (p) => `<option value="${p.id}">${p.name}</option>`
+    ).join("");
+  }
+  if (provider) provider.value = music.external.provider || "soundcloud";
+  const source = $("#musicSource");
+  if (source) source.value = music.external.sourceUrl || "";
+  const hint = $("#musicHint");
+  if (hint) hint.textContent = music.external.embedUrl ? "已解析嵌入链接。" : "";
+}
+
+function onMusicAction(e) {
+  const id = e.target.id;
+  if (id === "musicApply") {
+    const source = $("#musicSource")?.value || "";
+    const provider = $("#musicProvider")?.value || "soundcloud";
+    const parsed = hp.parseMusicEmbed(source, provider);
+    if (!parsed) {
+      say("链接无效或不支持：仅 https 公开链接，且需匹配所选平台");
+      return;
+    }
+    cfg.music = hp.normalizeMusic({
+      ...(cfg.music || {}),
+      enabled: true,
+      external: {
+        ...(cfg.music?.external || {}),
+        provider: parsed.provider,
+        sourceUrl: source.trim(),
+        embedUrl: parsed.embedUrl,
+        fallbackUrl: parsed.fallbackUrl,
+        title: parsed.title,
+      },
+    });
+    void persist().then(() => {
+      renderMusic();
+      renderMusicControls();
+    });
+    say("外链音乐已应用（不自动播放）");
+  } else if (id === "musicClear") {
+    cfg.music = hp.normalizeMusic(null);
+    void persist().then(() => {
+      renderMusic();
+      renderMusicControls();
+    });
+    say("已清除外链音乐");
+  } else if (id === "musicEnabled") {
+    cfg.music = hp.normalizeMusic({
+      ...(cfg.music || {}),
+      enabled: e.target.checked,
+    });
+    void persist().then(renderMusic);
+  } else if (id === "homeMusicOpen" || id === "homeMusicFallback") {
+    const url = hp.normalizeMusicUrl(e.target.dataset.url || "");
+    if (url && chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active: false });
+  }
+}
+
+// 快捷操作条：委托到主页自身能力或向宿主发消息（此处实现可离线完成的部分）。
+function onQuickbar(e) {
+  const btn = e.target.closest("[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  if (act === "new-tab" || act === "open-home") {
+    const url =
+      act === "open-home" ? chromeApi?.runtime?.getURL?.(hp.HOME_PAGE_PATH) : "about:blank";
+    if (url && chromeApi?.tabs?.create) void chromeApi.tabs.create({ url });
+  } else if (act === "backup" || act === "trash" || act === "locate") {
+    // 这类动作在插件宿主壳里实现；主页独立打开时无宿主，给出明确提示。
+    if (window.parent !== window) {
+      void window.parent.postMessage({ type: "tabharbor-quickact", action: act }, "*");
+    } else {
+      say("请在插件侧边栏或独立窗口中使用该操作");
+    }
+  }
 }
 
 function bind() {
   $("#homeSearchForm")?.addEventListener("submit", onSearch);
+  $("#homeSites")?.addEventListener("click", onSiteClick);
+  $("#homeQuickbar")?.addEventListener("click", onQuickbar);
+  $("#homeNotes")?.addEventListener("input", (e) => {
+    cfg.notes = e.target.value.slice(0, 4000);
+    void persist();
+  });
+  for (const [sel, key] of [
+    ["#decoClock", "clock"],
+    ["#decoQuickbar", "quickbar"],
+    ["#decoNotes", "notes"],
+    ["#decoKeys", "keysCard"],
+  ]) {
+    $(sel)?.addEventListener("change", (e) => {
+      cfg.decorations = { ...(cfg.decorations || {}), [key]: e.target.checked };
+      void persist();
+      renderDecorations();
+    });
+  }
+  // 外链音乐：配置面板应用/清除/开关 + 卡片内"在新标签打开"兜底。
+  for (const id of [
+    "#musicApply",
+    "#musicClear",
+    "#musicEnabled",
+    "#homeMusicOpen",
+    "#homeMusicFallback",
+  ]) {
+    $(id)?.addEventListener("click", onMusicAction);
+  }
+  // 天气：开关/定位/校验（click）与单位/城市（change）
+  for (const id of ["#weatherEnabled", "#weatherTest", "#weatherUseLocation"]) {
+    $(id)?.addEventListener("click", onWeatherAction);
+  }
+  for (const id of ["#weatherUnit", "#weatherCity"]) {
+    $(id)?.addEventListener("change", onWeatherAction);
+  }
   $("#homeEngine")?.addEventListener("change", (e) => {
     cfg.engine = e.target.value;
     void persist();
@@ -239,6 +641,9 @@ function bind() {
     renderEngines();
     renderSiteEditList();
     renderWallpaperControls();
+    renderDecorations();
+    renderMusicControls();
+    renderWeatherControls();
     $("#homeCfgMask").hidden = false;
   });
   $("#homeCfgClose")?.addEventListener("click", () => {
@@ -299,13 +704,40 @@ function bind() {
   });
   $("#wpPreset")?.addEventListener("change", (e) => {
     wpEditMode = null;
+    // 基础预设非精选，清空精选元数据，避免预览仍显示上一张精选的作者/来源。
     cfg.wallpaper = hp.normalizeWallpaper({
       ...cfg.wallpaper,
       mode: "gradient",
       preset: e.target.value,
+      artist: "",
+      source: "",
+      sourceUrl: "",
+      license: "",
     });
     void persist();
     say("渐变预设已更新");
+  });
+  // 精选画廊：点击缩略图应用，写入 preset 与作者/来源/许可元数据，清空图片来源。
+  $("#wpGallery")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".wp-gallery-item");
+    if (!btn) return;
+    const id = btn.getAttribute("data-wp-id");
+    const featured = hp.FEATURED_WALLPAPERS.find((f) => f.id === id);
+    if (!featured) return;
+    wpEditMode = null;
+    cfg.wallpaper = hp.normalizeWallpaper({
+      ...cfg.wallpaper,
+      mode: "gradient",
+      preset: featured.id,
+      imageData: "",
+      imageUrl: "",
+      artist: featured.artist,
+      source: featured.source,
+      sourceUrl: featured.sourceUrl,
+      license: featured.license,
+    });
+    void persist().then(() => renderWallpaperControls());
+    say(`已应用精选壁纸：${featured.name}`);
   });
   $("#wpScrim")?.addEventListener("input", (e) => {
     const val = $("#wpScrimVal");
@@ -413,7 +845,11 @@ function bind() {
     if (!title) return;
     const url = window.prompt("网址（以浏览器协议开头，如 github.com）");
     if (!url) return;
-    cfg.sites = [...(cfg.sites || []), { title: title.trim(), url: url.trim() }];
+    const site = hp.normalizeSite(
+      { title: title.trim(), url: url.trim() },
+      (cfg.sites || []).length
+    );
+    cfg.sites = [...(cfg.sites || []), site];
     void persist();
     renderSiteEditList();
     say("已添加常用网址");
@@ -427,7 +863,16 @@ function bind() {
     if (e.target.classList.contains("site-title")) cfg.sites[i].title = e.target.value;
     else if (e.target.classList.contains("site-url")) cfg.sites[i].url = e.target.value;
   });
-  $("#siteEditList")?.addEventListener("change", () => void persist());
+  $("#siteEditList")?.addEventListener("change", (e) => {
+    const row = e.target.closest("[data-idx]");
+    if (row && e.target.classList.contains("site-category")) {
+      cfg.sites[Number(row.dataset.idx)].category = e.target.value;
+      void persist();
+      renderSites();
+      return;
+    }
+    void persist();
+  });
   $("#siteEditList")?.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
@@ -436,6 +881,8 @@ function bind() {
     const i = Number(row.dataset.idx);
     if (btn.hasAttribute("data-del-site")) {
       cfg.sites.splice(i, 1);
+    } else if (btn.hasAttribute("data-pin")) {
+      cfg.sites[i].pinned = !cfg.sites[i].pinned;
     } else if (btn.dataset.move === "up" && i > 0) {
       [cfg.sites[i - 1], cfg.sites[i]] = [cfg.sites[i], cfg.sites[i - 1]];
     } else if (btn.dataset.move === "down" && i < cfg.sites.length - 1) {
@@ -532,7 +979,15 @@ async function boot() {
   renderEngines();
   renderSites();
   renderWallpaper();
+  renderDecorations();
+  renderMusic();
+  renderMusicControls();
+  renderWeatherControls();
   bind();
+  // 时钟每分钟刷新一次（纯本地；页面关闭即停止）。
+  if (cfg.decorations?.clock) window.setInterval(renderClock, 60000);
+  // 天气仅主页打开时请求一次，不后台轮询。
+  void refreshWeather();
 }
 
 void boot();

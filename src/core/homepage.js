@@ -27,26 +27,210 @@ export const BUILTIN_ENGINES = [
   { id: "brave", name: "Brave Search", url: `${P}search.brave.com/search?q=%s` },
 ];
 
-// 常用网址初始预置（Q3）：2026-11-25 扩充至 17 个（开发/文档、国际、国内内容服务）。
-export const DEFAULT_SITES = [
-  { title: "GitHub", url: `${P}github.com` },
-  { title: "MDN Web Docs", url: `${P}developer.mozilla.org` },
-  { title: "Wikipedia", url: `${P}www.wikipedia.org` },
-  { title: "Stack Overflow", url: `${P}stackoverflow.com` },
-  { title: "Microsoft Learn", url: `${P}learn.microsoft.com` },
-  { title: "YouTube", url: `${P}www.youtube.com` },
-  { title: "Reddit", url: `${P}www.reddit.com` },
-  { title: "LinkedIn", url: `${P}www.linkedin.com` },
-  { title: "Amazon", url: `${P}www.amazon.com` },
-  { title: "Bilibili", url: `${P}www.bilibili.com` },
-  { title: "知乎", url: `${P}www.zhihu.com` },
-  { title: "微博", url: `${P}weibo.com` },
-  { title: "豆瓣", url: `${P}www.douban.com` },
-  { title: "小红书", url: `${P}www.xiaohongshu.com` },
-  { title: "百度", url: `${P}www.baidu.com` },
-  { title: "淘宝", url: `${P}www.taobao.com` },
-  { title: "京东", url: `${P}www.jd.com` },
+// 2026-11-26（口径确认）：常用网址=普通 URL 跳转入口（不读取 chrome.bookmarks）。
+// site schema：{ id, title, url, category, pinned, createdAt }。
+export const SITE_CATEGORIES = [
+  { id: "work", name: "工作开发" },
+  { id: "life", name: "生活日常" },
+  { id: "news", name: "新闻资讯" },
+  { id: "tools", name: "工具效率" },
+  { id: "video", name: "视频娱乐" },
+  { id: "social", name: "社交社区" },
+  { id: "bookmarks", name: "书签导航" },
+  { id: "other", name: "其他" },
 ];
+const SITE_CREATED_AT = "2026-11-26";
+
+// 常用网址初始预置（Q3）：2026-11-25 扩充至 17 个（开发/文档、国际、国内内容服务）。
+// 2026-11-26 补齐分类/置顶元数据；内置站点按 URL/标题映射默认分类。
+export const DEFAULT_SITES = [
+  {
+    id: "site-github",
+    title: "GitHub",
+    url: `${P}github.com`,
+    category: "work",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-mdn",
+    title: "MDN Web Docs",
+    url: `${P}developer.mozilla.org`,
+    category: "work",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-wikipedia",
+    title: "Wikipedia",
+    url: `${P}www.wikipedia.org`,
+    category: "news",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-so",
+    title: "Stack Overflow",
+    url: `${P}stackoverflow.com`,
+    category: "work",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-learn",
+    title: "Microsoft Learn",
+    url: `${P}learn.microsoft.com`,
+    category: "work",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-youtube",
+    title: "YouTube",
+    url: `${P}www.youtube.com`,
+    category: "video",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-reddit",
+    title: "Reddit",
+    url: `${P}www.reddit.com`,
+    category: "social",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-linkedin",
+    title: "LinkedIn",
+    url: `${P}www.linkedin.com`,
+    category: "work",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-amazon",
+    title: "Amazon",
+    url: `${P}www.amazon.com`,
+    category: "life",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-bilibili",
+    title: "Bilibili",
+    url: `${P}www.bilibili.com`,
+    category: "video",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-zhihu",
+    title: "知乎",
+    url: `${P}www.zhihu.com`,
+    category: "social",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-weibo",
+    title: "微博",
+    url: `${P}weibo.com`,
+    category: "social",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-douban",
+    title: "豆瓣",
+    url: `${P}www.douban.com`,
+    category: "life",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-xhs",
+    title: "小红书",
+    url: `${P}www.xiaohongshu.com`,
+    category: "life",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-baidu",
+    title: "百度",
+    url: `${P}www.baidu.com`,
+    category: "tools",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-taobao",
+    title: "淘宝",
+    url: `${P}www.taobao.com`,
+    category: "life",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+  {
+    id: "site-jd",
+    title: "京东",
+    url: `${P}www.jd.com`,
+    category: "life",
+    pinned: false,
+    createdAt: SITE_CREATED_AT,
+  },
+];
+
+// 旧站点按 URL/标题推断默认分类（2026-11-26）；无法判定归 other。
+export function inferSiteCategory(site) {
+  const s =
+    `${site && site.title ? site.title : ""} ${site && site.url ? site.url : ""}`.toLowerCase();
+  const has = (...ks) => ks.some((k) => s.includes(k));
+  if (has("github", "stackoverflow", "developer.mozilla", "learn.microsoft", "mdn", "gitlab"))
+    return "work";
+  if (has("youtube", "bilibili", "b23.tv", "video", "netflix")) return "video";
+  if (has("reddit", "zhihu", "weibo", "twitter", "x.com", "forum", "tieba", " douban"))
+    return "social";
+  if (has("wikipedia", "wikipedia.org", "news", "bbc", "reuters", "百科", "新闻")) return "news";
+  if (
+    has(
+      "baidu",
+      "google",
+      "bing",
+      "translate",
+      "drive.google",
+      "search",
+      "tool",
+      "搜索",
+      "翻译",
+      "网盘"
+    )
+  )
+    return "tools";
+  if (has("taobao", "jd.com", "amazon", "xiaohongshu", "douban", "淘宝", "京东", "购物", "小红书"))
+    return "life";
+  return "other";
+}
+
+// 站点规范化（2026-11-26）：补齐 schema 字段；category 非法归 other；pinned 强制布尔；
+// createdAt 保留原值或补默认；id 复用或生成稳定值。不覆盖用户已有合法字段。
+export function normalizeSite(site, index = 0) {
+  const title = String(site.title || site.url);
+  const url = String(site.url);
+  const category = SITE_CATEGORIES.some((c) => c.id === site.category)
+    ? site.category
+    : inferSiteCategory({ title, url });
+  return {
+    id: String(site.id || `site-${index}-${url.replace(/[^a-z0-9]/gi, "").slice(0, 16)}`),
+    title,
+    url,
+    category,
+    pinned: site.pinned === true,
+    createdAt:
+      typeof site.createdAt === "string" && site.createdAt ? site.createdAt : SITE_CREATED_AT,
+  };
+}
 
 // 壁纸预设（2026-11-25）：5 套深浅主题安全渐变，仅作 CSS background 值。
 // 只作用于内部主页；不提供远程 URL 输入（零出站红线）。
@@ -58,12 +242,115 @@ export const WALLPAPER_PRESETS = [
   { id: "graphite", name: "石墨", css: "linear-gradient(135deg,#1a1a1e,#3a3a42 55%,#5a5a66)" },
 ];
 
+// 精选内置壁纸画廊（2026-11-26 任务 6）：原创 CSS 渐变/图案，零版权风险、零出站。
+// 每张带作者/来源/原始链接/许可元数据，供画廊展示与配置记录；远程图库仅评估、不默认接入。
+// 原创壁纸 sourceUrl 留空（画廊显示“原创无外链”）；用户远程图的原图链接走 imageUrl/sourceUrl。
+export const FEATURED_WALLPAPERS = [
+  {
+    id: "aurora",
+    name: "极光",
+    css: "radial-gradient(1200px 620px at 18% 8%,#1e5b74,transparent 60%),linear-gradient(160deg,#071a2f,#12425c 55%,#6fd3c0)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "midnight-sky",
+    name: "午夜星空",
+    css: "radial-gradient(2px 2px at 20% 30%,#fff,transparent),radial-gradient(2px 2px at 70% 60%,#cfd8ff,transparent),linear-gradient(150deg,#070b1f,#182a52 60%,#3b4b86)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "sunset-dunes",
+    name: "落日沙丘",
+    css: "linear-gradient(180deg,#f6b26b 0%,#d97542 42%,#7b3b3b 100%)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "mint-fog",
+    name: "薄荷雾",
+    css: "radial-gradient(900px 500px at 80% 20%,#a8e6cf,transparent 62%),linear-gradient(155deg,#0f3b36,#2f7a6e 58%,#8fd6bd)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "sakura",
+    name: "樱花",
+    css: "radial-gradient(900px 500px at 25% 15%,#ffd6e0,transparent 60%),linear-gradient(160deg,#4a2338,#9c4f70 58%,#f3b6c9)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "ocean-depth",
+    name: "深海",
+    css: "linear-gradient(165deg,#041c33,#0a4d6b 52%,#1aa3a3)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "amber-forest",
+    name: "琥珀森林",
+    css: "radial-gradient(800px 500px at 70% 10%,#e0a458,transparent 60%),linear-gradient(160deg,#1c2410,#4a5a1f 55%,#a88a3a)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "lavender-dusk",
+    name: "薰衣草暮色",
+    css: "linear-gradient(160deg,#241a3a,#5b3f8c 55%,#b39ddb)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "slate-graphite",
+    name: "石墨",
+    css: "linear-gradient(160deg,#14161c,#333842 55%,#6b7280)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+  {
+    id: "sunrise-peach",
+    name: "晨曦蜜桃",
+    css: "radial-gradient(900px 520px at 15% 12%,#ffe0b2,transparent 60%),linear-gradient(160deg,#5b3a3a,#b06a5a 55%,#f4b89a)",
+    artist: "TabHarbor 原创",
+    source: "内置精选",
+    sourceUrl: "",
+    license: "CC0",
+  },
+];
+
+// 全部可选渐变（基础预设 + 精选画廊）：preset 校验与渲染在此并集上查找。
+export const ALL_GRADIENT_PRESETS = [...WALLPAPER_PRESETS, ...FEATURED_WALLPAPERS];
+
 export const DEFAULT_WALLPAPER = {
   mode: "none", // none | gradient | image（本地图片）| url-image（用户主动输入的 https 图片）
   preset: "deep-blue",
   imageData: "", // 本地图片 data URL（png/jpeg/webp），仅存本机
   imageUrl: "", // 用户主动输入的 https 图片链接（远程壁纸例外，见 C11/C12 口径）
   scrim: 0.35, // 遮罩不透明度，保证文字对比度
+  artist: "", // 壁纸作者（精选画廊自动写入；用户远程图可选填）
+  source: "", // 来源名称（精选画廊自动写入）
+  sourceUrl: "", // 原图链接（远程图的 source_url；精选原创为空）
+  license: "", // 许可（精选画廊为 CC0）
 };
 
 /**
@@ -80,11 +367,28 @@ export function normalizeWallpaperUrl(value) {
   return s;
 }
 
-/** 壁纸配置规范化：模式/preset/scrim 合法化；image/url-image 无合法来源时回退 gradient；两种图片来源二选一。 */
+/**
+ * 壁纸元数据规范化：作者/来源/许可纯文本限长；sourceUrl 走 https 校验。
+ * 精选画廊选中的壁纸会把这些值一并写入；用户远程图可填 source_url/artist。
+ */
+function normalizeWallpaperMeta(src) {
+  const text = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  return {
+    artist: text(src.artist, 60),
+    source: text(src.source, 60),
+    sourceUrl: normalizeWallpaperUrl(src.sourceUrl),
+    license: text(src.license, 30),
+  };
+}
+
+/**
+ * 壁纸配置规范化：模式/preset/scrim 合法化；image/url-image 无合法来源时回退 gradient；
+ * 两种图片来源二选一；远程模式（url-image）清空本地图片元信息，本地图片模式清空远程 source 元数据。
+ */
 export function normalizeWallpaper(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const mode = ["none", "gradient", "image", "url-image"].includes(src.mode) ? src.mode : "none";
-  const preset = WALLPAPER_PRESETS.some((p) => p.id === src.preset)
+  const preset = ALL_GRADIENT_PRESETS.some((p) => p.id === src.preset)
     ? src.preset
     : DEFAULT_WALLPAPER.preset;
   const scrimNum = Number(src.scrim);
@@ -102,12 +406,21 @@ export function normalizeWallpaper(raw) {
   let finalMode = mode;
   if (mode === "image" && !effectiveImageData) finalMode = "gradient";
   if (mode === "url-image" && !effectiveImageUrl) finalMode = "gradient";
+  const meta = normalizeWallpaperMeta(src);
+  // 远程模式清本地图片元信息（本地 data 已清空）；本地图片模式清远程 sourceUrl。
+  const effectiveMeta = {
+    artist: meta.artist,
+    source: meta.source,
+    sourceUrl: mode === "image" ? "" : meta.sourceUrl,
+    license: meta.license,
+  };
   return {
     mode: finalMode,
     preset,
     imageData: effectiveImageData,
     imageUrl: effectiveImageUrl,
     scrim,
+    ...effectiveMeta,
   };
 }
 
@@ -118,7 +431,183 @@ export const DEFAULT_HOMEPAGE = {
   sites: DEFAULT_SITES, // [{ title, url }]，顺序即展示顺序
   wallpaper: DEFAULT_WALLPAPER, // 2026-11-25：壁纸配置
   hiddenDefaultSiteUrls: [], // 2026-11-25 P0：用户主动删除的内置默认站点 URL，升级不再加回
+  // 2026-11-26 离线装饰：纯本地、不出站、不申请权限。notes 仅存本机配置。
+  decorations: {
+    clock: true, // 时钟/日期/星期/问候语
+    quickbar: true, // 快捷操作条
+    notes: false, // 本地便签/待办
+    keysCard: false, // 快捷键提示卡（只展示已实现的键）
+  },
+  notes: "", // 本地便签文本，不上传
+  // 2026-11-26 外链音乐（阶段 1）：仅 external 实现，local 仅预留 schema 不启用。
+  music: {
+    enabled: false,
+    phase: "external", // external | local（local 阶段 2 才实现）
+    external: {
+      provider: "soundcloud", // soundcloud|spotify|archive|netease-outchain|custom
+      sourceUrl: "",
+      embedUrl: "",
+      title: "",
+      autoPlay: false,
+      showArtwork: true,
+      showControls: true,
+      height: 166,
+      fallbackUrl: "",
+    },
+    local: { tracks: [], volume: 0.8, repeat: "off" }, // 阶段 2 预留，本版不实现
+  },
+  // 2026-11-26 天气卡片（任务 4）：默认手动城市、不主动定位、不后台轮询。
+  weather: {
+    enabled: false,
+    mode: "manual", // manual | location（location 由用户点击"使用当前位置"后才写入）
+    city: "",
+    latitude: null,
+    longitude: null,
+    unit: "celsius", // celsius | fahrenheit
+  },
 };
+
+// 天气配置规范化：经纬度合法化、单位二选一、城市限长、mode 只允许 manual/location。
+export function normalizeWeather(raw) {
+  const def = DEFAULT_HOMEPAGE.weather;
+  const src = raw && typeof raw === "object" ? raw : {};
+  const lat = Number(src.latitude);
+  const lon = Number(src.longitude);
+  return {
+    enabled: src.enabled === true,
+    mode: src.mode === "location" ? "location" : "manual",
+    city: typeof src.city === "string" ? src.city.slice(0, 60) : "",
+    latitude: Number.isFinite(lat) && lat >= -90 && lat <= 90 ? lat : null,
+    longitude: Number.isFinite(lon) && lon >= -180 && lon <= 180 ? lon : null,
+    unit: src.unit === "fahrenheit" ? "fahrenheit" : def.unit,
+  };
+}
+
+// 外链音乐供应商白名单（用协议常量 P 拼接，源码不出现字面远程 URL，遵守 C12）。
+export const MUSIC_PROVIDERS = [
+  { id: "soundcloud", name: "SoundCloud", host: `${P}w.soundcloud.com` },
+  { id: "spotify", name: "Spotify", host: `${P}open.spotify.com` },
+  { id: "archive", name: "Internet Archive", host: `${P}archive.org` },
+  { id: "netease-outchain", name: "网易云外链", host: `${P}music.163.com` },
+  { id: "custom", name: "自定义嵌入链接", host: "" },
+];
+
+// 外链 URL 规范化（2026-11-26）：仅 https；拒绝 javascript:/blob:/file:/data: 伪协议与
+// 引号/空白/尖括号等注入字符；返回净化后的 URL，非法返回空串。协议用常量 P 拼接遵守 C12。
+export function normalizeMusicUrl(raw) {
+  const s = String(raw == null ? "" : raw).trim();
+  if (!s.startsWith(P)) return ""; // 仅 https，天然拒绝 http 明文与所有伪协议
+  if (/["'\s<>\\]/.test(s)) return "";
+  try {
+    const u = new URL(s);
+    if (u.protocol !== "https:") return "";
+    return u.href;
+  } catch {
+    return "";
+  }
+}
+
+// 把用户粘贴的公开音乐链接解析为嵌入播放器 URL（阶段 1）。
+// 只做字符串变换，不 fetch、不抓取受版权保护的音频直链、不登录账号。
+// 返回 { provider, embedUrl, fallbackUrl, title }；无法解析返回 null。
+export function parseMusicEmbed(sourceUrl, providerHint) {
+  const src = normalizeMusicUrl(sourceUrl);
+  if (!src) return null;
+  let u;
+  try {
+    u = new URL(src);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase();
+  const title = u.pathname.split("/").filter(Boolean).pop() || host;
+  // SoundCloud：soundcloud.com/<user>/<track|set> → w.soundcloud.com/player/?url=<encoded>
+  if (providerHint === "soundcloud" || host.endsWith("soundcloud.com")) {
+    if (host.startsWith("w.soundcloud.com")) {
+      return { provider: "soundcloud", embedUrl: src, fallbackUrl: src, title };
+    }
+    const base = `${P}w.soundcloud.com/player/`;
+    const embed = `${base}?url=${encodeURIComponent(src)}&auto_play=false&show_artwork=true&show_playcount=false&show_user=true`;
+    return { provider: "soundcloud", embedUrl: embed, fallbackUrl: src, title };
+  }
+  // Spotify：从 open.spotify.com/<type>/<id> 或分享链接提取 → open.spotify.com/embed/<type>/<id>
+  if (providerHint === "spotify" || host.endsWith("spotify.com")) {
+    const m = u.pathname.match(/\/(track|album|playlist|artist|episode)\/([A-Za-z0-9]+)/);
+    if (m) {
+      const embed = `${P}open.spotify.com/embed/${m[1]}/${m[2]}`;
+      return { provider: "spotify", embedUrl: embed, fallbackUrl: src, title };
+    }
+    return null;
+  }
+  // Internet Archive：archive.org/details/<id> → archive.org/embed/<id>
+  if (providerHint === "archive" || host.endsWith("archive.org")) {
+    const m = u.pathname.match(/\/(?:details|embed)\/([^/]+)/);
+    if (m) {
+      const embed = `${P}archive.org/embed/${encodeURIComponent(m[1])}`;
+      return { provider: "archive", embedUrl: embed, fallbackUrl: src, title };
+    }
+    return null;
+  }
+  // 网易云外链 / 自定义：用户已生成 embed URL，原样采用（已通过 normalizeMusicUrl 校验）。
+  if (
+    providerHint === "netease-outchain" ||
+    host.endsWith("music.163.com") ||
+    providerHint === "custom"
+  ) {
+    return {
+      provider: providerHint === "custom" ? "custom" : "netease-outchain",
+      embedUrl: src,
+      fallbackUrl: src,
+      title,
+    };
+  }
+  return null;
+}
+
+// 外链音乐配置规范化：非法 provider 归 soundcloud；URL 走净化；布尔/数值合法化。
+export function normalizeMusic(raw) {
+  const def = DEFAULT_HOMEPAGE.music;
+  const src = raw && typeof raw === "object" ? raw : {};
+  const ex = src.external && typeof src.external === "object" ? src.external : {};
+  const provider = MUSIC_PROVIDERS.some((p) => p.id === ex.provider)
+    ? ex.provider
+    : def.external.provider;
+  const sourceUrl = normalizeMusicUrl(ex.sourceUrl);
+  const embedUrl =
+    normalizeMusicUrl(ex.embedUrl) ||
+    (sourceUrl ? parseMusicEmbed(sourceUrl, provider)?.embedUrl || "" : "");
+  return {
+    enabled: src.enabled === true,
+    phase: "external", // 阶段 2 local 不启用
+    external: {
+      provider,
+      sourceUrl,
+      embedUrl,
+      title: typeof ex.title === "string" ? ex.title.slice(0, 120) : "",
+      autoPlay: false, // 强制不自动播放
+      showArtwork: ex.showArtwork !== false,
+      showControls: ex.showControls !== false,
+      height: Number.isFinite(Number(ex.height))
+        ? Math.max(120, Math.min(360, Math.round(Number(ex.height))))
+        : def.external.height,
+      fallbackUrl: normalizeMusicUrl(ex.fallbackUrl) || sourceUrl,
+    },
+    local: { tracks: [], volume: 0.8, repeat: "off" },
+  };
+}
+
+// 离线装饰配置规范化：缺省补默认、布尔强制；notes 限长 4000 字防止存储膨胀。
+export function normalizeDecorations(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const on = (v, d) => (typeof v === "boolean" ? v : d);
+  const base = DEFAULT_HOMEPAGE.decorations;
+  return {
+    clock: on(src.clock, base.clock),
+    quickbar: on(src.quickbar, base.quickbar),
+    notes: on(src.notes, base.notes),
+    keysCard: on(src.keysCard, base.keysCard),
+  };
+}
 
 // ===== 2026-11-25 P0：设置版本迁移与升级默认值补全 =====
 // 主页默认配置版本号：随内置引擎/站点/壁纸结构变化递增；旧持久化配置版本落后时走迁移。
@@ -179,6 +668,10 @@ export function migrateHomeConfig(raw) {
       sites: [...base.sites, ...addedSites],
       wallpaper: base.wallpaper,
       hiddenDefaultSiteUrls: hidden,
+      decorations: base.decorations,
+      notes: base.notes,
+      music: base.music,
+      weather: base.weather,
     },
     added: addedSites.length,
   };
@@ -223,13 +716,13 @@ export function normalizeHomeConfig(raw) {
   const sites = Array.isArray(src.sites)
     ? src.sites
         .filter((s) => s && typeof s.url === "string" && safeUrl(s.url))
-        .map((s) => ({ title: String(s.title || s.url), url: String(s.url) }))
         .filter((s) => {
           const k = s.url.toLowerCase();
           if (seen.has(k)) return false;
           seen.add(k);
           return true;
         })
+        .map((s, i) => normalizeSite(s, i))
     : DEFAULT_SITES.map((s) => ({ ...s }));
   // P0（2026-11-25）：用户主动删除的内置默认站点 URL，迁移时不再加回。
   const hiddenDefaultSiteUrls = Array.isArray(src.hiddenDefaultSiteUrls)
@@ -243,6 +736,10 @@ export function normalizeHomeConfig(raw) {
     sites,
     wallpaper: normalizeWallpaper(src.wallpaper),
     hiddenDefaultSiteUrls,
+    decorations: normalizeDecorations(src.decorations),
+    notes: typeof src.notes === "string" ? src.notes.slice(0, 4000) : "",
+    music: normalizeMusic(src.music),
+    weather: normalizeWeather(src.weather),
   };
 }
 
