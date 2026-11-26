@@ -41,6 +41,8 @@
 
 > 证据分层：以上 BDD 为 mock 层、E2E 为本地真机自动化层；真实 Chrome 手工验收与 GitHub 线上演练未做，故本轮功能状态为「已实现」而非「已验证」。
 
+**CI 证据**：提交 `f2f8587` 触发 run [45829015912](https://github.com/zeek-zhao/tabharbor/actions/runs/45829015912)，`test` 与 `e2e` 两个 job 最终均 success（attempt 2）。首次 attempt 的 e2e 在 P0-1「容器加号相邻插入」前置（依赖启动归类绑定真实窗口）偶发失败——本地连续 3 次复跑该段均通过、`test` job 同轮全绿，判定为 headless Chrome 窗口绑定时序抖动，rerun failed jobs 后通过；非代码回归。
+
 ## 4. 待拍板口径与遗留风险
 
 1. **外链音乐 / 天气 Open-Meteo / 远程壁纸图片**：三类运行时出站（平台 iframe 资源、白名单域名单次请求、用户主动输入的 https 图片）均非代码 fetch 标签数据，但会向第三方暴露网络环境信息，是否正式纳入红线白名单待产品/用户拍板。
