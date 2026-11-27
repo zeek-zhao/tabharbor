@@ -193,3 +193,17 @@ BDD 场景总数：325/325 PASS（基线 301 → 本轮 +24）。**未取得真�
 BDD 场景总数：338/338 PASS（`b26fad7` 时 325 → 本轮 +13）。
 
 **红线口径变更（本轮）**：C11 fetch 白名单新增 `src/core/wallpaper-online.js`；C12 源码 URL 白名单新增 `wallhaven.cc` / `w.wallhaven.cc` / `nekos.best`（manifest 可选主机同步）。在线壁纸仅在用户点击「加载候选」时请求一次，不自动轮询。是否长期纳入红线白名单待产品/用户拍板（延续 F-79/F-90 待拍板项）。
+
+## 15. 2026-11-27 复核修复（基于 `c3f9ac7`，2 P0 + 3 P1）
+
+> 依据《TabHarbor-右键取消焦点回收与主页入口错位复核-2026-11-27》。审计确认门禁与 BDD 全绿但指出了 5 项用户反馈问题。
+
+| ID | 反馈项 | 根因 | 修复 | 状态 |
+| --- | --- | --- | --- | --- |
+| F-100 (P0) | 标签不需要右键 | 叶子右键仍弹只读提示项 | menu.js 叶子模板返回空串；shell 主/PiP 双宿主 contextmenu 对 leaf/tab 空操作（preventDefault 但不显示菜单）；Delete/行尾垃圾桶保留 | 已实现 |
+| F-101 (P0) | 双击打开后焦点跑到新页面 | openTab 新建标签两条路径返回值无 switched/backgrounded 标记，宿主焦点回收分支不覆盖；主页仍读旧 openTabsInBackground | 新建/orphan/rebound 分支补模式标记（backgrounded/switched/focused 三选一）；toast rebound 优先；主页搜索/站点统一走 openTabMode（仅 focus-webpage 前台） | 已实现 |
+| F-102 (P1) | 音乐/设置入口错位 | 音乐入口直接调用齿轮点击，设置面板滚动位置残留 | 抽独立 openHomeConfig(sectionId)：齿轮 openHomeConfig(null) 复位顶部滚动；音乐入口 openHomeConfig("#musicEnabled") 直达音乐分区 | 已实现 |
+| F-103 (P1) | 常用网址只剩一分类且竖排 | 全分类并排横向滚动，窄面板其他分类滑出可视区 | 分类改 chip 单选切换（含数量徽标，窄屏换行）；新增 restoreDefaultSites 纯函数 + 配置面板「恢复推荐站点」按钮（补回缺失默认站点、清隐藏记录、不覆盖用户同 URL 站点） | 已实现 |
+| F-104 (P1) | 状态源乱 | openTabsInBackground 与 openTabMode 并存；notes 字符串与 noteItems 数组并存 | 默认设置删除 openTabsInBackground，migrateSettings 一次性迁移（true→background / false→focus-webpage）并删除旧字段；normalizeHomeConfig 幂等迁移旧 notes 进 noteItems 首条；单条便签 textarea 从 UI 移除 | 已实现 |
+
+BDD 场景总数：343/343 PASS（338 → 本轮 +5，feature 37）。本轮无红线口径变更（C11/C12 白名单不变）。

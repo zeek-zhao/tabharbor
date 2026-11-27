@@ -149,12 +149,7 @@
           <span class="home-sites-title">本地便签</span>
           <span class="home-notes-hint">仅存本机</span>
         </div>
-        <textarea
-          id="homeNotes"
-          class="home-notes"
-          rows="3"
-          placeholder="随手记…（仅保存在本机，不上传）"
-        ></textarea>
+        <!-- 2026-11-27 复核 P1-5：旧单条便签 textarea 已收敛为多条便签列表（noteItems）。 -->
         <div id="homeNoteItems" class="home-note-items"></div>
         <button id="homeNoteAdd" class="home-mini" type="button">+ 添加便签</button>
       </section>
@@ -306,6 +301,8 @@
             </div>
             <p class="home-hint">分类横向排列、可左右滑动；此处设置每类站点每行列数。</p>
             <div id="siteEditList" class="home-cfg-sites"></div>
+            <!-- 2026-11-27 复核 P1-4：旧配置/误删导致分类缺失时，一键补回内置推荐站点。 -->
+            <button id="siteRestoreDefaults" class="btn" type="button">恢复推荐站点</button>
           </section>
 
           <!-- 外链音乐（阶段 1）-->

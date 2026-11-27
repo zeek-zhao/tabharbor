@@ -159,10 +159,13 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
         : await chromeApi.tabs.create({ url: node.url, ...activeOpt });
     const tabId = created && created.id != null ? created.id : undefined;
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
+    // 2026-11-27 复核 P0-2：新建标签也要带模式标记——switch-keep-focus 时 active:true 会切换
+    // 页面抢走焦点，UI 层需据 switched:true 重新聚焦插件宿主；此前该分支无标记导致焦点回收失效。
     return {
       created: true,
       tabId,
       orphan: true,
+      ...(background ? { backgrounded: true } : keepFocus ? { switched: true } : { focused: true }),
       ...(host.windowId != null ? { rebound: true, windowId: host.windowId } : {}),
     };
   }
@@ -186,6 +189,8 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
   return {
     created: true,
     tabId,
+    // 2026-11-27 复核 P0-2：同分支 1——新建标签补模式标记，保证焦点回收覆盖新建路径。
+    ...(background ? { backgrounded: true } : keepFocus ? { switched: true } : { focused: true }),
     ...(host.rebound ? { rebound: true, windowId: host.windowId, topWindowId: host.topWinId } : {}),
   };
 }

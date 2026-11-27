@@ -151,7 +151,7 @@ const GUIDE_HTML = `
   <li><b>双击打开：</b>双击标签即在浏览器打开（无行内「打开」按钮）；行内复制图标一键复制，末尾 X 关闭网页（仅已打开叶子显示、常显不悬停）。</li>
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
-  <li><b>重命名与删除（2026-11-27）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；标签行尾垃圾桶按钮删除到回收站（右键删除入口已移除，Delete 快捷键保留）；复制走行内复制按钮——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站并同步按 tabId 关闭对应浏览器网页（容器删除关闭整个子树），可从工具栏回收站恢复。</li>
+  <li><b>重命名与删除（2026-11-27）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；标签行尾垃圾桶按钮删除到回收站（标签右键已彻底禁用，Delete 快捷键保留）；复制走行内复制按钮——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站并同步按 tabId 关闭对应浏览器网页（容器删除关闭整个子树），可从工具栏回收站恢复。</li>
   <li><b>导入与备份（U5/U6/Q2）：</b>只保留一个「导入数据」按钮，放入文件后按内容自动识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份（不看后缀、不弹格式选项）。备份在本地与 GitHub 两张卡片里「先配置、后确认」：本地备份填密码后确认；GitHub 备份先「保存并校验配置」再单独「确认备份」。两者均为加密完整快照（含书签+回收站+设置+主页配置），密码不保存；另有独立「导出 HTML」明文书签导出。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
@@ -683,12 +683,12 @@ export async function bootShell(root) {
       toast(
         res.focused
           ? "已聚焦已打开网页"
-          : res.switched
-            ? "已切换页面（焦点仍在插件，可继续操作）"
-            : res.backgrounded
-              ? "已在后台打开网页（焦点仍在插件）"
-              : res.rebound
-                ? "已新建窗口并打开网页"
+          : res.rebound
+            ? "已新建窗口并打开网页"
+            : res.switched
+              ? "已切换页面（焦点仍在插件，可继续操作）"
+              : res.backgrounded
+                ? "已在后台打开网页（焦点仍在插件）"
                 : "已打开网页"
       );
     } catch (err) {
@@ -1343,6 +1343,12 @@ export async function bootShell(root) {
     const el = e.target.closest(".node, .leaf");
     if (!el || !ctxMenu) return;
     e.preventDefault();
+    // 2026-11-27 复核 P0-1：叶子右键彻底禁用——不弹自定义菜单、无提示项；
+    // 分组/窗口仍弹自定义菜单。
+    if (el.dataset.kind === "leaf" || el.dataset.kind === "tab") {
+      hideCtx();
+      return;
+    }
     ctxTarget = { id: el.dataset.id, kind: el.dataset.kind };
     ctxMenu.innerHTML = menuHtml(ctxTarget.kind === "leaf" ? "leaf" : ctxTarget.kind);
     ctxMenu.style.left = `${e.clientX}px`;
@@ -1900,6 +1906,11 @@ export async function bootShell(root) {
       const el = e.target.closest(".node, .leaf");
       if (!el || !ctxMenu) return;
       e.preventDefault();
+      // 2026-11-27 复核 P0-1：叶子右键彻底禁用（与主宿主一致）。
+      if (el.dataset.kind === "leaf" || el.dataset.kind === "tab") {
+        hideCtx();
+        return;
+      }
       ctxTarget = { id: el.dataset.id, kind: el.dataset.kind };
       ctxMenu.innerHTML = menuHtml(ctxTarget.kind === "leaf" ? "leaf" : ctxTarget.kind);
       ctxMenu.style.left = `${e.clientX}px`;

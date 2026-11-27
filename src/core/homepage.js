@@ -630,6 +630,17 @@ export function normalizeNoteItems(raw) {
     }));
 }
 
+/**
+ * 2026-11-27 复核 P1-5：旧单条 notes → noteItems 一次性迁移（幂等）。
+ * 仅当 notes 非空且 noteItems 为空时迁移：首条便签继承文本，notes 清空。
+ */
+function normalizeNotesMigration(src) {
+  const notes = typeof src.notes === "string" ? src.notes.slice(0, 4000) : "";
+  const items = Array.isArray(src.noteItems) ? src.noteItems : [];
+  if (!notes.trim() || items.length) return { notes: "", noteItems: items };
+  return { notes: "", noteItems: [{ text: notes }] };
+}
+
 // 离线装饰配置规范化：缺省补默认、布尔强制；notes 限长 4000 字防止存储膨胀。
 export function normalizeDecorations(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
@@ -681,6 +692,34 @@ export function resetHomepageConfig() {
  * - hiddenDefaultSiteUrls：规整为合法 http(s) URL 数组。
  * 返回 { config, added: 新增默认站点数 }，供 store 迁移与 BDD 校验。
  */
+/**
+ * 2026-11-27 复核 P1-4：恢复推荐站点——把 DEFAULT_SITES 中用户配置缺失的补回。
+ * 按 URL（小写）比对现有 sites；同时从 hiddenDefaultSiteUrls 移除这些 URL（用户显式要求恢复）。
+ * 不覆盖用户已改过的同 URL 站点。返回 { sites, hiddenDefaultSiteUrls, restored: 新增数 }。
+ */
+export function restoreDefaultSites(config) {
+  const base = normalizeHomeConfig(config);
+  const seen = new Set(base.sites.map((s) => String(s.url).toLowerCase()));
+  const hiddenSet = new Set(base.hiddenDefaultSiteUrls.map((u) => String(u).toLowerCase()));
+  const restoredSites = [];
+  for (const d of DEFAULT_SITES) {
+    const key = String(d.url).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hiddenSet.delete(key);
+    restoredSites.push({ ...d });
+  }
+  if (restoredSites.length) {
+    // 置顶与 createdAt 顺序保持默认站点定义顺序，追加到现有站点之后。
+    base.sites = [...base.sites, ...restoredSites];
+  }
+  return {
+    sites: base.sites,
+    hiddenDefaultSiteUrls: base.hiddenDefaultSiteUrls.filter((u) => hiddenSet.has(u.toLowerCase())),
+    restored: restoredSites.length,
+  };
+}
+
 export function migrateHomeConfig(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const base = normalizeHomeConfig(src);
@@ -764,6 +803,7 @@ export function normalizeHomeConfig(raw) {
         .filter((u) => typeof u === "string" && safeUrl(u))
         .map((u) => u.trim())
     : [];
+  const migratedNotes = normalizeNotesMigration(src);
   return {
     engine,
     customEngines,
@@ -772,8 +812,10 @@ export function normalizeHomeConfig(raw) {
     hiddenDefaultSiteUrls,
     siteLayout: { columns: normalizeSiteColumns(src.siteLayout && src.siteLayout.columns) },
     decorations: normalizeDecorations(src.decorations),
-    notes: typeof src.notes === "string" ? src.notes.slice(0, 4000) : "",
-    noteItems: normalizeNoteItems(src.noteItems),
+    // 2026-11-27 复核 P1-5 收敛状态源：旧单条 notes 字符串一次性迁移进 noteItems 首条，
+    // 之后 notes 恒为空串（兼容导出格式）；UI 只读写 noteItems。
+    notes: migratedNotes.notes,
+    noteItems: normalizeNoteItems(migratedNotes.noteItems),
     music: normalizeMusic(src.music),
     weather: normalizeWeather(src.weather),
   };

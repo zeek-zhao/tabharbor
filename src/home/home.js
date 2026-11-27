@@ -229,6 +229,8 @@ function renderEngines() {
 
 // 常用网址网格（图标 + 标题；点击后台新标签打开）。
 // 2026-11-26：先渲染置顶站点，再按分类分组（SITE_CATEGORIES 顺序），组内保持用户排序。
+// 2026-11-27 复核 P1-4：当前选中的分类 chip（内存态，null=自动选第一个非空分类）。
+let siteActiveCat = null;
 function renderSites() {
   const box = $("#homeSites");
   if (!box) return;
@@ -237,26 +239,34 @@ function renderSites() {
     box.innerHTML = `<div class="home-empty"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg><span class="t">还没有常用网址</span><span class="d">点击「+ 添加」或在设置里管理常用站点</span></div>`;
     return;
   }
-  // 2026-11-27 审计 P1：分类分组横向滚动；每行列数由 siteLayout.columns 控制（auto/2/3/4）。
+  // 2026-11-27 复核 P1-4：分类改为 chip 单选切换——此前全部分类并排横向滚动，
+  // 窄面板下其他分类被滑出可视区（用户看到「只剩工作开发，而且是竖的」）。
+  // 现在头部一行 chip（置顶 + 各分类，含数量），点击切换下方网格；列数由 siteLayout.columns 控制。
   const columns = hp.normalizeSiteColumns(cfg.siteLayout && cfg.siteLayout.columns);
   const gridCls = columns === "auto" ? "" : ` cols-${columns}`;
   const siteHtml = (s) =>
     `<a class="home-site${s.pinned ? " pinned" : ""}" data-idx="${cfg.sites.indexOf(s)}" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(s.url)}"><span class="home-site-icon">${initialOf(s.title)}</span><span class="home-site-title">${escapeHtml(s.title)}</span></a>`;
-  const parts = [];
   const pinned = sites.filter((s) => s.pinned);
-  if (pinned.length) {
-    parts.push(
-      `<div class="home-site-group"><div class="home-site-group-title">置顶</div><div class="home-sites${gridCls}">${pinned.map(siteHtml).join("")}</div></div>`
-    );
-  }
+  const groups = [];
+  if (pinned.length) groups.push({ id: "__pinned__", name: "置顶", list: pinned });
   for (const cat of hp.SITE_CATEGORIES) {
     const inCat = sites.filter((s) => !s.pinned && (s.category || "other") === cat.id);
-    if (!inCat.length) continue;
-    parts.push(
-      `<div class="home-site-group"><div class="home-site-group-title">${escapeHtml(cat.name)}</div><div class="home-sites${gridCls}">${inCat.map(siteHtml).join("")}</div></div>`
-    );
+    if (inCat.length) groups.push({ id: cat.id, name: cat.name, list: inCat });
   }
-  box.innerHTML = `<div class="home-site-groups">${parts.join("")}</div>`;
+  if (!groups.length) {
+    box.innerHTML = `<div class="home-empty"><span class="t">还没有常用网址</span><span class="d">点击「+ 添加」或在设置里管理常用站点</span></div>`;
+    return;
+  }
+  // 选中分类失效（配置变化后）时回退到第一个非空分类。
+  if (!groups.some((g) => g.id === siteActiveCat)) siteActiveCat = groups[0].id;
+  const active = groups.find((g) => g.id === siteActiveCat) || groups[0];
+  const chipHtml = groups
+    .map(
+      (g) =>
+        `<button class="home-site-chip${g.id === active.id ? " active" : ""}" data-cat="${escapeHtml(g.id)}" type="button">${escapeHtml(g.name)}<span class="chip-count">${g.list.length}</span></button>`
+    )
+    .join("");
+  box.innerHTML = `<div class="home-site-chips" role="tablist" aria-label="常用网址分类">${chipHtml}</div><div class="home-site-group"><div class="home-sites${gridCls}">${active.list.map(siteHtml).join("")}</div></div>`;
 }
 
 // 配置面板里的可编辑站点列表（编辑/删除/上移/下移）
@@ -296,22 +306,31 @@ function onSearch(e) {
   const isUrl = /^https?:\/\//i.test(q) || /^file:\/\//i.test(q);
   const engine = hp.findEngine(cfg, cfg.engine);
   const url = isUrl ? q : hp.engineSearchUrl(engine, q);
-  // 2026-11-26 P0（口径确认）：主页搜索/站点点击复用后台打开规则，焦点留在主页。
-  // openTabsInBackground 默认 true → active:false；关闭该设置时才前台打开。
-  const background = settings?.openTabsInBackground !== false;
-  if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active: !background });
+  // 2026-11-27 复核 P0-2/P1-5：主页打开统一走 openTabMode（旧后台开关已迁移收敛）。
+  // switch-keep-focus / background 均后台打开（焦点留在主页标签）；仅 focus-webpage 前台激活。
+  const mode = settings?.openTabMode || "switch-keep-focus";
+  const active = mode === "focus-webpage";
+  if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active });
   else window.location.href = url;
 }
 
 // 常用网址点击：有 chrome.tabs 时拦截默认跳转，按后台规则用 tabs.create 打开。
 function onSiteClick(e) {
+  // 2026-11-27 复核 P1-4：分类 chip 点击——切换显示对应分类站点网格。
+  const chip = e.target.closest(".home-site-chip");
+  if (chip) {
+    siteActiveCat = chip.dataset.cat || null;
+    renderSites();
+    return;
+  }
   const a = e.target.closest("a.home-site");
   if (!a) return;
   const url = a.getAttribute("href");
   if (!url || !chromeApi?.tabs?.create) return; // 无扩展 API 时回退 <a target=_blank> 原行为
   e.preventDefault();
-  const background = settings?.openTabsInBackground !== false;
-  void chromeApi.tabs.create({ url, active: !background });
+  // 2026-11-27 复核：与搜索同口径——仅 focus-webpage 前台，其余后台打开留主页。
+  const mode = settings?.openTabMode || "switch-keep-focus";
+  void chromeApi.tabs.create({ url, active: mode === "focus-webpage" });
 }
 
 // ===== 2026-11-26 离线装饰（纯本地计算，不出站、不申请权限）=====
@@ -344,8 +363,7 @@ function renderDecorations() {
   show("#homeQuickbar", d.quickbar);
   show("#homeNotesWrap", d.notes);
   show("#homeKeysCard", d.keysCard);
-  const notes = $("#homeNotes");
-  if (notes) notes.value = cfg.notes || "";
+  // 2026-11-27 复核 P1-5：旧单条便签 UI 已移除，只保留 noteItems 多条列表。
   renderNoteItems();
   const keysList = $("#homeKeysList");
   if (keysList && !keysList.childElementCount) {
@@ -663,10 +681,7 @@ function bind() {
   $("#homeSearchForm")?.addEventListener("submit", onSearch);
   $("#homeSites")?.addEventListener("click", onSiteClick);
   $("#homeQuickbar")?.addEventListener("click", onQuickbar);
-  $("#homeNotes")?.addEventListener("input", (e) => {
-    cfg.notes = e.target.value.slice(0, 4000);
-    void persist();
-  });
+
   // 2026-11-27 P1：多条便签——添加 / 删除 / 完成 / 日期 / 提醒。
   $("#homeNoteAdd")?.addEventListener("click", () => {
     if (!Array.isArray(cfg.noteItems)) cfg.noteItems = [];
@@ -742,7 +757,9 @@ function bind() {
     say("默认搜索引擎已切换");
   });
 
-  $("#homeSettings")?.addEventListener("click", () => {
+  // 2026-11-27 复核 P1-3：独立的「打开配置分区」入口——齿轮回到面板默认顶部，
+  // 音乐入口只滚动到音乐分区；两者不再互相调用，避免滚动位置互相残留。
+  const openHomeConfig = (sectionId) => {
     wpEditMode = null; // 每次打开都回到已持久化的真实模式
     renderEngines();
     renderSiteEditList();
@@ -750,9 +767,20 @@ function bind() {
     renderDecorations();
     renderMusicControls();
     renderWeatherControls();
-    $("#homeCfgMask").hidden = false;
-  });
-  // 2026-11-27 审计 P1-8：顶部音乐图标——已配置则切换播放器显示，未配置则打开设置面板。
+    const mask = $("#homeCfgMask");
+    if (!mask) return;
+    mask.hidden = false;
+    const content = mask.querySelector(".content");
+    if (content) content.scrollTop = 0; // 复位上次滚动位置
+    if (sectionId) {
+      // 等一帧让布局稳定后再滚动到目标分区。
+      requestAnimationFrame(() => {
+        $(sectionId)?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    }
+  };
+  $("#homeSettings")?.addEventListener("click", () => openHomeConfig(null));
+  // 2026-11-27 审计 P1-8：顶部音乐图标——已配置则切换播放器显示，未配置则打开音乐分区。
   $("#homeMusicToggle")?.addEventListener("click", () => {
     const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
     if (music.enabled && music.external?.embedUrl) {
@@ -766,9 +794,8 @@ function bind() {
       }
       return;
     }
-    // 未配置：打开设置面板并引导到音乐配置（复用设置按钮的统一渲染入口）。
-    $("#homeSettings")?.click();
-    $("#musicEnabled")?.scrollIntoView({ block: "center", behavior: "smooth" });
+    // 未配置：直接打开配置面板的音乐分区（不经过齿轮入口）。
+    openHomeConfig("#musicEnabled");
     say("先在设置中粘贴音乐外链");
   });
   $("#homeCfgClose")?.addEventListener("click", () => {
@@ -1023,6 +1050,21 @@ function bind() {
     void persist();
     renderSiteEditList();
     say("已添加常用网址");
+  });
+
+  // 2026-11-27 复核 P1-4：恢复推荐站点——补回缺失的内置默认站点（显式要求，同步清隐藏记录）。
+  $("#siteRestoreDefaults")?.addEventListener("click", () => {
+    const r = hp.restoreDefaultSites(cfg);
+    if (!r.restored) {
+      say("推荐站点已齐全，无需恢复");
+      return;
+    }
+    cfg.sites = r.sites;
+    cfg.hiddenDefaultSiteUrls = r.hiddenDefaultSiteUrls;
+    void persist();
+    renderSiteEditList();
+    renderSites();
+    say(`已恢复 ${r.restored} 个推荐站点`);
   });
 
   // 配置面板：编辑输入即时写回，删除/排序按钮

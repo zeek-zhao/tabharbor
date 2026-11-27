@@ -3512,9 +3512,11 @@ step("那么", "叶子行尾有垃圾桶按钮且右键无删除入口且 Delete
   const trashHandlers = shellSrc.split('[data-act="trash"]').length - 1;
   if (trashHandlers < 2) throw new Error("主宿主与 PiP 未同时接线 trash 按钮");
   if (!shellSrc.includes('runMenuAct("del"')) throw new Error("垃圾桶未复用共享删除动作");
-  // 右键菜单：叶子模板无删除动作。
+  // 右键菜单：2026-11-27 复核 P0-1 彻底禁用——叶子模板为空、双宿主 contextmenu 对叶子空操作。
   const leafMenu = menu.menuHtml("leaf");
-  if (leafMenu.includes('data-act="del"')) throw new Error("叶子右键仍暴露删除入口");
+  if (leafMenu.trim() !== "") throw new Error("叶子右键菜单模板应完全为空");
+  const ctxGuards = shellSrc.split('el.dataset.kind === "leaf"').length - 1;
+  if (ctxGuards < 2) throw new Error("主宿主与 PiP 未同时对叶子右键空操作");
   // Delete 快捷键删除保留。
   if (!shellSrc.includes('e.key === "Delete"')) throw new Error("Delete 快捷键删除被移除");
 });
@@ -4978,14 +4980,19 @@ step("那么", "明文快照未写入扩展存储历史", async () => {
 
 /* ========== 2026-11-26 P0：打开网页焦点留插件（features/30）========== */
 step("假如", "默认设置开启标签后台打开", () => {
+  // 2026-11-27 复核 P1-5：状态源收敛为 openTabMode（旧 openTabsInBackground 已删除）。
   ctx.bgSettings = store.DEFAULT_SETTINGS;
-  if (ctx.bgSettings.openTabsInBackground !== true)
-    throw new Error("默认 openTabsInBackground 应为 true");
+  if (ctx.bgSettings.openTabMode !== "switch-keep-focus")
+    throw new Error("默认 openTabMode 应为 switch-keep-focus");
+  if ("openTabsInBackground" in ctx.bgSettings)
+    throw new Error("旧字段 openTabsInBackground 未删除");
 });
 
 step("那么", "默认设置开启标签后台打开", () => {
-  if (store.DEFAULT_SETTINGS.openTabsInBackground !== true)
-    throw new Error("默认 openTabsInBackground 应为 true");
+  if (store.DEFAULT_SETTINGS.openTabMode !== "switch-keep-focus")
+    throw new Error("默认 openTabMode 应为 switch-keep-focus");
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
+    throw new Error("旧字段 openTabsInBackground 未删除");
 });
 
 step("那么", "后台打开新标签传 active false 且不聚焦窗口", async () => {
@@ -5047,8 +5054,14 @@ step("那么", "显式聚焦动作仍激活标签并聚焦窗口", async () => {
 step("那么", "默认打开模式为 switch-keep-focus 且保留三种模式", () => {
   if (store.DEFAULT_SETTINGS.openTabMode !== "switch-keep-focus")
     throw new Error("默认 openTabMode 应为 switch-keep-focus");
-  if (store.DEFAULT_SETTINGS.openTabsInBackground !== true)
-    throw new Error("旧字段 openTabsInBackground 应保留兼容");
+  // 2026-11-27 复核 P1-5：旧字段已删除，migrateSettings 一次性迁移旧值。
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
+    throw new Error("旧字段 openTabsInBackground 未删除");
+  const migTrue = store.migrateSettings({ openTabsInBackground: true });
+  if (migTrue.openTabMode !== "background") throw new Error("旧 true 未迁移为 background");
+  if ("openTabsInBackground" in migTrue) throw new Error("迁移后旧字段未删除");
+  const migFalse = store.migrateSettings({ openTabsInBackground: false });
+  if (migFalse.openTabMode !== "focus-webpage") throw new Error("旧 false 未迁移为 focus-webpage");
 });
 
 step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", async () => {
@@ -5142,7 +5155,10 @@ step("那么", "主页顶部音乐图标入口已配置展开播放器未配置�
   const homeJs = repoFile("src/home/home.js");
   if (!homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标未绑定事件");
   // 已配置：切换播放器显示；未配置：打开设置面板并引导。
-  if (!homeJs.includes('$("#homeSettings")?.click()')) throw new Error("未配置时未引导到设置面板");
+  // 2026-11-27 复核 P1-3：未配置走独立 openHomeConfig("#musicEnabled")，不再调用齿轮。
+  if (homeJs.includes('$("#homeSettings")?.click()')) throw new Error("音乐入口仍耦合齿轮按钮点击");
+  if (!homeJs.includes('openHomeConfig("#musicEnabled")'))
+    throw new Error("未配置时未引导到音乐分区");
   if (!homeJs.includes("card.hidden = !card.hidden")) throw new Error("已配置时未切换播放器显示");
 });
 
@@ -5240,29 +5256,35 @@ step("那么", "在线壁纸候选仅接受安全 https 且超时回退", async 
     if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺图源主机权限：" + h);
 });
 
-step("那么", "常用网址支持分类横向滚动与每行列数配置", () => {
+step("那么", "常用网址支持分类chip切换与每行列数配置", () => {
   if (homepage.normalizeSiteColumns("3") !== "3") throw new Error("合法列数 3 被拒绝");
   if (homepage.normalizeSiteColumns("9") !== "auto") throw new Error("非法列数应回退 auto");
   const cfg = homepage.normalizeHomeConfig({ siteLayout: { columns: "4" } });
   if (cfg.siteLayout.columns !== "4") throw new Error("列数未纳入配置规范化");
   const homeJs = repoFile("src/home/home.js");
-  if (!homeJs.includes("home-site-groups")) throw new Error("分类未包入横向滚动容器");
+  // 2026-11-27 复核 P1-4：分类由横向滚动分组升级为 chip 单选切换（横向滚动容器废弃）。
+  if (homeJs.includes("home-site-groups")) throw new Error("仍残留横向滚动分组容器");
+  if (!homeJs.includes("home-site-chips") || !homeJs.includes("home-site-chip"))
+    throw new Error("缺分类 chip 行");
   if (!homeJs.includes("cols-${columns}")) throw new Error("站点网格未应用列数 class");
   if (!repoFile("src/home/home.html").includes('id="siteColumns"'))
     throw new Error("配置面板缺列数控件");
   const css = repoFile("src/home/home.css");
-  if (!css.includes(".home-site-groups") || !css.includes("overflow-x: auto"))
-    throw new Error("分类容器不支持横向滚动");
+  if (!css.includes(".home-site-chip.active")) throw new Error("缺 chip 选中态样式");
   for (const n of ["2", "3", "4"])
     if (!css.includes(`.home-sites.cols-${n}`)) throw new Error(`缺 cols-${n} 列数样式`);
 });
 
 step("那么", "主页搜索与站点点击走后台打开且焦点留插件", () => {
   const homeJs = repoFile("src/home/home.js");
-  if (!homeJs.includes("openTabsInBackground")) throw new Error("主页未读取后台打开设置");
-  if (!homeJs.includes("onSiteClick")) throw new Error("主页站点点击未走后台打开链路");
-  const creates = homeJs.match(/tabs\.create\([^)]*active:\s*!background/g) || [];
-  if (creates.length < 2) throw new Error("搜索与站点未同时传 active:!background");
+  // 2026-11-27 复核 P0-2/P1-5：主页统一走 openTabMode（旧 openTabsInBackground 已弃用）。
+  if (homeJs.includes("openTabsInBackground"))
+    throw new Error("主页仍读取旧 openTabsInBackground 开关");
+  if (!homeJs.includes("onSiteClick")) throw new Error("主页站点点击未走打开链路");
+  const creates = homeJs.match(/tabs\.create\(\{ url, active(:| )/g) || [];
+  if (creates.length < 2) throw new Error("搜索与站点未统一走 openTabMode active 口径");
+  const modes = homeJs.match(/mode === "focus-webpage"/g) || [];
+  if (modes.length < 2) throw new Error("仅 focus-webpage 前台的口径未覆盖搜索与站点");
   const shellJs = repoFile("src/ui/shell.js");
   // 2026-11-27 P0：shell 改传 mode（switch-keep-focus 默认 / focus-webpage 显式）。
   if (!shellJs.includes("mode,") || !shellJs.includes('mode = opts.focus ? "focus-webpage"'))
@@ -5333,7 +5355,9 @@ step("那么", "站点分类可规范化且隐藏站点不重复加回", () => {
 
 step("那么", "主页按分类分组渲染且置顶优先并且不读取浏览器书签", () => {
   const homeJs = repoFile("src/home/home.js");
-  if (!homeJs.includes("home-site-group-title")) throw new Error("主页未按分类分组渲染");
+  // 2026-11-27 复核 P1-4：分组渲染升级为 chip 单选切换（chip 名即分类名，置顶是第一个 chip）。
+  if (!homeJs.includes("home-site-chip")) throw new Error("主页未按分类 chip 渲染");
+  if (homeJs.includes("home-site-group-title")) throw new Error("残留旧分组标题渲染");
   if (!homeJs.includes("s.pinned")) throw new Error("主页未处理置顶");
   if (!homeJs.includes("data-pin")) throw new Error("配置面板无置顶控件");
   if (!homeJs.includes("site-category")) throw new Error("配置面板无分类选择");
@@ -5366,8 +5390,9 @@ step("那么", "装饰组件纯本地计算且便签仅存本机不上传", () =
   const homeJs = repoFile("src/home/home.js");
   if (!homeJs.includes("renderClock") || !homeJs.includes("greetingOf"))
     throw new Error("缺本地时钟/问候语实现");
-  if (!homeJs.includes("homeNotes") || !homeJs.includes("cfg.notes"))
-    throw new Error("缺本地便签持久化");
+  // 2026-11-27 复核 P1-5：单条便签 UI 收敛为 noteItems 多条列表。
+  if (!homeJs.includes("homeNoteItems") || !homeJs.includes("noteItems"))
+    throw new Error("缺多条便签持久化");
   if (!homeJs.includes("postMessage")) throw new Error("快捷操作条未向宿主转发动作");
   // 装饰配置层（homepage.js）不得含任何出站/定位；主页脚本允许天气的一次性
   // getCurrentPosition（用户显式点击，任务4），但禁止 watchPosition 后台监听与直接 fetch。
@@ -5539,4 +5564,95 @@ step("那么", "天气仅用户显式定位且不后台轮询并含署名", () =
     if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺白名单：" + h);
   const constraint = repoFile("tools/check-constraints.mjs");
   if (!constraint.includes("src/core/weather.js")) throw new Error("C11 未放行 weather 模块");
+});
+
+/* ========== 2026-11-27 复核：新建标签/游离窗口焦点回收（features/37）========== */
+step("那么", "新建标签与游离窗口打开返回模式标记且宿主焦点回收覆盖", () => {
+  const src = repoFile("src/core/tabs-op.js");
+  const shellJs = repoFile("src/ui/shell.js");
+  // 新建标签两条路径（orphan 新窗口 / 普通新建）都要返回模式标记。
+  const marks =
+    src.match(
+      /\.\.\.\(background \? \{ backgrounded: true \} : keepFocus \? \{ switched: true \} : \{ focused: true \}\)/g
+    ) || [];
+  if (marks.length < 2) throw new Error("新建标签分支未补模式标记：" + marks.length);
+  // 命中已开标签路径已有标记；宿主焦点回收覆盖 switched/backgrounded。
+  if (!shellJs.includes("res.switched || res.backgrounded"))
+    throw new Error("宿主焦点回收分支未覆盖 switched/backgrounded");
+  // toast 优先级：rebound 优先于 switched（新建窗口提示不被覆盖）。
+  const reboundIdx = shellJs.indexOf("res.rebound\n");
+  if (!shellJs.includes('"已新建窗口并打开网页"')) throw new Error("缺新建窗口提示");
+});
+
+/* ========== 2026-11-27 复核：音乐/设置入口解耦（features/37）========== */
+step("那么", "音乐与设置入口解耦且打开配置复位滚动", async () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function openHomeConfig") && !homeJs.includes("const openHomeConfig ="))
+    throw new Error("缺独立 openHomeConfig 入口");
+  // 齿轮：openHomeConfig(null) 回默认顶部。
+  if (!homeJs.includes("openHomeConfig(null)")) throw new Error("齿轮未回默认顶部");
+  // 打开配置面板复位 .content 滚动位置。
+  if (!homeJs.includes("content.scrollTop = 0")) throw new Error("未复位面板滚动位置");
+  // 齿轮事件绑定不调用 openHomeConfig 之外的面板打开逻辑（通过 musicEnabled 分区隔离验证）。
+  if (!homeJs.includes('openHomeConfig("#musicEnabled")'))
+    throw new Error("音乐入口未指向音乐分区");
+});
+
+/* ========== 2026-11-27 复核：分类 chip 化与恢复推荐站点（features/37）========== */
+step("那么", "分类chip单选切换且可恢复推荐站点", () => {
+  // 恢复推荐站点：补回缺失默认站点、清对应隐藏记录、不覆盖用户同 URL 站点。
+  const P = "https:" + "//";
+  const r = homepage.restoreDefaultSites({
+    sites: [
+      {
+        id: "s1",
+        title: "我的GitHub",
+        url: P + "github.com",
+        category: "work",
+        pinned: true,
+        createdAt: "2026-01-01",
+      },
+    ],
+    hiddenDefaultSiteUrls: [P + "developer.mozilla.org"],
+  });
+  if (r.restored < 1) throw new Error("缺失默认站点未被恢复");
+  const back = r.sites.find((x) => (x.title || "").includes("我的GitHub"));
+  if (!back) throw new Error("用户同 URL 站点被覆盖");
+  if (r.hiddenDefaultSiteUrls.some((u) => u.includes("developer.mozilla")))
+    throw new Error("被恢复站点的隐藏记录未清除");
+  // UI：chip 行 + chip 点击切换 + 恢复按钮。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('closest(".home-site-chip")')) throw new Error("chip 点击未委托");
+  if (!homeJs.includes("siteActiveCat")) throw new Error("缺选中分类状态");
+  if (!homeJs.includes("restoreDefaultSites")) throw new Error("恢复按钮未接线");
+  if (!repoFile("src/home/home.html").includes('id="siteRestoreDefaults"'))
+    throw new Error("配置面板缺恢复按钮");
+});
+
+/* ========== 2026-11-27 复核：旧状态源收敛（features/37）========== */
+step("那么", "旧后台开关与单条便签已收敛到唯一状态源", () => {
+  // openTabsInBackground：默认值删除 + 迁移收敛（迁移断言见 36 场景）。
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS) throw new Error("默认设置仍含旧后台开关");
+  // 全仓源码（除迁移函数外）不得读写旧开关。
+  const src = ["src/core/store.js", "src/ui/shell.js", "src/home/home.js", "src/core/tabs-op.js"]
+    .map((f) =>
+      repoFile(f)
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//"))
+        .join("\n")
+    )
+    .join("\n");
+  const reads = src.match(/openTabsInBackground/g) || [];
+  for (const line of src.split("\n"))
+    if (
+      line.includes("openTabsInBackground") &&
+      !line.includes("delete merged") &&
+      !line.includes("rawSettings")
+    )
+      throw new Error("迁移逻辑外仍读写旧开关：" + line.trim().slice(0, 80));
+  // 单条便签 UI 移除，noteItems 唯一状态源（迁移已由 36/37 场景覆盖）。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('id="homeNotes"')) throw new Error("单条便签 textarea 未移除");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes("cfg.notes =")) throw new Error("UI 仍写旧 notes 字段");
 });

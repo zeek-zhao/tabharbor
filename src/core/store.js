@@ -35,12 +35,9 @@ export const DEFAULT_SETTINGS = {
   copyFormat: "md",
   linkShow: false,
   backupTarget: "local",
-  // 2026-11-26 P0（审计口径确认）：打开网页默认后台，焦点留在插件，不跳到网页。
-  // 2026-11-27 审计 P0：默认改为 switch-keep-focus——激活目标标签切换页面，
-  // 但不把浏览器窗口焦点交给网页，打开后重新聚焦插件面板。
-  // 可选值：switch-keep-focus | background | focus-webpage。
-  // openTabsInBackground 保留兼容旧配置/旧 UI 断言；新逻辑以 openTabMode 为准。
-  openTabsInBackground: true,
+  // 2026-11-26 P0：打开网页默认后台，焦点留在插件。2026-11-27 复核 P1-5 收敛状态源：
+  // 旧 openTabsInBackground 字段已删除，唯一状态源 = openTabMode
+  // （switch-keep-focus | background | focus-webpage），旧值由 migrateSettings 一次性迁移。
   openTabMode: "switch-keep-focus",
   // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
   ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
@@ -72,6 +69,18 @@ export const DEFAULT_SETTINGS = {
 export function migrateSettings(rawSettings) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) };
   delete merged.ghBackupPassword;
+  // 2026-11-27 复核 P1-5：旧 openTabsInBackground 开关一次性迁移到 openTabMode 并删除旧字段——
+  // true（后台）→ background；false（前台）→ focus-webpage；未显式设置则保持默认 switch-keep-focus。
+  if (rawSettings && typeof rawSettings.openTabsInBackground === "boolean") {
+    if (
+      typeof merged.openTabMode !== "string" ||
+      !["switch-keep-focus", "background", "focus-webpage"].includes(merged.openTabMode) ||
+      merged.openTabMode === DEFAULT_SETTINGS.openTabMode
+    ) {
+      merged.openTabMode = rawSettings.openTabsInBackground ? "background" : "focus-webpage";
+    }
+  }
+  delete merged.openTabsInBackground;
   if (rawSettings && rawSettings.homepage && typeof rawSettings.homepage === "object") {
     merged.homepage =
       rawSettings.homepageDefaultsVersion !== HOMEPAGE_DEFAULTS_VERSION
