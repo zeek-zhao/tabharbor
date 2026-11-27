@@ -8,6 +8,7 @@ import * as store from "../core/store.js";
 import * as homepage from "../core/homepage.js";
 import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
+import * as keymap from "../core/keymap.js";
 import * as editOp from "../core/edit-op.js";
 import * as trashOp from "../core/trash-op.js";
 import {
@@ -130,7 +131,7 @@ function buildShellSkeleton(mode = "pip") {
 
 const KEYS_TABLE = [
   ["上 / 下选择标签", "↑ / ↓"],
-  ["切换页面打开选中标签（焦点留插件，也可双击）", "Enter"],
+  ["打开选中标签（前台跳转，也可双击）", "Enter"],
   ["显式聚焦网页到浏览器", "Ctrl+Shift+Enter"],
   ["打开整组已关闭标签", "Ctrl + O"],
   ["定位当前标签", "Ctrl + L"],
@@ -157,7 +158,7 @@ const GUIDE_HTML = `
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；主页入口已并入设置「外观」分类，也可从主页右上角齿轮进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
-  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter（或双击）<b>切换页面</b>打开选中网页但焦点仍留在插件（不把浏览器窗口焦点交给网页），可继续用 ↑↓/Delete 操作；需要把焦点交给网页时按 Ctrl+Shift+Enter 显式聚焦。</li>
+  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter（或双击）<b>前台</b>打开选中网页（网页获得浏览器焦点）；→ 聚焦当前网页、← 回到插件面板（可在设置里自定义全部快捷键）；在设置里切到「后台打开」可让焦点留在插件继续操作。</li>
   <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页脚「快速上手指南」图标右侧的 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
@@ -621,12 +622,9 @@ export async function bootShell(root) {
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
       const winId = boundWindowId(m, id);
-      // 显式聚焦动作优先；否则按设置模式，缺省 switch-keep-focus。
-      const configured = ["switch-keep-focus", "background", "focus-webpage"].includes(
-        settings.openTabMode
-      )
-        ? settings.openTabMode
-        : "switch-keep-focus";
+      // AI 任务：默认前台打开（网页获得浏览器焦点）；仅设置为 background 时后台打开。
+      // Ctrl+Shift+Enter 显式聚焦动作走 focus-webpage 兼容别名（行为同前台）。
+      const configured = settings.openTabMode === "background" ? "background" : "foreground";
       const mode = opts.focus ? "focus-webpage" : configured;
       const res = await tabsOp.openTab(chrome, node, urls, {
         windowId: winId,
@@ -665,10 +663,9 @@ export async function bootShell(root) {
       }
       if (dirty) await store.saveModel(m);
       await refreshOpen();
-      // 2026-11-27 P0：切换页面后把焦点交还插件宿主——refreshOpen 重渲染后重新标记选中叶子、
-      // 滚动可见并主动 focus 宿主文档，确保用户能继续用 ↑↓/Enter 操作插件树。
-      // switch-keep-focus / background 都不调用 window.focus，也不把窗口焦点交给网页。
-      if ((res.switched || res.backgrounded) && selectedId) {
+      // AI 任务：前台打开是默认口径（网页获得焦点，不回收）；仅 background 模式
+      // 把焦点留回插件宿主（重新标记选中叶子、滚动可见、focus 宿主文档）。
+      if (res.backgrounded && selectedId) {
         const el = body.querySelector(`.leaf[data-id="${selectedId}"]`);
         if (el) {
           el.classList.add("selected");
@@ -682,14 +679,12 @@ export async function bootShell(root) {
       }
       toast(
         res.focused
-          ? "已聚焦已打开网页"
+          ? "已打开网页（前台）"
           : res.rebound
             ? "已新建窗口并打开网页"
-            : res.switched
-              ? "已切换页面（焦点仍在插件，可继续操作）"
-              : res.backgrounded
-                ? "已在后台打开网页（焦点仍在插件）"
-                : "已打开网页"
+            : res.backgrounded
+              ? "已在后台打开网页（焦点留在插件）"
+              : "已打开网页"
       );
     } catch (err) {
       say("打开失败：" + err.message);
@@ -1250,11 +1245,15 @@ export async function bootShell(root) {
   document.addEventListener("keydown", async (e) => {
     const t = e.target;
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    // AI 任务：快捷键改动作注册表 + 本地 keymap（可录制/冲突提示/恢复默认）。
+    // 左右方向键：→ 聚焦当前网页、← 回到插件面板；均可在设置里重新录制。
+    const action = keymap.matchAction(settings.keymap, e);
+    if (!action) return;
+    if (action === "cursor-next" || action === "cursor-prev") {
       e.preventDefault();
       const ids = orderedLeafIds();
       if (!ids.length) return;
-      const down = e.key === "ArrowDown";
+      const down = action === "cursor-next";
       const cur = ids.indexOf(selectedId);
       const nextIdx =
         cur < 0
@@ -1270,13 +1269,14 @@ export async function bootShell(root) {
       await selectLeaf(pickId);
       return;
     }
-    const leaves = visibleLeaves();
-    const cur = leaves.findIndex((el) => el.dataset.id === selectedId);
-    if (e.key === "Enter" && selectedId) {
+    if (action === "open-selected" || action === "open-selected-focus") {
+      if (!selectedId) return;
       e.preventDefault();
-      // Ctrl/Cmd+Shift+Enter = 显式聚焦网页（唯一允许激活标签+聚焦窗口的入口）。
-      await openLeafById(selectedId, { focus: e.shiftKey });
-    } else if (e.key === "Delete" && selectedId) {
+      await openLeafById(selectedId, { focus: action === "open-selected-focus" });
+      return;
+    }
+    if (action === "trash-selected") {
+      if (!selectedId) return;
       e.preventDefault();
       const node = findNode(m, selectedId);
       if (!node) return;
@@ -1288,23 +1288,35 @@ export async function bootShell(root) {
         selectedId = null;
         await render();
       }
-    } else if (e.key === "c" && (e.ctrlKey || e.metaKey) && !e.shiftKey && selectedId) {
+      return;
+    }
+    if (action === "copy-selected") {
+      if (!selectedId) return;
       e.preventDefault();
       try {
         await copyNode(selectedId);
       } catch (err) {
         say("复制失败：" + err.message);
       }
-    } else if (e.key === "l" && (e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    if (action === "locate-selected") {
       e.preventDefault();
       root.querySelector("#btnLocate")?.click();
-    } else if (e.key === "e" && (e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    if (action === "toggle-collapse") {
       e.preventDefault();
       root.querySelector("#btnToggleAll")?.click();
-    } else if (e.key === "L" && e.shiftKey && (e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    if (action === "toggle-links") {
       e.preventDefault();
       root.querySelector("#btnLinks")?.click();
-    } else if (e.key === "o" && (e.ctrlKey || e.metaKey) && selectedId) {
+      return;
+    }
+    if (action === "open-group") {
+      if (!selectedId) return;
       e.preventDefault();
       const leaf = findNode(m, selectedId);
       const gid =
@@ -1320,18 +1332,142 @@ export async function bootShell(root) {
           say("打开失败：" + err.message);
         }
       }
-    } else if (e.key === "d" && (e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    if (action === "toggle-theme") {
       e.preventDefault();
       root.querySelector("#btnTheme")?.click();
-    } else if (e.key === "p" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault(); // 原型 Ctrl+P：置顶 / 取消置顶（仅独立窗口有该按钮）
+      return;
+    }
+    if (action === "toggle-pip") {
+      e.preventDefault();
       root.querySelector("#btnPip")?.click();
-    } else if (e.key === "Backspace" && (e.ctrlKey || e.metaKey)) {
+      return;
+    }
+    if (action === "open-trash") {
       e.preventDefault();
       renderTrashList();
       openModal("modalTrash");
+      return;
+    }
+    if (action === "focus-web") {
+      // → ：前台聚焦选中标签所在网页（激活标签 + 聚焦窗口）。
+      e.preventDefault();
+      if (!selectedId) {
+        toast("先选中一个标签");
+        return;
+      }
+      const node = findNode(m, selectedId);
+      if (node?.tabId != null) {
+        try {
+          await chrome.tabs.update(node.tabId, { active: true });
+          const tab = (await chrome.tabs.query({})).find((x) => x.id === node.tabId);
+          if (tab?.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
+          toast("已聚焦网页（按 ← 回到面板）");
+        } catch (err) {
+          say("聚焦失败：" + err.message);
+        }
+      } else {
+        // 未打开：走前台打开（网页获得焦点）。
+        await openLeafById(selectedId, { focus: true });
+      }
+      return;
+    }
+    if (action === "focus-panel") {
+      // ← ：焦点回到插件面板选中行（面板未打开时本快捷键仅在面板内生效，无需额外开面板）。
+      e.preventDefault();
+      if (body) {
+        if (!body.hasAttribute("tabindex")) body.setAttribute("tabindex", "-1");
+        if (typeof body.focus === "function") body.focus({ preventScroll: true });
+      }
+      if (selectedId) {
+        const el = body.querySelector(`.leaf[data-id="${selectedId}"]`);
+        if (el) {
+          el.classList.add("selected");
+          el.scrollIntoView({ block: "nearest" });
+        }
+      }
+      toast("焦点已回到面板");
+      return;
     }
   });
+
+  // ---- AI 任务：快捷键动作注册表 UI（录制 / 冲突提示 / 恢复默认）----
+  let keymapRecording = null; // 正在录制的动作 id
+  const renderKeymapList = () => {
+    const list = root.querySelector("#keymapList");
+    if (!list) return;
+    const map = keymap.normalizeKeymap(settings.keymap);
+    list.innerHTML = keymap.KEY_ACTIONS.map(
+      (a) => `
+      <div class="keymap-row${keymapRecording === a.id ? " recording" : ""}" data-act="${a.id}">
+        <div class="keymap-label"><span class="t">${a.label}</span><span class="d">${a.desc || ""}</span></div>
+        <button class="keymap-key" data-act="${a.id}" type="button">${
+          keymapRecording === a.id ? "按任意键…" : map[a.id]
+        }</button>
+      </div>`
+    ).join("");
+  };
+  const saveKeymap = async (actionId, binding) => {
+    settings.keymap = keymap.normalizeKeymap({ ...settings.keymap, [actionId]: binding });
+    await store.saveSettings(settings);
+  };
+  const onKeymapListClick = async (e) => {
+    const doc = root.ownerDocument || document;
+    const btn = e.target.closest(".keymap-key");
+    const resetBtn = e.target.closest("#keymapReset");
+    if (resetBtn) {
+      settings.keymap = keymap.defaultKeymap();
+      await store.saveSettings(settings);
+      keymapRecording = null;
+      renderKeymapList(host);
+      toast("快捷键已恢复默认");
+      return;
+    }
+    if (!btn) return;
+    const actionId = btn.dataset.act;
+    if (keymapRecording === actionId) {
+      // 再次点击取消录制
+      keymapRecording = null;
+      renderKeymapList(host);
+      return;
+    }
+    keymapRecording = actionId;
+    renderKeymapList(host);
+    const capture = async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      doc.removeEventListener("keydown", capture, true);
+      if (ev.key === "Escape") {
+        keymapRecording = null;
+        renderKeymapList(host);
+        return;
+      }
+      const binding = keymap.normalizeKeyBinding(keymap.formatKeyEvent(ev));
+      keymapRecording = null;
+      if (!binding) {
+        renderKeymapList(host);
+        return;
+      }
+      const conflicts = keymap.findConflicts(settings.keymap, binding, actionId);
+      if (conflicts.length) {
+        const names = conflicts
+          .map((id) => keymap.KEY_ACTIONS.find((a) => a.id === id)?.label || id)
+          .join("、");
+        toast(`与「${names}」冲突，请换一个键`);
+        renderKeymapList(host);
+        return;
+      }
+      await saveKeymap(actionId, binding);
+      renderKeymapList(host);
+      toast("快捷键已更新");
+    };
+    doc.addEventListener("keydown", capture, true);
+  };
+  root.addEventListener("click", onKeymapListClick);
+  // 打开设置弹窗时同步快捷键列表（复用 btnSettings 的打开动作，追加渲染）。
+  root.querySelector("#btnSettings")?.addEventListener("click", () => renderKeymapList());
+  // keymapReset 也在 click 委托里处理（见 onKeymapListClick）。
 
   // ---- #30 右键菜单（menuHtml 模板 + data-act 分发） ----
   const ctxMenu = root.querySelector("#ctxMenu");

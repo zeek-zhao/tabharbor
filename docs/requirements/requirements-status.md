@@ -207,3 +207,17 @@ BDD 场景总数：338/338 PASS（`b26fad7` 时 325 → 本轮 +13）。
 | F-104 (P1) | 状态源乱 | openTabsInBackground 与 openTabMode 并存；notes 字符串与 noteItems 数组并存 | 默认设置删除 openTabsInBackground，migrateSettings 一次性迁移（true→background / false→focus-webpage）并删除旧字段；normalizeHomeConfig 幂等迁移旧 notes 进 noteItems 首条；单条便签 textarea 从 UI 移除 | 已实现 |
 
 BDD 场景总数：343/343 PASS（338 → 本轮 +5，feature 37）。本轮无红线口径变更（C11/C12 白名单不变）。
+
+## 16. AI 任务轮：前台打开/快捷键注册表/三栏大屏/完整播放器/天气预报（基于 `157db8f`）
+
+> 依据《TabHarbor-AI任务-前台打开焦点切换全屏主页音乐播放器-2026-11-27》与配套 v5 桌面大屏原型。未取得真机证据前一律「已实现」。
+
+| ID | 任务 | 实现 | 状态 |
+| --- | --- | --- | --- |
+| F-105 | 默认前台打开 | openTabMode 值域收敛 foreground（默认）/background；旧值（switch-keep-focus/focus-webpage）迁移 foreground；foreground = 前台跳转、网页获得焦点、不回收插件键盘焦点；焦点回收仅保留在 background 模式；主页搜索/站点同步前台跳转 | 已实现 |
+| F-106 | 快捷键动作注册表 | 新增 `src/core/keymap.js`：15 个动作（含 focus-web ←→/focus-panel 左右焦点切换）、键串规范化（修饰键定序 + 主键白名单）、matchAction、findConflicts、defaultKeymap；settings.keymap 持久化 + migrateSettings 规范化；shell 主宿主 keydown 改 matchAction 分发；设置面板快捷键卡支持录制（Escape 取消）、冲突提示、恢复默认；浏览器全局命令仍由 Chrome 快捷键页管理 | 已实现 |
+| F-107 | 主页 v5 三栏大屏 | `.home-grid`（左 280px/中 1fr/右 320px，≤1080px 单列）；左栏时钟天气/快捷操作/便签（移除「定位当前」按钮、加导出）；中栏搜索+站点（chip 行首「全部」）；右栏音乐播放器/快捷键卡/站点分组统计卡（管理按钮打开设置）；列数收敛 auto/4/5/6（旧 2/3 回退 auto） | 已实现 |
+| F-108 | 完整音乐播放器 | music.local 扩展（tracks ≤50 https 直链、playlists ≤10、loop off/all/one、shuffle、volume 0-1、muted）；原生 `<audio>`（preload=none 不自动下载）：播放暂停/上下首/进度拖动/音量/静音/循环三态/随机/播放列表切换/添加曲目；外链 iframe 保留兜底（外链兜底打开按钮），不显示不可控伪控件 | 已实现 |
+| F-109 | 天气预报 | fetchCurrentWeather 同一次请求附带 daily（今日起 4 天最高/最低温与天气码），不增加请求次数；天气卡片渲染多天预报行 | 已实现 |
+
+BDD 场景总数：347/347 PASS（343 → +4，feature 38）。红线口径：无 C11/C12 白名单变更、无新增权限；音频直链为用户主动输入的运行时资源（同壁纸 https 链接口径）。

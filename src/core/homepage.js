@@ -42,11 +42,12 @@ export const SITE_CATEGORIES = [
 const SITE_CREATED_AT = "2026-11-26";
 
 // 2026-11-27 审计 P1：常用网址布局——分类横向滚动 + 每行列数（auto/2/3/4）。
+// AI 任务（v5 原型）：大屏网格列数收敛为 auto / 4 / 5 / 6；旧 2/3 由 normalizeSiteColumns 回退 auto。
 export const SITE_COLUMN_OPTIONS = [
   { id: "auto", name: "自适应" },
-  { id: "2", name: "每行 2 个" },
-  { id: "3", name: "每行 3 个" },
   { id: "4", name: "每行 4 个" },
+  { id: "5", name: "每行 5 个" },
+  { id: "6", name: "每行 6 个" },
 ];
 export function normalizeSiteColumns(value) {
   return SITE_COLUMN_OPTIONS.some((o) => o.id === String(value)) ? String(value) : "auto";
@@ -607,7 +608,53 @@ export function normalizeMusic(raw) {
         : def.external.height,
       fallbackUrl: normalizeMusicUrl(ex.fallbackUrl) || sourceUrl,
     },
-    local: { tracks: [], volume: 0.8, repeat: "off" },
+    // AI 任务：完整播放器——本地/直链曲目原生 <audio> 播放；external iframe 仅作嵌入兜底。
+    local: normalizeMusicLocal(src.local),
+  };
+}
+
+/**
+ * AI 任务：本地播放列表规范化——曲目（title/artist/url/duration）与播放列表（name + trackIds）。
+ * url 仅接受 https 直链（normalizeMusicUrl），防止伪协议/注入；曲目 ≤50、列表 ≤10。
+ * 播放控制状态（loop/shuffle/volume/muted）纯本机持久化；播放位置为内存态不入库。
+ */
+export function normalizeMusicLocal(raw) {
+  const src = raw && typeof raw === "object" ? raw : {};
+  const tracks = (Array.isArray(src.tracks) ? src.tracks : [])
+    .filter((t) => t && typeof t === "object")
+    .slice(0, 50)
+    .map((t) => ({
+      id: String(t.id || `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+      title: String(t.title || "").slice(0, 120) || "未命名曲目",
+      artist: String(t.artist || "").slice(0, 80),
+      url: normalizeMusicUrl(t.url),
+      duration: Number.isFinite(Number(t.duration)) ? Math.max(0, Number(t.duration)) : 0,
+    }))
+    .filter((t) => t.url);
+  const idSet = new Set(tracks.map((t) => t.id));
+  const playlists = (Array.isArray(src.playlists) ? src.playlists : [])
+    .filter((pl) => pl && typeof pl === "object")
+    .slice(0, 10)
+    .map((pl) => ({
+      id: String(pl.id || `list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+      name: String(pl.name || "").slice(0, 40) || "播放列表",
+      trackIds: (Array.isArray(pl.trackIds) ? pl.trackIds : [])
+        .map(String)
+        .filter((id) => idSet.has(id)),
+    }));
+  const activeListId = playlists.some((pl) => pl.id === src.activeListId)
+    ? String(src.activeListId)
+    : "";
+  const loop = ["off", "all", "one"].includes(src.loop) ? src.loop : "off";
+  const vol = Number(src.volume);
+  return {
+    tracks,
+    playlists,
+    activeListId,
+    loop,
+    shuffle: src.shuffle === true,
+    volume: Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 0.8,
+    muted: src.muted === true,
   };
 }
 

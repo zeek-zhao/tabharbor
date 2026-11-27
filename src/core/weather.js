@@ -63,18 +63,31 @@ export async function fetchCurrentWeather(coords, unit = "celsius", fetchImpl = 
   if (!coords || coords.latitude == null || coords.longitude == null) return null;
   const tempUnit = unit === "fahrenheit" ? "fahrenheit" : "celsius";
   try {
-    const url = `${FORECAST_ENDPOINT}?latitude=${encodeURIComponent(coords.latitude)}&longitude=${encodeURIComponent(coords.longitude)}&current=temperature_2m,weather_code&temperature_unit=${tempUnit}&timezone=auto`;
+    // AI 任务（v5 原型）：同一次请求附带 daily 预报（今日起 4 天最高/最低温与天气码），
+    // 不增加请求次数、不后台轮询。
+    const url = `${FORECAST_ENDPOINT}?latitude=${encodeURIComponent(coords.latitude)}&longitude=${encodeURIComponent(coords.longitude)}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=4&temperature_unit=${tempUnit}&timezone=auto`;
     const resp = await fetchImpl(url);
     if (!resp || !resp.ok) return null;
     const data = await resp.json();
     const cur = data && data.current ? data.current : null;
     if (!cur || cur.temperature_2m == null) return null;
+    const daily = data && data.daily ? data.daily : null;
+    const days =
+      daily && Array.isArray(daily.time)
+        ? daily.time.slice(0, 4).map((t, i) => ({
+            date: t,
+            code: daily.weather_code?.[i],
+            max: daily.temperature_2m_max?.[i],
+            min: daily.temperature_2m_min?.[i],
+          }))
+        : [];
     return {
       temperature: cur.temperature_2m,
       unit: tempUnit,
       code: cur.weather_code,
       label: weatherLabel(cur.weather_code),
       time: cur.time || "",
+      days,
     };
   } catch {
     return null;

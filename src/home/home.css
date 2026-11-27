@@ -33,9 +33,28 @@
   z-index: 1;
 }
 .home-wrap {
-  max-width: 760px;
+  /* AI 任务：全屏桌面大屏主页（v5 原型），不再是窄侧边栏。 */
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 28px 20px 64px;
+  padding: 28px 24px 40px;
+}
+/* v5 三栏仪表盘：左栏时钟天气/快捷操作/便签，中栏搜索+站点，右栏音乐/快捷键/分组。 */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(260px, 320px);
+  gap: 20px;
+  align-items: start;
+}
+.home-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+@media (max-width: 1080px) {
+  .home-grid {
+    grid-template-columns: 1fr;
+  }
 }
 /* 2026-11-27 审计 P1-9：主页 footer——版本/指南/反馈/隐私，弱化样式不抢焦点。 */
 .home-footer {
@@ -59,6 +78,124 @@
 }
 .home-footer-version {
   opacity: 0.8;
+}
+/* AI 任务：右栏站点分组统计卡。 */
+.home-group-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.home-group-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg2);
+  border: 1px solid var(--line2);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+/* AI 任务：完整播放器（v5 原型右栏）。 */
+.home-music-playlists {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.home-music-now {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.home-music-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.home-music-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-music-artist {
+  font-size: 11px;
+  color: var(--fg2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-music-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.home-music-time {
+  font-size: 10px;
+  color: var(--fg2);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+.home-music-seek,
+.home-music-vol {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.home-music-vol {
+  flex: 0 0 72px;
+}
+.home-music-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.home-music-controls .home-mini.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.home-music-play {
+  font-size: 13px;
+}
+.home-music-tracks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.home-music-track {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+.home-music-track:hover {
+  background: var(--bg3);
+}
+.home-music-track.active {
+  color: var(--accent);
+  background: var(--bg3);
+}
+.home-music-track .no {
+  color: var(--fg2);
+}
+.home-music-track .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-music-track .a,
+.home-music-track .d {
+  color: var(--fg2);
+  font-size: 10px;
 }
 .home-top {
   display: flex;
@@ -263,24 +400,15 @@
   font-size: 10px;
   opacity: 0.7;
 }
-/* 2026-11-27 审计 P1：固定每行列数（每组最小宽度随列数增长，配合横向滚动）。 */
-.home-sites.cols-2 {
-  grid-template-columns: repeat(2, minmax(76px, 1fr));
-}
-.home-sites.cols-3 {
-  grid-template-columns: repeat(3, minmax(76px, 1fr));
-}
+/* AI 任务（v5 原型）：大屏网格固定每行列数（4/5/6），中栏宽度充足不再需要横向滚动。 */
 .home-sites.cols-4 {
-  grid-template-columns: repeat(4, minmax(76px, 1fr));
+  grid-template-columns: repeat(4, minmax(88px, 1fr));
 }
-.home-site-group:has(.home-sites.cols-2) {
-  min-width: 200px;
+.home-sites.cols-5 {
+  grid-template-columns: repeat(5, minmax(88px, 1fr));
 }
-.home-site-group:has(.home-sites.cols-3) {
-  min-width: 280px;
-}
-.home-site-group:has(.home-sites.cols-4) {
-  min-width: 360px;
+.home-sites.cols-6 {
+  grid-template-columns: repeat(6, minmax(88px, 1fr));
 }
 .home-site {
   display: flex;
@@ -795,6 +923,24 @@
   font-size: 10px;
   color: var(--fg2);
   opacity: 0.7;
+}
+/* AI 任务：4 天预报行（v5 原型左栏）。 */
+.home-weather-days {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.home-weather-day {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--fg2);
+}
+.home-weather-day .t {
+  color: var(--fg1);
+  font-variant-numeric: tabular-nums;
 }
 /* 2026-11-27 审计 P1：定位失败可读提示 + 卡片重新定位入口。 */
 .home-weather-retry {

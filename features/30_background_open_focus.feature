@@ -19,7 +19,7 @@
   场景: 主页搜索与站点点击走后台且焦点留插件
     那么 主页搜索与站点点击走后台打开且焦点留插件
 
-  场景: 不绑定左右方向键且输入控件不触发树快捷键
-    那么 不绑定左右方向键且输入控件不触发树快捷键
+  场景: 左右键默认绑定焦点切换且输入控件不触发树快捷键
+    那么 左右键默认绑定焦点切换且输入控件不触发树快捷键
 EOF
 cd /workspace/tabharbor && npx prettier --write tests/bdd.steps.mjs >/dev/null 2>&1; node tools/bdd-runner.mjs features >/tmp/bdd30.out 2>&1; echo "exit=$?"; grep -E '汇总|FAIL' /tmp/bdd30.out | head -20; tail -5 /tmp/bdd30.out

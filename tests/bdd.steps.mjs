@@ -967,6 +967,7 @@ step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
 
 /* ---------- 场景组：存储层 v2（FR-008~011，SRS §3.2） ---------- */
 import * as store from "../src/core/store.js";
+import * as keymap from "../src/core/keymap.js";
 
 step("当", "首次读取存储层", async () => {
   ctx.all = await store.loadAll();
@@ -4982,17 +4983,21 @@ step("那么", "明文快照未写入扩展存储历史", async () => {
 step("假如", "默认设置开启标签后台打开", () => {
   // 2026-11-27 复核 P1-5：状态源收敛为 openTabMode（旧 openTabsInBackground 已删除）。
   ctx.bgSettings = store.DEFAULT_SETTINGS;
-  if (ctx.bgSettings.openTabMode !== "switch-keep-focus")
-    throw new Error("默认 openTabMode 应为 switch-keep-focus");
+  // AI 任务：默认前台打开（foreground）；background 为可选模式。
+  if (ctx.bgSettings.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
   if ("openTabsInBackground" in ctx.bgSettings)
     throw new Error("旧字段 openTabsInBackground 未删除");
 });
 
 step("那么", "默认设置开启标签后台打开", () => {
-  if (store.DEFAULT_SETTINGS.openTabMode !== "switch-keep-focus")
-    throw new Error("默认 openTabMode 应为 switch-keep-focus");
+  // AI 任务：默认 foreground；旧值（switch-keep-focus/focus-webpage）迁移为 foreground。
+  if (store.DEFAULT_SETTINGS.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
   if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
     throw new Error("旧字段 openTabsInBackground 未删除");
+  const mig = store.migrateSettings({ openTabMode: "switch-keep-focus" });
+  if (mig.openTabMode !== "foreground") throw new Error("switch-keep-focus 未迁移为 foreground");
 });
 
 step("那么", "后台打开新标签传 active false 且不聚焦窗口", async () => {
@@ -5051,20 +5056,24 @@ step("那么", "显式聚焦动作仍激活标签并聚焦窗口", async () => {
 });
 
 /* ========== 2026-11-27 审计 P0：switch-keep-focus 默认（features/36）========== */
-step("那么", "默认打开模式为 switch-keep-focus 且保留三种模式", () => {
-  if (store.DEFAULT_SETTINGS.openTabMode !== "switch-keep-focus")
-    throw new Error("默认 openTabMode 应为 switch-keep-focus");
-  // 2026-11-27 复核 P1-5：旧字段已删除，migrateSettings 一次性迁移旧值。
+step("那么", "默认打开模式为 foreground 且旧值全部迁移", () => {
+  // AI 任务：值域收敛为 foreground（默认）/ background；switch-keep-focus 与 focus-webpage
+  // 旧值迁移为 foreground（前台语义合并）。
+  if (store.DEFAULT_SETTINGS.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
   if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
     throw new Error("旧字段 openTabsInBackground 未删除");
   const migTrue = store.migrateSettings({ openTabsInBackground: true });
   if (migTrue.openTabMode !== "background") throw new Error("旧 true 未迁移为 background");
   if ("openTabsInBackground" in migTrue) throw new Error("迁移后旧字段未删除");
   const migFalse = store.migrateSettings({ openTabsInBackground: false });
-  if (migFalse.openTabMode !== "focus-webpage") throw new Error("旧 false 未迁移为 focus-webpage");
+  if (migFalse.openTabMode !== "foreground") throw new Error("旧 false 未迁移为 foreground");
+  const migSkf = store.migrateSettings({ openTabMode: "switch-keep-focus" });
+  if (migSkf.openTabMode !== "foreground") throw new Error("switch-keep-focus 未迁移为 foreground");
 });
 
 step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", async () => {
+  // AI 任务：switch-keep-focus 已废弃并迁移为 foreground——命中已开标签 = 激活 + 聚焦窗口。
   const mock = freshMock();
   const tabId = 557;
   ctx.openTabs = [{ id: tabId, title: "切换", url: "https://example.com/switch" }];
@@ -5075,36 +5084,41 @@ step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", a
     url: "https://example.com/switch",
     tabId,
   };
-  const res = await ops.openTab(mock.chrome, node, new Set(), { mode: "switch-keep-focus" });
-  if (!res.switched) throw new Error("switch-keep-focus 应返回 switched");
+  const res = await ops.openTab(mock.chrome, node, new Set(), { mode: "foreground" });
+  if (!res.focused) throw new Error("foreground 命中已开应返回 focused");
   const c = mock.calls;
   if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
-    throw new Error("switch-keep-focus 应 tabs.update(active:true) 切换页面");
-  if (c.winFocus.length !== 0)
-    throw new Error("switch-keep-focus 不应 windows.update(focused) 抢浏览器窗口焦点");
+    throw new Error("foreground 应 tabs.update(active:true) 切换页面");
+  if (c.winFocus.length !== 1)
+    throw new Error("foreground 应 windows.update(focused) 把焦点交给网页");
 });
 
 step("那么", "switch-keep-focus 新标签默认激活且不聚焦窗口", async () => {
+  // AI 任务：foreground 新标签 active:true 前台打开。
   const mock = freshMock();
   const node = { id: "t_new", kind: "tab", title: "新页", url: "https://example.com/new" };
   const res = await ops.openTab(mock.chrome, node, new Set(), {
     windowId: 1,
     topWindow: { id: "w_new", windowId: 1 },
-    mode: "switch-keep-focus",
+    mode: "foreground",
   });
-  if (!res.created) throw new Error("应新建标签");
+  if (!res.created || !res.focused) throw new Error("foreground 新建应返回 focused");
   const c = mock.calls;
   if (c.tabsCreate[0].active === false)
-    throw new Error("switch-keep-focus 新标签应处于激活态（默认 active:true）");
-  if (c.winFocus.length !== 0) throw new Error("switch-keep-focus 不应聚焦窗口");
+    throw new Error("foreground 新标签应处于激活态（active:true）");
+  // 新建分支不显式 windows.update（active:true 由 tabs.create 自然前台），返回 focused 标记即可。
+  if (c.winFocus.length !== 0) throw new Error("foreground 新建分支不应额外 windows.update");
 });
 
 step("那么", "插件面板在切换页面后重新聚焦宿主", () => {
+  // AI 任务：前台为默认（网页获得焦点，不回收）；仅 background 模式回收焦点回宿主。
   const shellJs = repoFile("src/ui/shell.js");
   if (!shellJs.includes("body.focus({ preventScroll: true })"))
-    throw new Error("切换页面后未重新聚焦插件宿主");
+    throw new Error("background 模式未重新聚焦插件宿主");
   if (!shellJs.includes('setAttribute("tabindex", "-1")'))
     throw new Error("插件宿主未补 tabindex 以支持 focus");
+  if (!shellJs.includes("res.backgrounded && selectedId"))
+    throw new Error("焦点回收未限定 background 模式");
 });
 
 /* ========== 2026-11-27 审计 P1：常用网址分类横滚 + 列数（features/36）========== */
@@ -5136,13 +5150,14 @@ step("那么", "多条便签支持日期提醒完成态与到期高亮且不申�
 
 /* ========== 2026-11-27 审计 P1：快捷键卡位置与默认展示（features/36）========== */
 step("那么", "快捷键卡位于搜索框下方且默认展示", () => {
+  // AI 任务（v5 三栏）：快捷键卡移入右栏（音乐卡之后），默认展示。
   const html = repoFile("src/home/home.html");
-  const searchEnd = html.indexOf("</form>");
   const keysIdx = html.indexOf('id="homeKeysCard"');
-  const sitesIdx = html.indexOf('class="home-sites-wrap"');
-  if (searchEnd < 0 || keysIdx < 0 || sitesIdx < 0) throw new Error("关键区块缺失");
-  if (!(searchEnd < keysIdx && keysIdx < sitesIdx))
-    throw new Error("快捷键卡未位于搜索框与常用网址之间");
+  const rightCol = html.indexOf('class="home-col home-col-right"');
+  const groupIdx = html.indexOf('id="homeGroupCard"');
+  if (keysIdx < 0 || rightCol < 0) throw new Error("快捷键卡/右栏缺失");
+  if (!(rightCol < keysIdx)) throw new Error("快捷键卡未位于右栏");
+  if (!(keysIdx < groupIdx)) throw new Error("分组卡应在快捷键卡之后");
   // 默认值：decorations.keysCard=true。
   const def = homepage.normalizeDecorations({});
   if (def.keysCard !== true) throw new Error("快捷键卡默认未开启");
@@ -5257,22 +5272,34 @@ step("那么", "在线壁纸候选仅接受安全 https 且超时回退", async 
 });
 
 step("那么", "常用网址支持分类chip切换与每行列数配置", () => {
-  if (homepage.normalizeSiteColumns("3") !== "3") throw new Error("合法列数 3 被拒绝");
-  if (homepage.normalizeSiteColumns("9") !== "auto") throw new Error("非法列数应回退 auto");
-  const cfg = homepage.normalizeHomeConfig({ siteLayout: { columns: "4" } });
-  if (cfg.siteLayout.columns !== "4") throw new Error("列数未纳入配置规范化");
+  // AI 任务（v5 原型）：列数收敛为 auto/4/5/6；旧 2/3 回退 auto。
+  if (homepage.normalizeSiteColumns("3") !== "auto") throw new Error("非法列数 3 应回退 auto");
+  if (homepage.normalizeSiteColumns("2") !== "auto") throw new Error("非法列数 2 应回退 auto");
+  if (homepage.normalizeSiteColumns("5") !== "5") throw new Error("合法列数 5 被拒绝");
+  if (homepage.normalizeSiteColumns("6") !== "6") throw new Error("合法列数 6 被拒绝");
+  const cfg = homepage.normalizeHomeConfig({ siteLayout: { columns: "5" } });
+  if (cfg.siteLayout.columns !== "5") throw new Error("列数未纳入配置规范化");
   const homeJs = repoFile("src/home/home.js");
   // 2026-11-27 复核 P1-4：分类由横向滚动分组升级为 chip 单选切换（横向滚动容器废弃）。
   if (homeJs.includes("home-site-groups")) throw new Error("仍残留横向滚动分组容器");
   if (!homeJs.includes("home-site-chips") || !homeJs.includes("home-site-chip"))
     throw new Error("缺分类 chip 行");
+  // AI 任务：chip 行首为「全部」。
+  if (!homeJs.includes("__all__")) throw new Error("缺全部 chip");
   if (!homeJs.includes("cols-${columns}")) throw new Error("站点网格未应用列数 class");
   if (!repoFile("src/home/home.html").includes('id="siteColumns"'))
     throw new Error("配置面板缺列数控件");
   const css = repoFile("src/home/home.css");
   if (!css.includes(".home-site-chip.active")) throw new Error("缺 chip 选中态样式");
-  for (const n of ["2", "3", "4"])
+  for (const n of ["4", "5", "6"])
     if (!css.includes(`.home-sites.cols-${n}`)) throw new Error(`缺 cols-${n} 列数样式`);
+  // 三栏大屏布局（v5）。
+  if (!css.includes(".home-grid") || !css.includes("grid-template-columns: minmax(240px, 280px)"))
+    throw new Error("缺三栏大屏布局");
+  // 右栏分组统计卡。
+  if (!homeJs.includes("renderGroupStats")) throw new Error("缺分组统计渲染");
+  if (!repoFile("src/home/home.html").includes('id="homeGroupCard"'))
+    throw new Error("缺分组管理卡");
 });
 
 step("那么", "主页搜索与站点点击走后台打开且焦点留插件", () => {
@@ -5283,8 +5310,9 @@ step("那么", "主页搜索与站点点击走后台打开且焦点留插件", (
   if (!homeJs.includes("onSiteClick")) throw new Error("主页站点点击未走打开链路");
   const creates = homeJs.match(/tabs\.create\(\{ url, active(:| )/g) || [];
   if (creates.length < 2) throw new Error("搜索与站点未统一走 openTabMode active 口径");
-  const modes = homeJs.match(/mode === "focus-webpage"/g) || [];
-  if (modes.length < 2) throw new Error("仅 focus-webpage 前台的口径未覆盖搜索与站点");
+  // AI 任务：主页前台跳转为默认（active: mode !== "background"）。
+  const modes = homeJs.match(/mode !== "background"/g) || [];
+  if (modes.length < 2) throw new Error("前台跳转默认口径未覆盖搜索与站点");
   const shellJs = repoFile("src/ui/shell.js");
   // 2026-11-27 P0：shell 改传 mode（switch-keep-focus 默认 / focus-webpage 显式）。
   if (!shellJs.includes("mode,") || !shellJs.includes('mode = opts.focus ? "focus-webpage"'))
@@ -5292,18 +5320,31 @@ step("那么", "主页搜索与站点点击走后台打开且焦点留插件", (
   if (!shellJs.includes("Ctrl+Shift+Enter")) throw new Error("缺显式聚焦快捷键");
 });
 
-step("那么", "不绑定左右方向键且输入控件不触发树快捷键", () => {
+step("那么", "左右键默认绑定焦点切换且输入控件不触发树快捷键", () => {
+  // AI 任务新口径：→ focus-web（聚焦当前网页）、← focus-panel（回插件面板），均可自定义；
+  // 输入控件排除仍然生效（keydown 处理器首行 return）。
+  const def = keymap.defaultKeymap();
+  if (def["focus-web"] !== "ArrowRight") throw new Error("→ 未默认绑定 focus-web");
+  if (def["focus-panel"] !== "ArrowLeft") throw new Error("← 未默认绑定 focus-panel");
   const shellJs = repoFile("src/ui/shell.js");
-  for (const bad of ['e.key === "ArrowLeft"', 'e.key === "ArrowRight"'])
-    if (shellJs.includes(bad)) throw new Error("本轮不应绑定左右方向键：" + bad);
-  // 所有 keydown 处理器都应含输入控件排除
+  // 树快捷键分发走 keymap 匹配，主宿主 keydown 不再硬编码方向键。
+  if (/e\.key === "ArrowLeft"|e\.key === "ArrowRight"/.test(shellJs))
+    throw new Error("主宿主仍硬编码左右方向键");
+  if (!shellJs.includes("keymap.matchAction(settings.keymap, e)"))
+    throw new Error("主宿主未接入 keymap 匹配");
   const blocks = shellJs.split('addEventListener("keydown"');
   let checked = 0;
   for (const b of blocks.slice(1)) {
-    const seg = b.slice(0, 600);
-    if (/tagName === "INPUT"|isContentEditable/.test(seg)) checked += 1;
+    const head = b.split("if")[0] || "";
+    if (
+      head.includes("INPUT") ||
+      head.includes("TEXTAREA") ||
+      b.includes('t.tagName === "INPUT"')
+    ) {
+      checked++;
+    }
   }
-  if (checked < 2) throw new Error("键盘处理器未排除输入控件（主页面与 PiP）");
+  if (checked < 1) throw new Error("keydown 处理器缺输入控件排除");
 });
 
 /* ========== 2026-11-26 书签跳转入口与分类置顶（features/31）========== */
@@ -5571,14 +5612,13 @@ step("那么", "新建标签与游离窗口打开返回模式标记且宿主焦�
   const src = repoFile("src/core/tabs-op.js");
   const shellJs = repoFile("src/ui/shell.js");
   // 新建标签两条路径（orphan 新窗口 / 普通新建）都要返回模式标记。
+  // AI 任务：标记为二选一（background→backgrounded / foreground→focused）。
   const marks =
-    src.match(
-      /\.\.\.\(background \? \{ backgrounded: true \} : keepFocus \? \{ switched: true \} : \{ focused: true \}\)/g
-    ) || [];
+    src.match(/\.\.\.\(background \? \{ backgrounded: true \} : \{ focused: true \}\)/g) || [];
   if (marks.length < 2) throw new Error("新建标签分支未补模式标记：" + marks.length);
-  // 命中已开标签路径已有标记；宿主焦点回收覆盖 switched/backgrounded。
-  if (!shellJs.includes("res.switched || res.backgrounded"))
-    throw new Error("宿主焦点回收分支未覆盖 switched/backgrounded");
+  // 宿主焦点回收仅 background（foreground 前台打开不回收）。
+  if (!shellJs.includes("res.backgrounded && selectedId"))
+    throw new Error("宿主焦点回收未限定 background 模式");
   // toast 优先级：rebound 优先于 switched（新建窗口提示不被覆盖）。
   const reboundIdx = shellJs.indexOf("res.rebound\n");
   if (!shellJs.includes('"已新建窗口并打开网页"')) throw new Error("缺新建窗口提示");
@@ -5655,4 +5695,108 @@ step("那么", "旧后台开关与单条便签已收敛到唯一状态源", () =
   if (html.includes('id="homeNotes"')) throw new Error("单条便签 textarea 未移除");
   const homeJs = repoFile("src/home/home.js");
   if (homeJs.includes("cfg.notes =")) throw new Error("UI 仍写旧 notes 字段");
+});
+
+/* ========== AI 任务：快捷键动作注册表（features/38）========== */
+step("那么", "快捷键动作注册表支持录制冲突提示与恢复默认", () => {
+  // 注册表：15 个动作、默认键位齐全、id 唯一。
+  const ids = keymap.KEY_ACTIONS.map((a) => a.id);
+  if (new Set(ids).size !== ids.length) throw new Error("动作 id 重复");
+  for (const a of keymap.KEY_ACTIONS)
+    if (!keymap.normalizeKeyBinding(a.key)) throw new Error(`动作 ${a.id} 默认键非法`);
+  // 规范化：修饰键顺序统一、非法回退默认。
+  if (keymap.normalizeKeyBinding("shift+ctrl+L") !== "Ctrl+Shift+L")
+    throw new Error("键串规范化顺序错误");
+  const map = keymap.normalizeKeymap({ "cursor-prev": "Q", bogus: "x", "cursor-next": "!!!" });
+  if (map["cursor-prev"] !== "Q") throw new Error("合法自定义键未保留");
+  if (map["cursor-next"] !== "ArrowDown") throw new Error("非法键未回退默认");
+  if (map["open-selected"] !== "Enter") throw new Error("未配置动作未用默认键");
+  // 匹配与冲突。
+  const ev = { key: "Enter", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
+  if (keymap.matchAction(null, ev) !== "open-selected") throw new Error("事件匹配失败");
+  const ev2 = { key: "L", ctrlKey: true, altKey: false, shiftKey: true, metaKey: false };
+  if (keymap.matchAction(null, ev2) !== "toggle-links") throw new Error("组合键匹配失败");
+  const conf = keymap.findConflicts({ "cursor-prev": "Q" }, "Q", "cursor-next");
+  if (!conf.includes("cursor-prev")) throw new Error("冲突检测失败");
+  // 设置默认 keymap + UI 接线。
+  if (store.DEFAULT_SETTINGS.keymap["open-selected"] !== "Enter")
+    throw new Error("默认设置缺 keymap");
+  const shellJs = repoFile("src/ui/shell.js");
+  for (const frag of ["renderKeymapList", "findConflicts", "keymapReset"])
+    if (!shellJs.includes(frag)) throw new Error(`shell 缺 keymap UI：${frag}`);
+  for (const f of ["src/sidebar/sidebar.html", "src/window/window.html"])
+    if (!repoFile(f).includes('id="keymapList"')) throw new Error(`${f} 缺快捷键设置卡`);
+});
+
+/* ========== AI 任务：完整音乐播放器（features/38）========== */
+step("那么", "本地曲目原生播放且控件齐全且iframe仅兜底", () => {
+  // schema：tracks/playlists/loop/shuffle/volume/muted 规范化。
+  const cfg = homepage.normalizeHomeConfig({
+    music: {
+      enabled: true,
+      local: {
+        tracks: [
+          { title: "A", url: "https://example.com/a.mp3", duration: 180 },
+          { title: "B", url: "javascript:alert(1)" },
+        ],
+        playlists: [{ name: "专注", trackIds: ["nope"] }],
+        loop: "all",
+        volume: 1.5,
+      },
+    },
+  });
+  const local = cfg.music.local;
+  if (local.tracks.length !== 1 || local.tracks[0].url !== "https://example.com/a.mp3")
+    throw new Error("非法直链曲目未过滤");
+  if (local.loop !== "all") throw new Error("loop 未规范化");
+  if (local.volume !== 1) throw new Error("volume 未夹紧到 0-1");
+  if (local.playlists.length !== 1) throw new Error("播放列表未规范化");
+  // UI：控件齐全（播放/切歌/进度/音量/静音/循环/随机/列表/添加）。
+  const html = repoFile("src/home/home.html");
+  for (const id of [
+    "homeMusicPlay",
+    "homeMusicPrev",
+    "homeMusicNext",
+    "homeMusicSeek",
+    "homeMusicVol",
+    "homeMusicMute",
+    "homeMusicLoop",
+    "homeMusicShuffle",
+    "homeMusicPlaylists",
+    "homeMusicTracks",
+    "homeMusicAddTrack",
+  ])
+    if (!html.includes(`id="${id}"`)) throw new Error(`播放器缺控件 ${id}`);
+  const homeJs = repoFile("src/home/home.js");
+  for (const frag of [
+    "musicEnsureAudio",
+    "musicPlayAt",
+    "musicNext",
+    "musicPrev",
+    "musicListTracks",
+  ])
+    if (!homeJs.includes(frag)) throw new Error(`缺播放器实现 ${frag}`);
+  // preload=none 不自动下载；iframe 兜底按钮保留。
+  if (!homeJs.includes('preload = "none"')) throw new Error("audio 未设 preload:none");
+  if (!html.includes('id="homeMusicFallback"')) throw new Error("外链兜底按钮缺失");
+  // 循环三态。
+  if (!homeJs.includes('"all"') || !homeJs.includes('"one"')) throw new Error("循环三态缺失");
+});
+
+/* ========== AI 任务：天气预报（features/38）========== */
+step("那么", "天气预报四天同请求附带且不额外出站", () => {
+  const src = repoFile("src/core/weather.js");
+  // daily 参数在同一次 forecast 请求内；forecast_days=4；无新增域名。
+  if (!src.includes("daily=weather_code")) throw new Error("缺 daily 预报参数");
+  if (!src.includes("forecast_days=4")) throw new Error("缺 4 天预报");
+  if (!src.includes("days")) throw new Error("缺预报数据结构");
+  // 出站仍只有两个 Open-Meteo 端点（按端点常量行计数，忽略注释）。
+  const codeLines = src
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  const hosts = codeLines.match(/open-meteo\.com/g) || [];
+  if (hosts.length !== 2) throw new Error("出站域名数量异常");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("homeWeatherDays")) throw new Error("缺预报渲染容器");
 });

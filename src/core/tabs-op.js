@@ -108,22 +108,19 @@ export async function removeSeedTab(chromeApi, seedId, keepTabId) {
 // D17：只信 tabId，无 URL 兜底；导入/未绑定叶子无 tabId 时一律新建独立标签页（D18）。
 // D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
-  // 打开模式（2026-11-27 审计 P0）：三选一
-  // - switch-keep-focus（推荐默认）：激活目标标签并切换页面，但不 windows.update(focused)
-  //   把浏览器窗口焦点交给网页；返回 switched:true，UI 层随后重新聚焦插件面板。
+  // 打开模式（2026-11-27 AI 任务）：foreground（默认）| background；focus-webpage 作为
+  // 显式聚焦网页动作的兼容别名（行为同 foreground）。
+  // - foreground：激活目标标签 + windows.update(focused)，网页获得浏览器焦点，返回 focused:true。
   // - background：纯后台打开（active:false，不激活不聚焦），返回 backgrounded:true。
-  // - focus-webpage：显式聚焦网页（激活 + windows.update(focused)），返回 focused:true。
-  // 兼容旧参数：opts.focus=true 等价 focus-webpage；opts.background=true 等价 background；
-  // 二者皆无时默认 focus-webpage（底层单测旧契约），UI 层总是显式传 mode。
+  // 兼容旧参数：opts.focus=true 等价 focus-webpage；opts.background=true 等价 background。
   const mode = opts.mode
     ? opts.mode
     : opts.focus === true
       ? "focus-webpage"
       : opts.background === true
         ? "background"
-        : "focus-webpage";
+        : "foreground";
   const background = mode === "background";
-  const keepFocus = mode === "switch-keep-focus";
   const tabs = await chromeApi.tabs.query({});
   const hit = node.tabId != null ? tabs.find((t) => t.id === node.tabId) : undefined;
   if (hit) {
@@ -133,8 +130,8 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
     }
     // 切换页面：激活标签；仅 focus-webpage 才把窗口焦点交给网页。
     await chromeApi.tabs.update(hit.id, { active: true });
-    if (!keepFocus) await chromeApi.windows.update(hit.windowId, { focused: true });
-    return keepFocus ? { switched: true, tabId: hit.id } : { focused: true };
+    await chromeApi.windows.update(hit.windowId, { focused: true });
+    return { focused: true };
   }
   // D16：解析宿主窗口——优先显式传入，否则按顶层模型窗口的 windowId
   const topWin = opts.topWindow || (opts.m && node && topWindowOf(opts.m, node.id));
@@ -160,12 +157,12 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
     const tabId = created && created.id != null ? created.id : undefined;
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
     // 2026-11-27 复核 P0-2：新建标签也要带模式标记——switch-keep-focus 时 active:true 会切换
-    // 页面抢走焦点，UI 层需据 switched:true 重新聚焦插件宿主；此前该分支无标记导致焦点回收失效。
+    // AI 任务：新建标签 active:true 前台切换，UI 层按模式决定是否回收焦点。
     return {
       created: true,
       tabId,
       orphan: true,
-      ...(background ? { backgrounded: true } : keepFocus ? { switched: true } : { focused: true }),
+      ...(background ? { backgrounded: true } : { focused: true }),
       ...(host.windowId != null ? { rebound: true, windowId: host.windowId } : {}),
     };
   }
@@ -190,7 +187,7 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
     created: true,
     tabId,
     // 2026-11-27 复核 P0-2：同分支 1——新建标签补模式标记，保证焦点回收覆盖新建路径。
-    ...(background ? { backgrounded: true } : keepFocus ? { switched: true } : { focused: true }),
+    ...(background ? { backgrounded: true } : { focused: true }),
     ...(host.rebound ? { rebound: true, windowId: host.windowId, topWindowId: host.topWinId } : {}),
   };
 }

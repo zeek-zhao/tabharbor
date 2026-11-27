@@ -4,8 +4,8 @@
   场景: 叶子行尾有垃圾桶按钮且右键无删除入口且 Delete 快捷键保留
     那么 叶子行尾有垃圾桶按钮且右键无删除入口且 Delete 快捷键保留
 
-  场景: 默认打开模式为 switch-keep-focus 且保留三种模式
-    那么 默认打开模式为 switch-keep-focus 且保留三种模式
+  场景: 默认打开模式为 foreground 且旧值全部迁移
+    那么 默认打开模式为 foreground 且旧值全部迁移
 
   场景: switch-keep-focus 命中已开标签激活但不聚焦窗口
     那么 switch-keep-focus 命中已开标签激活但不聚焦窗口

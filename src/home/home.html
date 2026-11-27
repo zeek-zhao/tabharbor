@@ -49,110 +49,187 @@
         </div>
       </div>
 
-      <section id="homeHero" class="home-hero" hidden>
-        <div id="homeClock" class="home-clock">--:--</div>
-        <div id="homeDateLine" class="home-date-line"></div>
-        <div id="homeGreeting" class="home-greeting"></div>
-      </section>
+      <!-- AI 任务：v5 桌面大屏三栏布局——左栏时钟天气/快捷操作/便签，中栏搜索+站点，右栏音乐/快捷键/分组。 -->
+      <div class="home-grid">
+        <aside class="home-col home-col-left">
+          <section id="homeHero" class="home-hero" hidden>
+            <div id="homeClock" class="home-clock">--:--</div>
+            <div id="homeDateLine" class="home-date-line"></div>
+            <div id="homeGreeting" class="home-greeting"></div>
+          </section>
 
-      <section id="homeWeather" class="home-weather" hidden>
-        <span id="homeWeatherCity" class="home-weather-city"></span>
-        <span id="homeWeatherTemp" class="home-weather-temp"></span>
-        <span id="homeWeatherDesc" class="home-weather-desc"></span>
-        <span class="home-weather-src" title="数据来源：Open-Meteo">Open-Meteo</span>
-        <button
-          id="homeWeatherRetry"
-          class="home-weather-retry"
-          type="button"
-          title="重新获取当前位置"
-          hidden
-        >
-          重新定位
-        </button>
-      </section>
-      <p id="homeWeatherError" class="home-weather-error" hidden></p>
-
-      <section class="home-search">
-        <form id="homeSearchForm" class="home-search-box" autocomplete="off">
-          <select
-            id="homeEngine"
-            class="home-engine"
-            title="选择搜索引擎"
-            aria-label="搜索引擎"
-          ></select>
-          <input
-            id="homeQ"
-            class="home-q"
-            type="text"
-            placeholder="搜索或输入网址，回车打开…"
-            aria-label="搜索关键词"
-          />
-          <button class="home-go" type="submit" title="搜索" aria-label="搜索">
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+          <section id="homeWeather" class="home-weather" hidden>
+            <span id="homeWeatherCity" class="home-weather-city"></span>
+            <span id="homeWeatherTemp" class="home-weather-temp"></span>
+            <span id="homeWeatherDesc" class="home-weather-desc"></span>
+            <span class="home-weather-src" title="数据来源：Open-Meteo">Open-Meteo</span>
+            <!-- AI 任务：今日起 4 天预报（同一次请求，不额外出站）。 -->
+            <div id="homeWeatherDays" class="home-weather-days"></div>
+            <button
+              id="homeWeatherRetry"
+              class="home-weather-retry"
+              type="button"
+              title="重新获取当前位置"
+              hidden
             >
-              <circle cx="11" cy="11" r="7" />
-              <path d="M20 20l-3.5-3.5" />
-            </svg>
-          </button>
-        </form>
-      </section>
+              重新定位
+            </button>
+          </section>
+          <p id="homeWeatherError" class="home-weather-error" hidden></p>
 
-      <!-- 2026-11-27 审计 P1-7：快捷键卡移到搜索框正下方，默认展示（decorations.keysCard=true）。 -->
-      <section id="homeKeysCard" class="home-keys-card" hidden aria-label="快捷键">
-        <div class="home-sites-title">快捷键</div>
-        <div id="homeKeysList" class="home-keys-list"></div>
-      </section>
+          <section id="homeQuickbar" class="home-quickbar" hidden aria-label="快捷操作">
+            <button class="home-mini" data-act="new-tab" type="button" title="新建标签">
+              新建标签
+            </button>
+            <button class="home-mini" data-act="open-home" type="button" title="打开主页">
+              打开主页
+            </button>
+            <button class="home-mini" data-act="trash" type="button" title="回收站">回收站</button>
+            <button class="home-mini" data-act="backup" type="button" title="备份入口">备份</button>
+            <button class="home-mini" data-act="export" type="button" title="导出配置">导出</button>
+          </section>
 
-      <section class="home-sites-wrap">
-        <div class="home-sites-head">
-          <span class="home-sites-title">常用网址</span>
-          <button id="homeAddSite" class="home-mini" type="button" title="添加网址">+ 添加</button>
+          <section id="homeNotesWrap" class="home-notes-wrap" hidden>
+            <div class="home-sites-head">
+              <span class="home-sites-title">本地便签</span>
+              <span class="home-notes-hint">仅存本机</span>
+            </div>
+            <!-- 2026-11-27 复核 P1-5：旧单条便签 textarea 已收敛为多条便签列表（noteItems）。 -->
+            <div id="homeNoteItems" class="home-note-items"></div>
+            <button id="homeNoteAdd" class="home-mini" type="button">+ 添加便签</button>
+          </section>
+        </aside>
+
+        <div class="home-col home-col-mid">
+          <section class="home-search">
+            <form id="homeSearchForm" class="home-search-box" autocomplete="off">
+              <select
+                id="homeEngine"
+                class="home-engine"
+                title="选择搜索引擎"
+                aria-label="搜索引擎"
+              ></select>
+              <input
+                id="homeQ"
+                class="home-q"
+                type="text"
+                placeholder="搜索或输入网址，回车打开…"
+                aria-label="搜索关键词"
+              />
+              <button class="home-go" type="submit" title="搜索" aria-label="搜索">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
+              </button>
+            </form>
+          </section>
+
+          <section class="home-sites-wrap">
+            <div class="home-sites-head">
+              <span class="home-sites-title">常用网址</span>
+              <button id="homeAddSite" class="home-mini" type="button" title="添加网址">
+                + 添加
+              </button>
+            </div>
+            <div id="homeSites" class="home-sites"></div>
+          </section>
         </div>
-        <div id="homeSites" class="home-sites"></div>
-      </section>
 
-      <section id="homeMusicCard" class="home-music-card" hidden>
-        <div class="home-sites-head">
-          <span class="home-sites-title">音乐</span>
-          <button id="homeMusicOpen" class="home-mini" type="button" title="在新标签打开">
-            在新标签打开
-          </button>
-        </div>
-        <div id="homeMusicFrame" class="home-music-frame"></div>
-        <button id="homeMusicFallback" class="home-mini hidden" type="button">在新标签打开</button>
-      </section>
+        <aside class="home-col home-col-right">
+          <!-- AI 任务：完整音乐播放器——本地/直链曲目原生 <audio>；外链 iframe 仅嵌入兜底。 -->
+          <section id="homeMusicCard" class="home-music-card" hidden>
+            <div class="home-sites-head">
+              <span class="home-sites-title">音乐播放器</span>
+              <button id="homeMusicOpen" class="home-mini" type="button" title="在新标签打开外链">
+                外链兜底打开
+              </button>
+            </div>
+            <div id="homeMusicPlaylists" class="home-music-playlists"></div>
+            <div class="home-music-now">
+              <div class="home-music-meta">
+                <span id="homeMusicTitle" class="home-music-title">未选择曲目</span>
+                <span id="homeMusicArtist" class="home-music-artist"></span>
+              </div>
+              <div class="home-music-progress">
+                <span id="homeMusicCur" class="home-music-time">00:00</span>
+                <input
+                  id="homeMusicSeek"
+                  class="home-music-seek"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                  aria-label="播放进度"
+                />
+                <span id="homeMusicDur" class="home-music-time">00:00</span>
+              </div>
+              <div class="home-music-controls">
+                <button
+                  id="homeMusicLoop"
+                  class="home-mini"
+                  type="button"
+                  title="循环：关/全部/单曲"
+                >
+                  ↻ 关
+                </button>
+                <button id="homeMusicPrev" class="home-mini" type="button" title="上一首">⏮</button>
+                <button
+                  id="homeMusicPlay"
+                  class="home-mini home-music-play"
+                  type="button"
+                  title="播放/暂停"
+                >
+                  ▶
+                </button>
+                <button id="homeMusicNext" class="home-mini" type="button" title="下一首">⏭</button>
+                <button id="homeMusicShuffle" class="home-mini" type="button" title="随机">
+                  ⤨
+                </button>
+                <button id="homeMusicMute" class="home-mini" type="button" title="静音">🔊</button>
+                <input
+                  id="homeMusicVol"
+                  class="home-music-vol"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="80"
+                  aria-label="音量"
+                />
+              </div>
+            </div>
+            <div id="homeMusicTracks" class="home-music-tracks"></div>
+            <button id="homeMusicAddTrack" class="home-mini" type="button">+ 添加曲目</button>
+            <div id="homeMusicFrame" class="home-music-frame"></div>
+            <button id="homeMusicFallback" class="home-mini hidden" type="button">
+              在新标签打开
+            </button>
+          </section>
 
-      <section id="homeQuickbar" class="home-quickbar" hidden aria-label="快捷操作">
-        <button class="home-mini" data-act="new-tab" type="button" title="新建标签">
-          新建标签
-        </button>
-        <button class="home-mini" data-act="open-home" type="button" title="打开主页">
-          打开主页
-        </button>
-        <button class="home-mini" data-act="locate" type="button" title="定位当前标签">
-          定位当前
-        </button>
-        <button class="home-mini" data-act="trash" type="button" title="回收站">回收站</button>
-        <button class="home-mini" data-act="backup" type="button" title="备份入口">备份</button>
-      </section>
+          <section id="homeKeysCard" class="home-keys-card" hidden aria-label="快捷键">
+            <div class="home-sites-title">可自定义快捷键</div>
+            <div id="homeKeysList" class="home-keys-list"></div>
+          </section>
 
-      <section id="homeNotesWrap" class="home-notes-wrap" hidden>
-        <div class="home-sites-head">
-          <span class="home-sites-title">本地便签</span>
-          <span class="home-notes-hint">仅存本机</span>
-        </div>
-        <!-- 2026-11-27 复核 P1-5：旧单条便签 textarea 已收敛为多条便签列表（noteItems）。 -->
-        <div id="homeNoteItems" class="home-note-items"></div>
-        <button id="homeNoteAdd" class="home-mini" type="button">+ 添加便签</button>
-      </section>
+          <!-- AI 任务：右栏站点分组管理——分类统计 + 管理入口。 -->
+          <section id="homeGroupCard" class="home-group-card" hidden aria-label="站点分组">
+            <div class="home-sites-head">
+              <span class="home-sites-title">站点分组</span>
+              <button id="homeGroupManage" class="home-mini" type="button">管理</button>
+            </div>
+            <div id="homeGroupStats" class="home-group-stats"></div>
+          </section>
+        </aside>
+      </div>
     </main>
 
     <!-- 2026-11-27 审计 P1-9：主页 footer——版本号、使用指南、反馈、隐私说明（链接由 JS 填充）。 -->
@@ -293,13 +370,13 @@
             <div class="field-row">
               <label for="siteColumns">分类排列</label>
               <select id="siteColumns" class="edit-input">
-                <option value="auto">自适应（每行多个）</option>
-                <option value="2">每行 2 个</option>
-                <option value="3">每行 3 个</option>
+                <option value="auto">自适应</option>
                 <option value="4">每行 4 个</option>
+                <option value="5">每行 5 个</option>
+                <option value="6">每行 6 个</option>
               </select>
             </div>
-            <p class="home-hint">分类横向排列、可左右滑动；此处设置每类站点每行列数。</p>
+            <p class="home-hint">大屏网格按分类 chip 切换展示；此处设置站点网格每行列数。</p>
             <div id="siteEditList" class="home-cfg-sites"></div>
             <!-- 2026-11-27 复核 P1-4：旧配置/误删导致分类缺失时，一键补回内置推荐站点。 -->
             <button id="siteRestoreDefaults" class="btn" type="button">恢复推荐站点</button>

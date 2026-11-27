@@ -6,6 +6,7 @@
 // 无需新增顶层键；此处引入默认值供全新安装与迁移合并。
 // P0（2026-11-25）：迁移时需按当前默认集合补齐字段/引擎回退，故引入规范化工具。
 import { DEFAULT_HOMEPAGE } from "./homepage.js";
+import { defaultKeymap, normalizeKeymap } from "./keymap.js";
 import {
   HOMEPAGE_DEFAULTS_VERSION,
   SETTINGS_SCHEMA_VERSION,
@@ -35,10 +36,13 @@ export const DEFAULT_SETTINGS = {
   copyFormat: "md",
   linkShow: false,
   backupTarget: "local",
-  // 2026-11-26 P0：打开网页默认后台，焦点留在插件。2026-11-27 复核 P1-5 收敛状态源：
-  // 旧 openTabsInBackground 字段已删除，唯一状态源 = openTabMode
-  // （switch-keep-focus | background | focus-webpage），旧值由 migrateSettings 一次性迁移。
-  openTabMode: "switch-keep-focus",
+  // 2026-11-27 AI 任务：唯一状态源 = openTabMode，值域收敛为两种——
+  // foreground（默认）：Enter/双击前台跳转，网页获得浏览器焦点，不承诺插件保留键盘焦点；
+  // background：新标签 active:false、已开标签不激活，焦点留在插件。
+  // 旧值迁移（migrateSettings）：switch-keep-focus / focus-webpage → foreground。
+  openTabMode: "foreground",
+  // AI 任务：面板快捷键映射（动作注册表见 keymap.js）；可录制/冲突提示/恢复默认。
+  keymap: defaultKeymap(),
   // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
   ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
   ghGistId: "", // 已有 Gist ID（20+ hex）→ PATCH 更新；空 → POST 新建
@@ -70,17 +74,22 @@ export function migrateSettings(rawSettings) {
   const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) };
   delete merged.ghBackupPassword;
   // 2026-11-27 复核 P1-5：旧 openTabsInBackground 开关一次性迁移到 openTabMode 并删除旧字段——
-  // true（后台）→ background；false（前台）→ focus-webpage；未显式设置则保持默认 switch-keep-focus。
+  // true（后台）→ background；false（前台）→ foreground；未显式设置则保持默认。
   if (rawSettings && typeof rawSettings.openTabsInBackground === "boolean") {
     if (
       typeof merged.openTabMode !== "string" ||
-      !["switch-keep-focus", "background", "focus-webpage"].includes(merged.openTabMode) ||
+      !["foreground", "background", "focus-webpage"].includes(merged.openTabMode) ||
       merged.openTabMode === DEFAULT_SETTINGS.openTabMode
     ) {
-      merged.openTabMode = rawSettings.openTabsInBackground ? "background" : "focus-webpage";
+      merged.openTabMode = rawSettings.openTabsInBackground ? "background" : "foreground";
     }
   }
   delete merged.openTabsInBackground;
+  // 2026-11-27 AI 任务：switch-keep-focus / focus-webpage 旧值迁移为 foreground（前台语义合并）。
+  if (merged.openTabMode === "switch-keep-focus" || merged.openTabMode === "focus-webpage")
+    merged.openTabMode = "foreground";
+  // AI 任务：键位映射规范化（非法条目回退默认键）。
+  merged.keymap = normalizeKeymap(merged.keymap);
   if (rawSettings && rawSettings.homepage && typeof rawSettings.homepage === "object") {
     merged.homepage =
       rawSettings.homepageDefaultsVersion !== HOMEPAGE_DEFAULTS_VERSION

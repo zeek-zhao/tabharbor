@@ -247,7 +247,7 @@ function renderSites() {
   const siteHtml = (s) =>
     `<a class="home-site${s.pinned ? " pinned" : ""}" data-idx="${cfg.sites.indexOf(s)}" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(s.url)}"><span class="home-site-icon">${initialOf(s.title)}</span><span class="home-site-title">${escapeHtml(s.title)}</span></a>`;
   const pinned = sites.filter((s) => s.pinned);
-  const groups = [];
+  const groups = [{ id: "__all__", name: "全部", list: sites }];
   if (pinned.length) groups.push({ id: "__pinned__", name: "置顶", list: pinned });
   for (const cat of hp.SITE_CATEGORIES) {
     const inCat = sites.filter((s) => !s.pinned && (s.category || "other") === cat.id);
@@ -306,10 +306,9 @@ function onSearch(e) {
   const isUrl = /^https?:\/\//i.test(q) || /^file:\/\//i.test(q);
   const engine = hp.findEngine(cfg, cfg.engine);
   const url = isUrl ? q : hp.engineSearchUrl(engine, q);
-  // 2026-11-27 复核 P0-2/P1-5：主页打开统一走 openTabMode（旧后台开关已迁移收敛）。
-  // switch-keep-focus / background 均后台打开（焦点留在主页标签）；仅 focus-webpage 前台激活。
-  const mode = settings?.openTabMode || "switch-keep-focus";
-  const active = mode === "focus-webpage";
+  // AI 任务：主页搜索前台跳转（普通 URL 打开，网页获得焦点）；仅 background 模式后台打开。
+  const mode = settings?.openTabMode || "foreground";
+  const active = mode !== "background";
   if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active });
   else window.location.href = url;
 }
@@ -328,9 +327,24 @@ function onSiteClick(e) {
   const url = a.getAttribute("href");
   if (!url || !chromeApi?.tabs?.create) return; // 无扩展 API 时回退 <a target=_blank> 原行为
   e.preventDefault();
-  // 2026-11-27 复核：与搜索同口径——仅 focus-webpage 前台，其余后台打开留主页。
-  const mode = settings?.openTabMode || "switch-keep-focus";
-  void chromeApi.tabs.create({ url, active: mode === "focus-webpage" });
+  // AI 任务：与搜索同口径——前台普通跳转；仅 background 后台打开。
+  const mode = settings?.openTabMode || "foreground";
+  void chromeApi.tabs.create({ url, active: mode !== "background" });
+}
+
+// AI 任务：右栏站点分组统计卡（分类计数 + 管理入口打开设置面板）。
+function renderGroupStats() {
+  const card = $("#homeGroupCard");
+  const box = $("#homeGroupStats");
+  if (!box) return;
+  const sites = cfg.sites || [];
+  const rows = [];
+  for (const cat of hp.SITE_CATEGORIES) {
+    const n = sites.filter((s) => (s.category || "other") === cat.id).length;
+    if (n) rows.push(`<span class="home-group-stat">${escapeHtml(cat.name)} · ${n}</span>`);
+  }
+  box.innerHTML = rows.join("");
+  if (card) card.hidden = !rows.length;
 }
 
 // ===== 2026-11-26 离线装饰（纯本地计算，不出站、不申请权限）=====
@@ -463,6 +477,19 @@ async function refreshWeather() {
   if (tempEl)
     tempEl.textContent = `${Math.round(cur.temperature)}°${cur.unit === "fahrenheit" ? "F" : "C"}`;
   if (descEl) descEl.textContent = cur.label;
+  // AI 任务：今日起 4 天预报（数据与当前天气同一次请求返回）。
+  const daysBox = $("#homeWeatherDays");
+  if (daysBox) {
+    const w0 = new Date();
+    const names = ["今天", "明天", "后天"];
+    daysBox.innerHTML = (cur.days || [])
+      .map((d, i) => {
+        const dt = new Date(d.date);
+        const wd = i < 3 ? names[i] : `周${"日一二三四五六"[dt.getDay()]}`;
+        return `<span class="home-weather-day"><span class="n">${wd}</span><span class="t">${Math.round(d.max)}°/${Math.round(d.min)}°</span></span>`;
+      })
+      .join("");
+  }
   card.hidden = false;
 }
 
@@ -549,16 +576,37 @@ async function requestLocation() {
 }
 
 // ===== 2026-11-26 外链音乐（阶段 1）：iframe 卡片，默认不自动播放 =====
+// AI 任务：完整播放器状态（内存态；音量/循环/随机/静音持久化在 music.local）。
+let musicAudio = null; // <audio> 单例
+let musicQueue = []; // 当前播放列表曲目引用
+let musicIndex = -1; // 当前曲目索引
+const fmtTime = (sec) => {
+  const n = Math.max(0, Math.floor(Number(sec) || 0));
+  return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+};
+
+function musicListTracks() {
+  const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
+  const tracks = local.tracks || [];
+  const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
+  if (!pl) return tracks;
+  return pl.trackIds.map((id) => tracks.find((t) => t.id === id)).filter(Boolean);
+}
+
 function renderMusic() {
   const card = $("#homeMusicCard");
   const frame = $("#homeMusicFrame");
   const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
   if (!card) return;
-  card.hidden = !(music.enabled && music.external?.embedUrl);
+  const hasLocal = (music.local?.tracks || []).length > 0;
+  const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
+  card.hidden = !(music.enabled && (hasLocal || embedUrl));
+  renderMusicPlayer();
   if (frame) frame.innerHTML = "";
   const fallback = $("#homeMusicFallback");
   if (fallback) fallback.classList.add("hidden");
-  if (card.hidden || !frame) return;
+  // 外链 iframe 仅在启用且配置了 embedUrl 时嵌入（兜底能力，不显示不可控伪控件）。
+  if (card.hidden || !frame || !embedUrl) return;
   // iframe 用 JS 创建：src 经 normalizeMusicUrl 净化（仅 https、拒绝注入字符）。
   const embedUrl = hp.normalizeMusicUrl(music.external.embedUrl);
   if (!embedUrl) {
@@ -595,6 +643,119 @@ function renderMusic() {
   if (fallback) fallback.dataset.url = music.external.fallbackUrl || embedUrl;
 }
 
+// 播放器 UI 渲染：播放列表 chips / 当前曲目 / 进度 / 控件状态 / 曲目列表。
+function renderMusicPlayer() {
+  const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
+  const plBox = $("#homeMusicPlaylists");
+  if (plBox) {
+    plBox.innerHTML = (local.playlists || [])
+      .map(
+        (pl) =>
+          `<button class="home-site-chip${pl.id === local.activeListId ? " active" : ""}" data-list="${escapeHtml(pl.id)}" type="button">${escapeHtml(pl.name)}</button>`
+      )
+      .join("");
+  }
+  musicQueue = musicListTracks();
+  const cur = musicQueue[musicIndex];
+  const title = $("#homeMusicTitle");
+  const artist = $("#homeMusicArtist");
+  if (title) title.textContent = cur ? cur.title : "未选择曲目";
+  if (artist) artist.textContent = cur ? cur.artist || "" : "";
+  const dur = $("#homeMusicDur");
+  if (dur) dur.textContent = fmtTime(cur?.duration || musicAudio?.duration || 0);
+  const tracksBox = $("#homeMusicTracks");
+  if (tracksBox) {
+    tracksBox.innerHTML = musicQueue
+      .map(
+        (t, i) =>
+          `<div class="home-music-track${i === musicIndex ? " active" : ""}" data-idx="${i}"><span class="no">${i + 1}</span><span class="t">${escapeHtml(t.title)}</span><span class="a">${escapeHtml(t.artist)}</span><span class="d">${fmtTime(t.duration)}</span></div>`
+      )
+      .join("");
+  }
+  const loopBtn = $("#homeMusicLoop");
+  if (loopBtn)
+    loopBtn.textContent = { off: "↻ 关", all: "↻ 全部", one: "↻ 单曲" }[local.loop || "off"];
+  const shufBtn = $("#homeMusicShuffle");
+  if (shufBtn) shufBtn.classList.toggle("active", local.shuffle === true);
+  const playBtn = $("#homeMusicPlay");
+  if (playBtn) playBtn.textContent = musicAudio && !musicAudio.paused ? "⏸" : "▶";
+  const muteBtn = $("#homeMusicMute");
+  if (muteBtn) muteBtn.textContent = local.muted ? "🔇" : "🔊";
+  const vol = $("#homeMusicVol");
+  if (vol) vol.value = String(Math.round((local.muted ? 0 : local.volume) * 100));
+}
+
+function musicEnsureAudio() {
+  if (musicAudio) return musicAudio;
+  musicAudio = new Audio();
+  musicAudio.preload = "none"; // 不自动下载，用户点播放才加载
+  const seek = $("#homeMusicSeek");
+  musicAudio.addEventListener("timeupdate", () => {
+    const cur = $("#homeMusicCur");
+    if (cur) cur.textContent = fmtTime(musicAudio.currentTime);
+    if (seek && musicAudio.duration && document.activeElement !== seek)
+      seek.value = String(Math.round((musicAudio.currentTime / musicAudio.duration) * 100) || 0);
+  });
+  musicAudio.addEventListener("loadedmetadata", () => {
+    const dur = $("#homeMusicDur");
+    if (dur) dur.textContent = fmtTime(musicAudio.duration);
+  });
+  musicAudio.addEventListener("ended", () => {
+    const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
+    if (local.loop === "one" && musicQueue[musicIndex]) {
+      musicAudio.currentTime = 0;
+      void musicAudio.play();
+      return;
+    }
+    musicNext(true);
+  });
+  musicAudio.addEventListener("error", () => {
+    say("曲目加载失败，请检查直链是否可用");
+  });
+  return musicAudio;
+}
+
+function musicPlayAt(i) {
+  if (!musicQueue.length) return;
+  musicIndex = ((i % musicQueue.length) + musicQueue.length) % musicQueue.length;
+  const audio = musicEnsureAudio();
+  const track = musicQueue[musicIndex];
+  const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
+  audio.src = track.url;
+  audio.volume = local.muted ? 0 : local.volume;
+  void audio.play().catch(() => say("播放失败：浏览器阻止或直链不可用"));
+  renderMusicPlayer();
+}
+
+function musicNext(auto = false) {
+  const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
+  if (!musicQueue.length) return;
+  if (local.loop === "off" && auto && musicIndex >= musicQueue.length - 1) {
+    // 顺序播放到底：停止。
+    if (musicAudio) musicAudio.pause();
+    renderMusicPlayer();
+    return;
+  }
+  let next;
+  if (local.shuffle && musicQueue.length > 1) {
+    do {
+      next = Math.floor(Math.random() * musicQueue.length);
+    } while (next === musicIndex);
+  } else {
+    next = musicIndex + 1;
+  }
+  musicPlayAt(next);
+}
+
+function musicPrev() {
+  if (!musicQueue.length) return;
+  musicPlayAt(musicIndex - 1);
+}
+
+async function persistMusicLocal() {
+  await persist();
+}
+
 function renderMusicControls() {
   const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
   const enabled = $("#musicEnabled");
@@ -612,7 +773,7 @@ function renderMusicControls() {
   if (hint) hint.textContent = music.external.embedUrl ? "已解析嵌入链接。" : "";
 }
 
-function onMusicAction(e) {
+async function onMusicAction(e) {
   const id = e.target.id;
   if (id === "musicApply") {
     const source = $("#musicSource")?.value || "";
@@ -655,7 +816,89 @@ function onMusicAction(e) {
   } else if (id === "homeMusicOpen" || id === "homeMusicFallback") {
     const url = hp.normalizeMusicUrl(e.target.dataset.url || "");
     if (url && chromeApi?.tabs?.create) void chromeApi.tabs.create({ url, active: false });
+  } else if (id === "homeMusicPlay") {
+    // 播放/暂停：无当前曲目时从队列头开始。
+    const audio = musicEnsureAudio();
+    if (!musicQueue.length) {
+      say("先添加曲目或配置外链");
+      return;
+    }
+    if (!audio.src && musicIndex < 0) musicPlayAt(0);
+    else if (audio.paused) void audio.play();
+    else audio.pause();
+    renderMusicPlayer();
+  } else if (id === "homeMusicPrev") {
+    musicPrev();
+  } else if (id === "homeMusicNext") {
+    musicNext(false);
+  } else if (id === "homeMusicLoop") {
+    const local = cfg.music.local;
+    local.loop = { off: "all", all: "one", one: "off" }[local.loop || "off"] || "off";
+    await persistMusicLocal();
+    renderMusicPlayer();
+  } else if (id === "homeMusicShuffle") {
+    cfg.music.local.shuffle = !(cfg.music.local.shuffle === true);
+    await persistMusicLocal();
+    renderMusicPlayer();
+  } else if (id === "homeMusicMute") {
+    cfg.music.local.muted = !(cfg.music.local.muted === true);
+    if (musicAudio) musicAudio.volume = cfg.music.local.muted ? 0 : cfg.music.local.volume;
+    await persistMusicLocal();
+    renderMusicPlayer();
+  } else if (id === "homeMusicAddTrack") {
+    const title = window.prompt("曲目名称")?.trim();
+    if (!title) return;
+    const artist = window.prompt("艺术家（可留空）")?.trim() || "";
+    const rawUrl = window.prompt("音频直链（以浏览器协议开头，如 example.com/a.mp3）")?.trim();
+    if (!rawUrl) return;
+    const url = hp.normalizeMusicUrl(rawUrl);
+    if (!url) {
+      say("仅支持 https 直链");
+      return;
+    }
+    cfg.music.local.tracks = [...(cfg.music.local.tracks || []), { title, artist, url }].slice(
+      0,
+      50
+    );
+    if (!cfg.music.local.activeListId && !cfg.music.local.playlists.length) {
+      const id = `list-${Date.now()}`;
+      cfg.music.local.playlists = [
+        { id, name: "默认播放列表", trackIds: cfg.music.local.tracks.map((t) => t.id) },
+      ];
+      cfg.music.local.activeListId = id;
+    }
+    await persistMusicLocal();
+    renderMusic();
+    say("曲目已添加");
   }
+}
+
+// 播放器交互：进度拖动、音量（input 委托）与播放列表/曲目选择（click 委托）。
+function onMusicPlayerInput(e) {
+  const id = e.target.id;
+  if (id === "homeMusicSeek" && musicAudio && musicAudio.duration) {
+    const pct = Number(e.target.value) / 100;
+    if (Number.isFinite(pct)) musicAudio.currentTime = pct * musicAudio.duration;
+  } else if (id === "homeMusicVol") {
+    const v = Math.max(0, Math.min(1, Number(e.target.value) / 100));
+    cfg.music.local.volume = v;
+    if (v > 0) cfg.music.local.muted = false;
+    if (musicAudio) musicAudio.volume = cfg.music.local.muted ? 0 : v;
+    void persistMusicLocal();
+    renderMusicPlayer();
+  }
+}
+
+function onMusicPlayerClick(e) {
+  const chip = e.target.closest("#homeMusicPlaylists .home-site-chip");
+  if (chip) {
+    cfg.music.local.activeListId = chip.dataset.list || "";
+    musicIndex = -1;
+    renderMusicPlayer();
+    return;
+  }
+  const track = e.target.closest("#homeMusicTracks .home-music-track");
+  if (track) musicPlayAt(Number(track.dataset.idx) || 0);
 }
 
 // 快捷操作条：委托到主页自身能力或向宿主发消息（此处实现可离线完成的部分）。
@@ -667,6 +910,12 @@ function onQuickbar(e) {
     const url =
       act === "open-home" ? chromeApi?.runtime?.getURL?.(hp.HOME_PAGE_PATH) : "about:blank";
     if (url && chromeApi?.tabs?.create) void chromeApi.tabs.create({ url });
+  } else if (act === "export") {
+    if (window.parent !== window) {
+      void window.parent.postMessage({ type: "tabharbor-quickact", action: "backup" }, "*");
+    } else {
+      say("请在插件侧边栏或独立窗口中使用导出");
+    }
   } else if (act === "backup" || act === "trash" || act === "locate") {
     // 这类动作在插件宿主壳里实现；主页独立打开时无宿主，给出明确提示。
     if (window.parent !== window) {
@@ -736,9 +985,21 @@ function bind() {
     "#musicEnabled",
     "#homeMusicOpen",
     "#homeMusicFallback",
+    "#homeMusicPlay",
+    "#homeMusicPrev",
+    "#homeMusicNext",
+    "#homeMusicLoop",
+    "#homeMusicShuffle",
+    "#homeMusicMute",
+    "#homeMusicAddTrack",
   ]) {
     $(id)?.addEventListener("click", onMusicAction);
   }
+  // 播放器交互委托：进度/音量（input）、播放列表/曲目（click）。
+  $("#homeMusicPlaylists")?.addEventListener("click", onMusicPlayerClick);
+  $("#homeMusicTracks")?.addEventListener("click", onMusicPlayerClick);
+  $("#homeMusicSeek")?.addEventListener("input", onMusicPlayerInput);
+  $("#homeMusicVol")?.addEventListener("input", onMusicPlayerInput);
   // 天气：开关/定位/校验（click）与单位/城市（change）
   for (const id of [
     "#weatherEnabled",
@@ -781,6 +1042,10 @@ function bind() {
   };
   $("#homeSettings")?.addEventListener("click", () => openHomeConfig(null));
   // 2026-11-27 审计 P1-8：顶部音乐图标——已配置则切换播放器显示，未配置则打开音乐分区。
+  // AI 任务：右栏分组卡「管理」按钮——打开设置面板常用网址区。
+  $("#homeGroupManage")?.addEventListener("click", () => {
+    openHomeConfig("#siteEditList");
+  });
   $("#homeMusicToggle")?.addEventListener("click", () => {
     const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
     if (music.enabled && music.external?.embedUrl) {
@@ -1217,6 +1482,7 @@ async function boot() {
   renderEngineSelect();
   renderEngines();
   renderSites();
+  renderGroupStats();
   renderWallpaper();
   renderDecorations();
   renderMusic();
