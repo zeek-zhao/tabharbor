@@ -20,7 +20,7 @@
 - `npm test`：343/343 PASS（新 feature `37_2026_11_27_review`，5 场景；30/31/32/36 历史契约同步更新到新口径）
 - 六项门禁：constraints / compliance / format:check / contrast / committer 全部 EXIT=0
 - E2E：真机 Chromium 冒烟全绿
-- CI：见下方 run 链接（提交后补记）
+- CI：run [45997722113](https://github.com/zeek-zhao/tabharbor/actions/runs/45997722113) 一次通过（success，headSha `c648941`）
 
 ## 3. 红线口径
 
