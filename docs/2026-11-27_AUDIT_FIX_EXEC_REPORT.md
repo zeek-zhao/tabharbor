@@ -24,7 +24,7 @@
 - `npm test`：338/338 PASS（新 feature `36_2026_11_27_audit`，13 场景）
 - 六项门禁：constraints / compliance / format:check / contrast / committer 全部 EXIT=0
 - E2E：真机 Chromium 冒烟全绿（含新增行尾垃圾桶计数断言）
-- CI：见下方 run 链接（提交后补记）
+- CI：run [45993613279](https://github.com/zeek-zhao/tabharbor/actions/runs/45993613279) 一次通过（success，headSha `07bf907`）
 
 ## 3. 红线口径变更（需产品/用户确认）
 
