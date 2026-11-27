@@ -108,12 +108,22 @@ export async function removeSeedTab(chromeApi, seedId, keepTabId) {
 // D17：只信 tabId，无 URL 兜底；导入/未绑定叶子无 tabId 时一律新建独立标签页（D18）。
 // D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
-  // 2026-11-26 P0（口径确认）：openTabsInBackground=true 时后台打开，焦点留在插件。
-  // - 命中已开标签：不 tabs.update(active) / windows.update(focused)，返回 backgrounded:true；
-  // - 新建标签：tabs.create 显式 active:false（后台）；
-  // 仅当用户显式"聚焦网页"动作（opts.focus === true）时才激活+聚焦（旧行为）。
-  // opts.background 默认 false 保持底层单测旧契约；UI 层按 settings.openTabsInBackground 传入。
-  const background = opts.background === true && opts.focus !== true;
+  // 打开模式（2026-11-27 审计 P0）：三选一
+  // - switch-keep-focus（推荐默认）：激活目标标签并切换页面，但不 windows.update(focused)
+  //   把浏览器窗口焦点交给网页；返回 switched:true，UI 层随后重新聚焦插件面板。
+  // - background：纯后台打开（active:false，不激活不聚焦），返回 backgrounded:true。
+  // - focus-webpage：显式聚焦网页（激活 + windows.update(focused)），返回 focused:true。
+  // 兼容旧参数：opts.focus=true 等价 focus-webpage；opts.background=true 等价 background；
+  // 二者皆无时默认 focus-webpage（底层单测旧契约），UI 层总是显式传 mode。
+  const mode = opts.mode
+    ? opts.mode
+    : opts.focus === true
+      ? "focus-webpage"
+      : opts.background === true
+        ? "background"
+        : "focus-webpage";
+  const background = mode === "background";
+  const keepFocus = mode === "switch-keep-focus";
   const tabs = await chromeApi.tabs.query({});
   const hit = node.tabId != null ? tabs.find((t) => t.id === node.tabId) : undefined;
   if (hit) {
@@ -121,9 +131,10 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       // 后台模式：已开标签仅确保存在，不抢焦点、不切换浏览器激活标签与窗口。
       return { backgrounded: true, tabId: hit.id };
     }
+    // 切换页面：激活标签；仅 focus-webpage 才把窗口焦点交给网页。
     await chromeApi.tabs.update(hit.id, { active: true });
-    await chromeApi.windows.update(hit.windowId, { focused: true });
-    return { focused: true };
+    if (!keepFocus) await chromeApi.windows.update(hit.windowId, { focused: true });
+    return keepFocus ? { switched: true, tabId: hit.id } : { focused: true };
   }
   // D16：解析宿主窗口——优先显式传入，否则按顶层模型窗口的 windowId
   const topWin = opts.topWindow || (opts.m && node && topWindowOf(opts.m, node.id));
@@ -140,6 +151,7 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       host.seedId =
         made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
     }
+    // background 显式 active:false；switch-keep-focus / focus-webpage 用默认 active:true 切换页面。
     const activeOpt = background ? { active: false } : {};
     const created =
       host.windowId != null

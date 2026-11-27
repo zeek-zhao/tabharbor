@@ -173,3 +173,23 @@ BDD 场景总数：301/301 PASS（基线 285 → 本轮 +16）。**未取得真�
 BDD 场景总数：325/325 PASS（基线 301 → 本轮 +24）。**未取得真机/CI E2E 证据前，本轮状态均为「已实现」而非「已验证」。**
 
 **待用户拍板的隐私/红线口径（延续 §11 F-79）**：F-86 外链音乐 iframe、F-87 天气 Open-Meteo 为本轮新增的两类运行时出站（非代码 fetch 标签数据；音乐为平台 iframe 资源，天气为白名单域名单次请求）。二者均不写源码字面量（协议常量 P 拼接 / C12 白名单域名），但会向第三方暴露网络环境信息，需产品/用户确认后决定是否正式纳入红线白名单。
+
+## 14. 2026-11-27 审计修复（基于 `b26fad7`，9 项需求缺口）
+
+> 依据《TabHarbor-标签回收站焦点切换主页布局音乐天气便签审计-2026-11-27》（2 P0 + 7 P1）。审计报告第 10 项（P2 历史接入）延续 §12 评审结论（默认不申请 history 权限），无代码改动；第 11 项为文档工作流说明，已完成。
+
+| ID | 审计项 | 实现 | 验收 | 状态 |
+| --- | --- | --- | --- | --- |
+| F-91 (P0) | 叶子行尾垃圾桶按钮 + 收敛右键删除 | `render.js` 行尾垃圾桶（data-act=trash）→ 共享 del 动作（主/PiP 双宿主）；叶子右键菜单移除「删除到回收站」；Delete 快捷键保留 | 36 feature；08_menu 历史场景同步更新 | 已实现 |
+| F-92 (P0) | 打开默认改 switch-keep-focus | `store.js` `openTabMode`（默认 switch-keep-focus，可选 background/focus-webpage）；`tabs-op.js` mode 分支：激活标签切换页面但不 `windows.update(focused)`；shell 打开后重新聚焦插件宿主（tabindex=-1 + focus） | 36 feature 三场景 + 30 契约更新 | 已实现 |
+| F-93 (P1) | 常用网址分类横向滚动 + 列数配置 | `homepage.js` `siteLayout.columns`（auto/2/3/4）+ `normalizeSiteColumns`；`.home-site-groups` 横向滚动容器；`.home-sites.cols-N` 固定网格；配置面板列数下拉 | 36 feature | 已实现 |
+| F-94 (P1) | 在线壁纸图源列表（可选接入） | 新增 `src/core/wallpaper-online.js`：Wallhaven（anime SFW 16:9，search/random）+ Nekos.best（neko/waifu）；协议常量拼接端点；仅 https；8 秒超时兜底；SFW/宽高比过滤；配置面板候选缩略图 + 来源署名 + 一键应用；自定义 https 链接保留 | 36 feature ×2；C11 放行 + C12 白名单（wallhaven.cc/w.wallhaven.cc/nekos.best）+ manifest 可选主机 | 已实现 |
+| F-95 (P1) | 天气定位失败可读化 + 卡片重试 | `geoErrorMessage` 映射 PERMISSION_DENIED/POSITION_UNAVAILABLE/TIMEOUT 可读文案；`requestLocation()` 抽取复用；天气卡片「重新定位」按钮 + 错误提示区；仍不 watchPosition、不申请 notifications | 36 feature | 已实现 |
+| F-96 (P1) | 多条便签 | `noteItems` schema（id/text/date/reminder/done，≤100 条）；日期/提醒格式校验（时间限 00:00–23:59）；列表增删改 + 完成勾选 + 到期高亮；`notes` 单条字符串兼容保留；不申请 notifications 权限 | 36 feature | 已实现 |
+| F-97 (P1) | 快捷键卡移到搜索框下方默认展示 | `home.html` `#homeKeysCard` 移至搜索框与常用网址之间；`decorations.keysCard` 默认 true | 36 feature + 32 契约更新 | 已实现 |
+| F-98 (P1) | 主页顶部音乐图标入口 | `home-top` 音乐图标：已配置切换播放器显示，未配置打开设置面板引导粘贴外链 | 36 feature | 已实现 |
+| F-99 (P1) | 主页 footer | 版本号（getManifest）+ 使用指南 / 反馈 / 隐私说明（GitHub 链接，协议常量拼接避免 C12 字面量） | 36 feature | 已实现 |
+
+BDD 场景总数：338/338 PASS（`b26fad7` 时 325 → 本轮 +13）。
+
+**红线口径变更（本轮）**：C11 fetch 白名单新增 `src/core/wallpaper-online.js`；C12 源码 URL 白名单新增 `wallhaven.cc` / `w.wallhaven.cc` / `nekos.best`（manifest 可选主机同步）。在线壁纸仅在用户点击「加载候选」时请求一次，不自动轮询。是否长期纳入红线白名单待产品/用户拍板（延续 F-79/F-90 待拍板项）。

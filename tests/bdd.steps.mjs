@@ -8,6 +8,7 @@ import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 import * as homepage from "../src/core/homepage.js";
 import * as weather from "../src/core/weather.js";
+import * as onlineWp from "../src/core/wallpaper-online.js";
 import * as crypto from "../src/core/crypto.js";
 import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
@@ -3485,19 +3486,37 @@ step("那么", "指南文案反映三分类与右下角反馈", () => {
 });
 
 // ===== 2026-11-24 合并审计（18_merge_audit.feature，基线 9adc32b）=====
-// 任务一：叶子右键菜单收敛
+// 任务一：叶子右键菜单收敛（2026-11-27 起删除入口移到行尾垃圾桶，右键无危险动作）
 step("那么", "叶子右键菜单模板仅一项且为删除", () => {
   const html = menu.menuHtml("leaf");
   const count = (html.match(/data-act=/g) || []).length;
-  if (count !== 1) throw new Error(`叶子菜单项数=${count}，应为 1`);
-  if (!html.includes('data-act="del"') || !html.includes("删除到回收站"))
-    throw new Error("叶子菜单缺删除到回收站");
-  if (!html.includes('class="mi danger"')) throw new Error("删除项未标危险色");
+  // 口径更新：右键不再提供删除动作（删除走行尾垃圾桶 / Delete 快捷键），只读提示项无 data-act。
+  if (count !== 0) throw new Error(`叶子菜单不应有可执行动作项，实际=${count}`);
+  if (html.includes('data-act="del"')) throw new Error("叶子右键仍暴露删除入口");
 });
 step("那么", "叶子右键菜单不再暴露备注与复制动作", () => {
   const html = menu.menuHtml("leaf");
   for (const bad of ['data-act="note"', 'data-act="copy"', 'data-act="edit"', 'data-act="rename"'])
     if (html.includes(bad)) throw new Error(`叶子菜单仍暴露 ${bad}`);
+});
+
+// 2026-11-27 P0：行尾垃圾桶（删除到回收站唯一行内入口），右键删除入口移除，Delete 保留。
+step("那么", "叶子行尾有垃圾桶按钮且右键无删除入口且 Delete 快捷键保留", () => {
+  const renderSrc = repoFile("src/ui/render.js");
+  const shellSrc = repoFile("src/ui/shell.js");
+  const menuSrc = repoFile("src/ui/menu.js");
+  // 渲染层：叶子行渲染 data-act="trash" 垃圾桶按钮。
+  if (!renderSrc.includes('data-act="trash"')) throw new Error("叶子行缺垃圾桶按钮");
+  if (!renderSrc.includes("trash-x")) throw new Error("垃圾桶按钮缺 trash-x 样式类");
+  // 接线层：主宿主与 PiP 宿主均委托 trash 到共享 del 动作。
+  const trashHandlers = shellSrc.split('[data-act="trash"]').length - 1;
+  if (trashHandlers < 2) throw new Error("主宿主与 PiP 未同时接线 trash 按钮");
+  if (!shellSrc.includes('runMenuAct("del"')) throw new Error("垃圾桶未复用共享删除动作");
+  // 右键菜单：叶子模板无删除动作。
+  const leafMenu = menu.menuHtml("leaf");
+  if (leafMenu.includes('data-act="del"')) throw new Error("叶子右键仍暴露删除入口");
+  // Delete 快捷键删除保留。
+  if (!shellSrc.includes('e.key === "Delete"')) throw new Error("Delete 快捷键删除被移除");
 });
 
 // 任务四：打开态派生（静态契约）
@@ -4176,11 +4195,14 @@ step(
     const hosts = mf.optional_host_permissions || [];
     if (!hosts.includes("https://api.github.com/*"))
       throw new Error("缺 api.github.com 可选主机权限");
-    // 2026-11-26 出站白名单新增 Open-Meteo（仅天气），其余主机权限一律禁止。
+    // 出站白名单：GitHub 备份、Open-Meteo（天气）、Wallhaven / Nekos.best（在线壁纸图源）。
     const allowed = [
       "https://api.github.com/*",
       "https://api.open-meteo.com/*",
       "https://geocoding-api.open-meteo.com/*",
+      "https://wallhaven.cc/*",
+      "https://w.wallhaven.cc/*",
+      "https://nekos.best/*",
     ];
     if (hosts.some((h) => !allowed.includes(h)))
       throw new Error("存在非白名单出站：" + hosts.join(","));
@@ -5021,6 +5043,220 @@ step("那么", "显式聚焦动作仍激活标签并聚焦窗口", async () => {
   if (c.winFocus.length !== 1) throw new Error("显式聚焦应 windows.update(focused)");
 });
 
+/* ========== 2026-11-27 审计 P0：switch-keep-focus 默认（features/36）========== */
+step("那么", "默认打开模式为 switch-keep-focus 且保留三种模式", () => {
+  if (store.DEFAULT_SETTINGS.openTabMode !== "switch-keep-focus")
+    throw new Error("默认 openTabMode 应为 switch-keep-focus");
+  if (store.DEFAULT_SETTINGS.openTabsInBackground !== true)
+    throw new Error("旧字段 openTabsInBackground 应保留兼容");
+});
+
+step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", async () => {
+  const mock = freshMock();
+  const tabId = 557;
+  ctx.openTabs = [{ id: tabId, title: "切换", url: "https://example.com/switch" }];
+  const node = {
+    id: "t_switch",
+    kind: "tab",
+    title: "切换",
+    url: "https://example.com/switch",
+    tabId,
+  };
+  const res = await ops.openTab(mock.chrome, node, new Set(), { mode: "switch-keep-focus" });
+  if (!res.switched) throw new Error("switch-keep-focus 应返回 switched");
+  const c = mock.calls;
+  if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
+    throw new Error("switch-keep-focus 应 tabs.update(active:true) 切换页面");
+  if (c.winFocus.length !== 0)
+    throw new Error("switch-keep-focus 不应 windows.update(focused) 抢浏览器窗口焦点");
+});
+
+step("那么", "switch-keep-focus 新标签默认激活且不聚焦窗口", async () => {
+  const mock = freshMock();
+  const node = { id: "t_new", kind: "tab", title: "新页", url: "https://example.com/new" };
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    windowId: 1,
+    topWindow: { id: "w_new", windowId: 1 },
+    mode: "switch-keep-focus",
+  });
+  if (!res.created) throw new Error("应新建标签");
+  const c = mock.calls;
+  if (c.tabsCreate[0].active === false)
+    throw new Error("switch-keep-focus 新标签应处于激活态（默认 active:true）");
+  if (c.winFocus.length !== 0) throw new Error("switch-keep-focus 不应聚焦窗口");
+});
+
+step("那么", "插件面板在切换页面后重新聚焦宿主", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("body.focus({ preventScroll: true })"))
+    throw new Error("切换页面后未重新聚焦插件宿主");
+  if (!shellJs.includes('setAttribute("tabindex", "-1")'))
+    throw new Error("插件宿主未补 tabindex 以支持 focus");
+});
+
+/* ========== 2026-11-27 审计 P1：常用网址分类横滚 + 列数（features/36）========== */
+/* ========== 2026-11-27 审计 P1：多条便签（features/36）========== */
+step("那么", "多条便签支持日期提醒完成态与到期高亮且不申请通知权限", () => {
+  const item = homepage.normalizeNoteItems([
+    { id: "n1", text: "买牛奶", date: "2026-01-01", reminder: "09:00", done: false },
+    { id: "n2", text: "非法", date: "bad", reminder: "99:99", done: "yes" },
+    { text: "缺 id" },
+  ])[0];
+  if (!item || item.text !== "买牛奶" || item.date !== "2026-01-01" || item.reminder !== "09:00")
+    throw new Error("合法便签字段未保留");
+  if (item.done !== false) throw new Error("done 非布尔未规范化");
+  const bad = homepage.normalizeNoteItems([{ text: "x", date: "bad", reminder: "99:99" }])[0];
+  if (bad.date !== "" || bad.reminder !== "") throw new Error("非法日期/提醒未清空");
+  const cfg = homepage.normalizeHomeConfig({ noteItems: [{ text: "往返" }] });
+  if (!Array.isArray(cfg.noteItems) || cfg.noteItems.length !== 1)
+    throw new Error("便签未纳入配置规范化");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeNoteItems"') || !html.includes('id="homeNoteAdd"'))
+    throw new Error("便签列表/添加控件缺失");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("overdue")) throw new Error("缺到期高亮");
+  // 本轮不申请 notifications 权限。
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  if ((mf.permissions || []).includes("notifications"))
+    throw new Error("本轮不应申请 notifications 权限");
+});
+
+/* ========== 2026-11-27 审计 P1：快捷键卡位置与默认展示（features/36）========== */
+step("那么", "快捷键卡位于搜索框下方且默认展示", () => {
+  const html = repoFile("src/home/home.html");
+  const searchEnd = html.indexOf("</form>");
+  const keysIdx = html.indexOf('id="homeKeysCard"');
+  const sitesIdx = html.indexOf('class="home-sites-wrap"');
+  if (searchEnd < 0 || keysIdx < 0 || sitesIdx < 0) throw new Error("关键区块缺失");
+  if (!(searchEnd < keysIdx && keysIdx < sitesIdx))
+    throw new Error("快捷键卡未位于搜索框与常用网址之间");
+  // 默认值：decorations.keysCard=true。
+  const def = homepage.normalizeDecorations({});
+  if (def.keysCard !== true) throw new Error("快捷键卡默认未开启");
+});
+
+/* ========== 2026-11-27 审计 P1：主页顶部音乐图标入口（features/36）========== */
+step("那么", "主页顶部音乐图标入口已配置展开播放器未配置引导设置", () => {
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeMusicToggle"')) throw new Error("缺顶部音乐图标按钮");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标未绑定事件");
+  // 已配置：切换播放器显示；未配置：打开设置面板并引导。
+  if (!homeJs.includes('$("#homeSettings")?.click()')) throw new Error("未配置时未引导到设置面板");
+  if (!homeJs.includes("card.hidden = !card.hidden")) throw new Error("已配置时未切换播放器显示");
+});
+
+/* ========== 2026-11-27 审计 P1：主页 footer（features/36）========== */
+step("那么", "主页footer含版本指南反馈隐私说明且链接协议常量拼接", () => {
+  const html = repoFile("src/home/home.html");
+  for (const id of [
+    "homeFooter",
+    "homeVersion",
+    "homeFooterGuide",
+    "homeFooterFeedback",
+    "homeFooterPrivacy",
+  ])
+    if (!html.includes(`id="${id}"`)) throw new Error(`footer 缺 ${id}`);
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function renderFooter")) throw new Error("缺 renderFooter");
+  if (!homeJs.includes("getManifest")) throw new Error("版本号未从 manifest 读取");
+  // C12 口径：GitHub 链接用协议常量拼接，源码无完整 https:// 字面量。
+  if (!homeJs.includes('"https:" + "//github.com/')) throw new Error("链接未用协议常量拼接");
+  const homeHtml = repoFile("src/home/home.html");
+  if (/https:\/\/github\.com/.test(homeHtml)) throw new Error("HTML 出现 GitHub 链接字面量");
+});
+
+/* ========== 2026-11-27 审计 P1：天气定位授权失败可读化（features/36）========== */
+step("那么", "天气定位失败按错误码可读化且卡片有重试入口", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const html = repoFile("src/home/home.html");
+  if (!homeJs.includes("function geoErrorMessage")) throw new Error("缺定位错误码映射");
+  for (const msg of ["定位被拒绝", "无法获取位置", "定位超时"])
+    if (!homeJs.includes(msg)) throw new Error(`缺错误码可读提示：${msg}`);
+  if (!homeJs.includes("code === 1") || !homeJs.includes("code === 3"))
+    throw new Error("未区分授权拒绝与超时");
+  if (!homeJs.includes("function requestLocation")) throw new Error("定位逻辑未抽取复用");
+  if (!html.includes('id="homeWeatherRetry"')) throw new Error("天气卡片缺重新定位入口");
+  if (!html.includes('id="homeWeatherError"')) throw new Error("缺定位失败提示区");
+  // 不后台监听（排除注释，仅查实际调用）。
+  if (/navigator\.geolocation\.watchPosition\s*\(/.test(homeJs))
+    throw new Error("不应后台监听定位");
+});
+
+/* ========== 2026-11-27 审计 P1：在线壁纸图源（features/36）========== */
+step("那么", "在线壁纸图源仅 SFW 白名单且协议常量拼接不硬编码", async () => {
+  const P = "https:" + "//";
+  const src = onlineWp.ONLINE_WALLPAPER_SOURCES;
+  if (!Array.isArray(src) || src.length < 4) throw new Error("在线图源候选不足");
+  const ids = new Set();
+  for (const s of src) {
+    if (ids.has(s.id)) throw new Error("图源 id 重复");
+    ids.add(s.id);
+    if (!s.endpoint.startsWith(P)) throw new Error("图源端点未用协议常量拼接");
+    if (s.provider === "wallhaven") {
+      if (!s.endpoint.includes("purity=100")) throw new Error("Wallhaven 未限制 SFW");
+      if (!s.endpoint.includes("ratio=16:9")) throw new Error("Wallhaven 未限制 16:9");
+      if (!s.endpoint.includes("categories=010")) throw new Error("Wallhaven 未限制动漫分类");
+    }
+  }
+  // 失败/无结果返回空数组，不抛错。
+  const none = await onlineWp.fetchOnlineWallpapers("wallhaven-top", async () => ({
+    ok: true,
+    json: async () => ({ data: [] }),
+  }));
+  if (!Array.isArray(none) || none.length !== 0) throw new Error("空结果应返回空数组");
+  // 网络异常返回空。
+  const err = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => {
+    throw new Error("offline");
+  });
+  if (err.length !== 0) throw new Error("网络失败应返回空数组");
+});
+
+step("那么", "在线壁纸候选仅接受安全 https 且超时回退", async () => {
+  const P = "https:" + "//";
+  // 合法候选保留 + 来源/作者元数据。
+  const good = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => ({
+    ok: true,
+    json: async () => ({
+      results: [
+        { url: `${P}nekos.best/example.jpg`, artist: "画师A", source_url: `${P}orig.example/x` },
+      ],
+    }),
+  }));
+  if (good.length !== 1 || good[0].artist !== "画师A" || good[0].source !== "Nekos.best")
+    throw new Error("合法候选元数据未保留");
+  // 非法注入 URL 被拒。
+  const bad = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => ({
+    ok: true,
+    json: async () => ({ results: [{ url: "javascript:alert(1)" }] }),
+  }));
+  if (bad.length !== 0) throw new Error("非法候选图片 URL 未拒绝");
+  // 约束白名单放行该模块 fetch。
+  const constraint = repoFile("tools/check-constraints.mjs");
+  if (!constraint.includes("src/core/wallpaper-online.js"))
+    throw new Error("C11 未放行在线壁纸模块");
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  for (const h of ["https://wallhaven.cc/*", "https://w.wallhaven.cc/*", "https://nekos.best/*"])
+    if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺图源主机权限：" + h);
+});
+
+step("那么", "常用网址支持分类横向滚动与每行列数配置", () => {
+  if (homepage.normalizeSiteColumns("3") !== "3") throw new Error("合法列数 3 被拒绝");
+  if (homepage.normalizeSiteColumns("9") !== "auto") throw new Error("非法列数应回退 auto");
+  const cfg = homepage.normalizeHomeConfig({ siteLayout: { columns: "4" } });
+  if (cfg.siteLayout.columns !== "4") throw new Error("列数未纳入配置规范化");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("home-site-groups")) throw new Error("分类未包入横向滚动容器");
+  if (!homeJs.includes("cols-${columns}")) throw new Error("站点网格未应用列数 class");
+  if (!repoFile("src/home/home.html").includes('id="siteColumns"'))
+    throw new Error("配置面板缺列数控件");
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-site-groups") || !css.includes("overflow-x: auto"))
+    throw new Error("分类容器不支持横向滚动");
+  for (const n of ["2", "3", "4"])
+    if (!css.includes(`.home-sites.cols-${n}`)) throw new Error(`缺 cols-${n} 列数样式`);
+});
+
 step("那么", "主页搜索与站点点击走后台打开且焦点留插件", () => {
   const homeJs = repoFile("src/home/home.js");
   if (!homeJs.includes("openTabsInBackground")) throw new Error("主页未读取后台打开设置");
@@ -5028,8 +5264,9 @@ step("那么", "主页搜索与站点点击走后台打开且焦点留插件", (
   const creates = homeJs.match(/tabs\.create\([^)]*active:\s*!background/g) || [];
   if (creates.length < 2) throw new Error("搜索与站点未同时传 active:!background");
   const shellJs = repoFile("src/ui/shell.js");
-  if (!shellJs.includes("background,") || !shellJs.includes("focus: !!opts.focus"))
-    throw new Error("shell 未向 openTab 传后台/显式聚焦参数");
+  // 2026-11-27 P0：shell 改传 mode（switch-keep-focus 默认 / focus-webpage 显式）。
+  if (!shellJs.includes("mode,") || !shellJs.includes('mode = opts.focus ? "focus-webpage"'))
+    throw new Error("shell 未向 openTab 传模式/显式聚焦参数");
   if (!shellJs.includes("Ctrl+Shift+Enter")) throw new Error("缺显式聚焦快捷键");
 });
 
@@ -5116,7 +5353,8 @@ step("那么", "主页按分类分组渲染且置顶优先并且不读取浏览�
 /* ========== 2026-11-26 离线主页装饰（features/32）========== */
 step("那么", "离线装饰默认只开时钟与快捷条且可规范化", () => {
   const d = homepage.normalizeDecorations(null);
-  if (d.clock !== true || d.quickbar !== true || d.notes !== false || d.keysCard !== false)
+  // 2026-11-27 审计 P1-7：keysCard 默认改为 true（快捷键卡默认展示）。
+  if (d.clock !== true || d.quickbar !== true || d.notes !== false || d.keysCard !== true)
     throw new Error("装饰默认值异常：" + JSON.stringify(d));
   const custom = homepage.normalizeDecorations({ clock: false, notes: true });
   if (custom.clock !== false || custom.notes !== true) throw new Error("装饰开关未规范化");

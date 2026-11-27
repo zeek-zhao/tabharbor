@@ -1,8 +1,8 @@
 # TabHarbor 测试矩阵（test-matrix）
 
-> 重建于 2026-11-24，2026-11-26 口径确认与主页功能增补复核。BDD 325 场景 + 真机 Chromium E2E + 六项门禁。
+> 重建于 2026-11-24，2026-11-27 审计修复复核。BDD 338 场景 + 真机 Chromium E2E + 六项门禁。
 
-## 1. BDD 场景分布（共 325，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
+## 1. BDD 场景分布（共 338，v0.3.0 发布时为 249；`npm test` = bdd-runner + 样例校验）
 
 | feature | 场景数 | 覆盖域 |
 | --- | --- | --- |
@@ -38,6 +38,7 @@
 | 33_external_music | 4 | 外链音乐播放器阶段 1（iframe 卡片、供应商白名单、安全 https、失败兜底、懒加载不自动播） |
 | 34_weather_card | 3 | 天气卡片（手动城市优先、Open-Meteo 白名单单次请求、显式定位、失败隐藏+署名） |
 | 35_featured_wallpaper_gallery | 4 | 精选壁纸画廊（10 张原创 CC0 + 元数据、远程模式清本地元信息、8 秒超时回退） |
+| 36_2026_11_27_audit | 13 | 2026-11-27 审计修复（叶子行尾垃圾桶、switch-keep-focus 打开模式、常用网址横向分类+列数、在线壁纸图源白名单、天气定位错误可读化+重试、多条便签、快捷键卡默认展示、顶部音乐入口、主页 footer） |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
 | 03_storage | 6 | 存储读写、实时广播 |
 | 10_samples | 3 | 样例数据合法性、指南当前状态断言 |
@@ -69,7 +70,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 325/325 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 338/338 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -79,7 +80,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 325 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 338 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |

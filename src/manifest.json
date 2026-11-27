@@ -16,7 +16,10 @@
   "optional_host_permissions": [
     "https://api.github.com/*",
     "https://api.open-meteo.com/*",
-    "https://geocoding-api.open-meteo.com/*"
+    "https://geocoding-api.open-meteo.com/*",
+    "https://wallhaven.cc/*",
+    "https://w.wallhaven.cc/*",
+    "https://nekos.best/*"
   ],
   "background": {
     "service_worker": "background/service-worker.js",

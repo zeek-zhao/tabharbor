@@ -40,9 +40,10 @@ const sep = `<div class="sep"></div>`;
 
 export function menuHtml(kind) {
   if (kind === "leaf" || kind === "tab") {
-    // 合并审计（2026-11-24）：叶子右键收敛为仅「删除到回收站」。
-    // 复制继续走行内复制按钮、重命名走行尾铅笔；备注 UI 入口整体移除。
-    return item("del", "删除到回收站", true);
+    // 2026-11-27 P0：移除叶子右键「删除到回收站」——删除统一走行尾垃圾桶按钮
+    // 或 Delete 快捷键；复制走行内复制、重命名走行尾铅笔。右键保留只读提示项，
+    // 避免空菜单（不提供任何删除动作，data-act 不绑定危险操作）。
+    return `<div class="mi muted"><span>用行尾垃圾桶删除，或按 Delete 键</span></div>`;
   }
   if (kind === "group") {
     // M1/M3/Q1：移除重命名/添加标签/新建子组——行内已具备全部入口

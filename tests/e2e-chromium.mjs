@@ -304,6 +304,12 @@ try {
     copyCheck.rows + copyCheck.leaves,
     `行内复制按钮数异常: ${JSON.stringify(copyCheck)}`
   );
+  // 2026-11-27 P0：每个叶子行尾有垃圾桶按钮（删除到回收站唯一行内入口）。
+  const trashCount = await win.evaluate(
+    () => document.querySelectorAll("#spBody .leaf .trash-x[data-act='trash']").length
+  );
+  assert.equal(trashCount, copyCheck.leaves, "叶子行尾垃圾桶按钮数异常");
+  console.log("E2E 2026-11-27 叶子行尾垃圾桶按钮通过");
   const tabNode = win.locator('.leaf[data-id="t_project_1"]');
   await tabNode.click();
   const selected = await tabNode.evaluate((el) => el.classList.contains("selected"));

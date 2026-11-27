@@ -15,6 +15,9 @@ const CP =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h7" stroke="currentColor" stroke-width="2"/></svg>';
 const XI =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>';
+// 2026-11-27 P0：叶子行尾「删除到回收站」垃圾桶按钮（右键删除入口同步移除，Delete 快捷键保留）。
+const TRASH =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M9 3h6v2h5v2H4V5h5V3zM6 8h12l-1 13H7L6 8zm4 2v9h2v-9h-2zm4 0v9h2v-9h-2z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 // M2/B8（2026-11-24 菜单审计）：行尾「重命名」铅笔按钮，容器与标签共用；复用 openEditModal。
 const PENCIL =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 17.2V21h3.8L17.9 9.9l-3.8-3.8L3 17.2zM20.7 7.1a1 1 0 0 0 0-1.4l-2.4-2.4a1 1 0 0 0-1.4 0l-1.8 1.8 3.8 3.8 1.8-1.8z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
@@ -139,6 +142,8 @@ function leafRow(t, opts) {
   // 关闭态叶子不渲染关闭按钮；已打开叶子的关闭按钮常显（不受 :hover 门控）。
   const renameBtn = `<button class="rename-x" data-act="rename" title="重命名" aria-label="重命名标签">${PENCIL}</button>`;
   const copyBtn = `<button class="copy-x" data-act="copy" title="复制标签" aria-label="复制标签">${CP}</button>`;
+  // 2026-11-27 P0：行尾垃圾桶——删除到回收站（右键删除入口移除，Delete 快捷键保留）。
+  const trashBtn = `<button class="trash-x" data-act="trash" title="删除到回收站" aria-label="删除到回收站">${TRASH}</button>`;
   const closeBtn = open
     ? `<button class="close-x" data-act="close" title="关闭网页" aria-label="关闭网页">${XI}</button>`
     : "";
@@ -152,9 +157,10 @@ function leafRow(t, opts) {
     rawTitle ||
     String(t.url || "").trim() ||
     (internal ? `${internal[1].replace(/-/g, "")} 页面` : "未命名标签");
-  // 2026-11-24 行内按钮审计：叶子操作包入 .row-ops 右对齐；DOM 从左到右 = 关闭 → 复制 → 重命名（最右）。
-  // 从右往左读 = 重命名 → 复制 → 关闭按钮。关闭态无关闭按钮；无打开按钮、无新建标签/分组按钮。
-  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}<span class="row-ops">${closeBtn}${copyBtn}${renameBtn}</span></div>`;
+  // 2026-11-24 行内按钮审计：叶子操作包入 .row-ops 右对齐；DOM 从左到右 = 关闭 → 复制 → 重命名 → 删除（最右）。
+  // 从右往左读 = 删除 → 重命名 → 复制 → 关闭按钮。关闭态无关闭按钮；无打开按钮、无新建标签/分组按钮。
+  // 2026-11-27 P0：垃圾桶放最右，为删除到回收站唯一行内入口。
+  return `<div class="leaf${open ? " open" : ""}${sel}${dim}" data-id="${t.id}" data-kind="leaf" draggable="true">${prefix}<span class="title">${escapeHtml(showTitle)}</span>${link}${note}<span class="row-ops">${closeBtn}${copyBtn}${renameBtn}${trashBtn}</span></div>`;
 }
 
 // FR-008：短链接——去协议头，超长截断

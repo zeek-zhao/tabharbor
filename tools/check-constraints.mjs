@@ -42,16 +42,20 @@ const RULES = [
   {
     id: "C11",
     re: /\bfetch\s*\(|XMLHttpRequest\b/g,
-    desc: "代码主动网络出站（白名单：GitHub 备份 + 天气 Open-Meteo）",
-    allowFiles: ["src/core/import-export.js", "src/core/weather.js"],
+    desc: "代码主动网络出站（白名单：GitHub 备份 + 天气 Open-Meteo + 在线壁纸图源）",
+    allowFiles: [
+      "src/core/import-export.js",
+      "src/core/weather.js",
+      "src/core/wallpaper-online.js",
+    ],
   },
   {
     id: "C12",
-    // 2026-11-26 出站白名单新增 Open-Meteo（仅天气模块使用）：api.open-meteo.com /
-    // geocoding-api.open-meteo.com。manifest.json 的可选主机权限字符串由此豁免。
+    // 出站白名单：GitHub 备份、Open-Meteo（天气）、Wallhaven / Nekos.best（在线壁纸图源）。
+    // manifest.json 的可选主机权限字符串由此豁免。
     // 远程壁纸/外链音乐均为用户运行时输入的 URL，不落源码字面量，仍被本规则禁止硬编码。
-    re: /https?:\/\/(?!api\.github\.com|api\.open-meteo\.com|geocoding-api\.open-meteo\.com)/g,
-    desc: "源码出站 URL 白名单：GitHub 备份 + Open-Meteo 天气",
+    re: /https?:\/\/(?!api\.github\.com|api\.open-meteo\.com|geocoding-api\.open-meteo\.com|wallhaven\.cc|w\.wallhaven\.cc|nekos\.best)/g,
+    desc: "源码出站 URL 白名单：GitHub 备份 + Open-Meteo 天气 + 在线壁纸图源",
     allowFiles: ["src/core/import-export.js"],
   },
 ];
@@ -106,6 +110,6 @@ for (const h of hits) {
   console.log("    > " + h.code);
 }
 console.log(
-  "\n受限例外：fetch/XHR 仅限 src/core/import-export.js（GitHub 备份）与 src/core/weather.js（Open-Meteo 天气）；书签 API 无例外。"
+  "\n受限例外：fetch/XHR 仅限 src/core/import-export.js（GitHub 备份）、src/core/weather.js（Open-Meteo 天气）、src/core/wallpaper-online.js（在线壁纸图源）；书签 API 无例外。"
 );
 process.exit(1);

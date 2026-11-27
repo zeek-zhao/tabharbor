@@ -41,6 +41,17 @@ export const SITE_CATEGORIES = [
 ];
 const SITE_CREATED_AT = "2026-11-26";
 
+// 2026-11-27 审计 P1：常用网址布局——分类横向滚动 + 每行列数（auto/2/3/4）。
+export const SITE_COLUMN_OPTIONS = [
+  { id: "auto", name: "自适应" },
+  { id: "2", name: "每行 2 个" },
+  { id: "3", name: "每行 3 个" },
+  { id: "4", name: "每行 4 个" },
+];
+export function normalizeSiteColumns(value) {
+  return SITE_COLUMN_OPTIONS.some((o) => o.id === String(value)) ? String(value) : "auto";
+}
+
 // 常用网址初始预置（Q3）：2026-11-25 扩充至 17 个（开发/文档、国际、国内内容服务）。
 // 2026-11-26 补齐分类/置顶元数据；内置站点按 URL/标题映射默认分类。
 export const DEFAULT_SITES = [
@@ -431,14 +442,18 @@ export const DEFAULT_HOMEPAGE = {
   sites: DEFAULT_SITES, // [{ title, url }]，顺序即展示顺序
   wallpaper: DEFAULT_WALLPAPER, // 2026-11-25：壁纸配置
   hiddenDefaultSiteUrls: [], // 2026-11-25 P0：用户主动删除的内置默认站点 URL，升级不再加回
+  // 2026-11-27 审计 P1：分类横向滚动 + 每行列数（auto/2/3/4）。
+  siteLayout: { columns: "auto" },
   // 2026-11-26 离线装饰：纯本地、不出站、不申请权限。notes 仅存本机配置。
   decorations: {
     clock: true, // 时钟/日期/星期/问候语
     quickbar: true, // 快捷操作条
     notes: false, // 本地便签/待办
-    keysCard: false, // 快捷键提示卡（只展示已实现的键）
+    keysCard: true, // 2026-11-27 审计 P1-7：快捷键提示卡默认展示（只展示已实现的键）
   },
-  notes: "", // 本地便签文本，不上传
+  notes: "", // 本地便签文本（旧版单条，兼容保留），不上传
+  // 2026-11-27 审计 P1：多条便签（文本/日期/提醒/完成态），纯本地；通知权限本轮不申请。
+  noteItems: [],
   // 2026-11-26 外链音乐（阶段 1）：仅 external 实现，local 仅预留 schema 不启用。
   music: {
     enabled: false,
@@ -596,6 +611,25 @@ export function normalizeMusic(raw) {
   };
 }
 
+// 2026-11-27 审计 P1：多条便签规范化——文本限长 1000、日期 YYYY-MM-DD、提醒 HH:MM、完成态布尔。
+// 到期高亮由 UI 依据 date 与当日比较计算，纯本地、不申请通知权限。
+const NOTE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+// 时间限 00:00–23:59，拒绝 99:99 之类的伪时间。
+const NOTE_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
+export function normalizeNoteItems(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((n) => n && typeof n === "object")
+    .slice(0, 100)
+    .map((n) => ({
+      id: String(n.id || `note-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`),
+      text: String(n.text || "").slice(0, 1000),
+      date: NOTE_DATE_RE.test(n.date || "") ? n.date : "",
+      reminder: NOTE_TIME_RE.test(n.reminder || "") ? n.reminder : "",
+      done: n.done === true,
+    }));
+}
+
 // 离线装饰配置规范化：缺省补默认、布尔强制；notes 限长 4000 字防止存储膨胀。
 export function normalizeDecorations(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
@@ -736,8 +770,10 @@ export function normalizeHomeConfig(raw) {
     sites,
     wallpaper: normalizeWallpaper(src.wallpaper),
     hiddenDefaultSiteUrls,
+    siteLayout: { columns: normalizeSiteColumns(src.siteLayout && src.siteLayout.columns) },
     decorations: normalizeDecorations(src.decorations),
     notes: typeof src.notes === "string" ? src.notes.slice(0, 4000) : "",
+    noteItems: normalizeNoteItems(src.noteItems),
     music: normalizeMusic(src.music),
     weather: normalizeWeather(src.weather),
   };

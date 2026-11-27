@@ -36,7 +36,12 @@ export const DEFAULT_SETTINGS = {
   linkShow: false,
   backupTarget: "local",
   // 2026-11-26 P0（审计口径确认）：打开网页默认后台，焦点留在插件，不跳到网页。
+  // 2026-11-27 审计 P0：默认改为 switch-keep-focus——激活目标标签切换页面，
+  // 但不把浏览器窗口焦点交给网页，打开后重新聚焦插件面板。
+  // 可选值：switch-keep-focus | background | focus-webpage。
+  // openTabsInBackground 保留兼容旧配置/旧 UI 断言；新逻辑以 openTabMode 为准。
   openTabsInBackground: true,
+  openTabMode: "switch-keep-focus",
   // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
   ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
   ghGistId: "", // 已有 Gist ID（20+ hex）→ PATCH 更新；空 → POST 新建
@@ -51,6 +56,7 @@ export const DEFAULT_SETTINGS = {
     customEngines: [],
     sites: DEFAULT_HOMEPAGE.sites.map((s) => ({ ...s })),
     wallpaper: { ...DEFAULT_HOMEPAGE.wallpaper },
+    noteItems: [],
   },
 };
 

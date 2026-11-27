@@ -340,7 +340,8 @@ body {
    2026-11-24 行内按钮审计：移除叶子打开按钮（双击/Enter 负责打开），保留 .close-x 常显。 */
 .copy-x,
 .close-x,
-.rename-x {
+.rename-x,
+.trash-x {
   flex: 0 0 auto;
   display: inline-flex;
   background: transparent;
@@ -358,6 +359,11 @@ body {
 }
 /* 2026-11-24 行内按钮审计：关闭按钮常显（仅已打开叶子渲染），hover 用警告色，无悬停门控 */
 .close-x:hover {
+  background: var(--bg3);
+  color: var(--warn);
+}
+/* 2026-11-27 P0：行尾垃圾桶常显、hover 警告色（删除到回收站的唯一行内入口） */
+.trash-x:hover {
   background: var(--bg3);
   color: var(--warn);
 }
@@ -805,6 +811,12 @@ body {
 }
 .ctx-menu .mi.danger {
   color: var(--warn);
+}
+/* 2026-11-27 P0：叶子右键只读提示项（不可点击、无删除动作） */
+.ctx-menu .mi.muted {
+  color: var(--fg2);
+  cursor: default;
+  font-size: 11px;
 }
 .ctx-menu .sep {
   height: 1px;

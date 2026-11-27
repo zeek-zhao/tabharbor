@@ -130,7 +130,7 @@ function buildShellSkeleton(mode = "pip") {
 
 const KEYS_TABLE = [
   ["上 / 下选择标签", "↑ / ↓"],
-  ["后台打开选中标签（焦点留插件，也可双击）", "Enter"],
+  ["切换页面打开选中标签（焦点留插件，也可双击）", "Enter"],
   ["显式聚焦网页到浏览器", "Ctrl+Shift+Enter"],
   ["打开整组已关闭标签", "Ctrl + O"],
   ["定位当前标签", "Ctrl + L"],
@@ -151,13 +151,13 @@ const GUIDE_HTML = `
   <li><b>双击打开：</b>双击标签即在浏览器打开（无行内「打开」按钮）；行内复制图标一键复制，末尾 X 关闭网页（仅已打开叶子显示、常显不悬停）。</li>
   <li><b>行内加号（U2）：</b>窗口行与分组行右侧常显两个加号——「页面 +」添加标签、「文件夹 +」添加分组（窗口行建分组、分组行建子组）；空名称不创建。</li>
   <li><b>整组操作：</b>分组 / 窗口行内复制图标一键复制整组 / 整窗；右键可打开整组、关闭整组、删除整组。</li>
-  <li><b>重命名与右键（M1/M3）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；标签右键只保留「删除到回收站」，复制走行内复制按钮——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站并同步按 tabId 关闭对应浏览器网页（容器删除关闭整个子树）。</li>
+  <li><b>重命名与删除（2026-11-27）：</b>行尾铅笔按钮统一重命名标签 / 分组 / 窗口；标签行尾垃圾桶按钮删除到回收站（右键删除入口已移除，Delete 快捷键保留）；复制走行内复制按钮——添加标签/分组走行尾加号，改名走行尾铅笔；删除项进入回收站并同步按 tabId 关闭对应浏览器网页（容器删除关闭整个子树），可从工具栏回收站恢复。</li>
   <li><b>导入与备份（U5/U6/Q2）：</b>只保留一个「导入数据」按钮，放入文件后按内容自动识别 JSON 快照 / HTML 书签 / 主页配置 / 加密备份（不看后缀、不弹格式选项）。备份在本地与 GitHub 两张卡片里「先配置、后确认」：本地备份填密码后确认；GitHub 备份先「保存并校验配置」再单独「确认备份」。两者均为加密完整快照（含书签+回收站+设置+主页配置），密码不保存；另有独立「导出 HTML」明文书签导出。</li>
   <li><b>双向拖拽：</b>标签拖到其他组，或拖到顶部空白区升级为独立窗口；组拖到其他组（子组）或空白区升为独立窗口；窗口拖到另一窗口内降级为子组。</li>
   <li><b>状态颜色：</b>不再用状态圆点；标签前缀 favicon 打开时彩色高亮、关闭时灰度（无图标用通用兜底图标同样着色）；组内有任一打开标签则组亮色、全关则灰色；窗口同理。</li>
   <li><b>扩展主页（H2/H3）：</b>行内加号新建的标签默认打开 TabHarbor 主页——居中搜索框（可选必应 / 百度 / Google / DuckDuckGo 或自定义引擎）与常用网址图标网格，配置自动保存；主页入口已并入设置「外观」分类，也可从主页右上角齿轮进入配置。</li>
   <li><b>复制：</b>范围按对象自动判定（单标签一条、组 / 窗整组），按设置里的默认内容与格式一键复制。</li>
-  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter（或双击）在浏览器<b>后台</b>打开选中网页、焦点留在插件，可继续用 ↑↓/Delete 操作；需要跳到网页时按 Ctrl+Shift+Enter 显式聚焦。</li>
+  <li><b>键盘导航：</b>↑↓ 在标签间移动选中，Enter（或双击）<b>切换页面</b>打开选中网页但焦点仍留在插件（不把浏览器窗口焦点交给网页），可继续用 ↑↓/Delete 操作；需要把焦点交给网页时按 Ctrl+Shift+Enter 显式聚焦。</li>
   <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页脚「快速上手指南」图标右侧的 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
@@ -559,6 +559,14 @@ export async function bootShell(root) {
       if (host?.dataset.id) await addGroupToContainer(host.dataset.id);
       return;
     }
+    // 2026-11-27 P0：行尾垃圾桶——删除到回收站（复用共享 del 动作，含相邻焦点处理）。
+    const trashBtn = e.target.closest('[data-act="trash"]');
+    if (trashBtn) {
+      e.stopPropagation();
+      const leaf = trashBtn.closest(".leaf");
+      if (leaf?.dataset.id) await runMenuAct("del", leaf.dataset.id, "leaf", mainHost);
+      return;
+    }
     // 2026-11-24 行内按钮审计：已移除叶子「打开」按钮（.open-x）；
     // 打开网页统一由双击叶子 / Enter / 右键批量动作触发，openLeafById 核心动作保留。
     const closeBtn = e.target.closest(".close-x");
@@ -602,8 +610,9 @@ export async function bootShell(root) {
   // 绑定失效）时自动新建一个真实浏览器窗口，并把新窗口句柄回填到窗口节点。
   // O4（2026-11-23 UI 审计）：叶子级「打开中」标记，按钮双击 / 双击事件冒泡不并发新建多个标签。
   const openingLeafIds = new Set();
-  // 2026-11-26 P0（口径确认）：opts.focus=true 表示用户显式"聚焦网页"动作才激活标签+聚焦窗口；
-  // 否则按 settings.openTabsInBackground（默认 true）后台打开，焦点留在插件宿主。
+  // 2026-11-27 审计 P0：默认 switch-keep-focus——激活标签切换页面，但不把浏览器窗口焦点
+  // 交给网页，打开后重新聚焦插件面板；Ctrl/Cmd+Shift+Enter（opts.focus）才是 focus-webpage。
+  // 设置 openTabMode 可选：switch-keep-focus（默认）| background | focus-webpage。
   const openLeafById = async (id, opts = {}) => {
     if (openingLeafIds.has(id)) return;
     const node = findNode(m, id);
@@ -612,13 +621,18 @@ export async function bootShell(root) {
     try {
       const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
       const winId = boundWindowId(m, id);
-      const background = !opts.focus && settings.openTabsInBackground !== false;
+      // 显式聚焦动作优先；否则按设置模式，缺省 switch-keep-focus。
+      const configured = ["switch-keep-focus", "background", "focus-webpage"].includes(
+        settings.openTabMode
+      )
+        ? settings.openTabMode
+        : "switch-keep-focus";
+      const mode = opts.focus ? "focus-webpage" : configured;
       const res = await tabsOp.openTab(chrome, node, urls, {
         windowId: winId,
         topWindow: topWindowOf(m, id),
         m,
-        background,
-        focus: !!opts.focus,
+        mode,
       });
       let dirty = false;
       if (res.created && res.tabId != null && node.tabId !== res.tabId) {
@@ -651,20 +665,31 @@ export async function bootShell(root) {
       }
       if (dirty) await store.saveModel(m);
       await refreshOpen();
-      // 2026-11-26 P0：后台打开时保持焦点留在插件宿主——refreshOpen 重渲染后重新标记选中叶子
-      // 并滚动到可见位置；不调用 window.focus（浏览器焦点本就未被网页抢走）。
-      if (res.backgrounded && selectedId) {
+      // 2026-11-27 P0：切换页面后把焦点交还插件宿主——refreshOpen 重渲染后重新标记选中叶子、
+      // 滚动可见并主动 focus 宿主文档，确保用户能继续用 ↑↓/Enter 操作插件树。
+      // switch-keep-focus / background 都不调用 window.focus，也不把窗口焦点交给网页。
+      if ((res.switched || res.backgrounded) && selectedId) {
         const el = body.querySelector(`.leaf[data-id="${selectedId}"]`);
-        if (el) el.scrollIntoView({ block: "nearest" });
+        if (el) {
+          el.classList.add("selected");
+          el.scrollIntoView({ block: "nearest" });
+        }
+        // div 默认不可聚焦：补 tabindex=-1 后再 focus，确保键盘事件仍落在插件宿主。
+        if (body) {
+          if (!body.hasAttribute("tabindex")) body.setAttribute("tabindex", "-1");
+          if (typeof body.focus === "function") body.focus({ preventScroll: true });
+        }
       }
       toast(
         res.focused
           ? "已聚焦已打开网页"
-          : res.backgrounded
-            ? "已在后台打开网页（焦点仍在插件）"
-            : res.rebound
-              ? "已新建窗口并打开网页"
-              : "已打开网页"
+          : res.switched
+            ? "已切换页面（焦点仍在插件，可继续操作）"
+            : res.backgrounded
+              ? "已在后台打开网页（焦点仍在插件）"
+              : res.rebound
+                ? "已新建窗口并打开网页"
+                : "已打开网页"
       );
     } catch (err) {
       say("打开失败：" + err.message);
@@ -1843,6 +1868,12 @@ export async function bootShell(root) {
       if (addGroup) {
         const node = addGroup.closest(".node");
         if (node?.dataset.id) addGroupToContainer(node.dataset.id, host);
+        return;
+      }
+      const trashBtn = e.target.closest('[data-act="trash"]');
+      if (trashBtn) {
+        const leaf = trashBtn.closest(".leaf");
+        if (leaf?.dataset.id) await runMenuAct("del", leaf.dataset.id, "leaf", host);
         return;
       }
       const closeX = e.target.closest(".close-x");
