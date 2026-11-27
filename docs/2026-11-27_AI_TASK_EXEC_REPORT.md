@@ -19,7 +19,7 @@
 
 - `npm test`：347/347 PASS（新 feature `38_keymap_foreground` 4 场景；30/31/36/37 历史契约同步到新口径）
 - 六项门禁 + 真机 Chromium E2E 全绿
-- CI：run 链接提交后补记
+- CI：run [46043474543](https://github.com/zeek-zhao/tabharbor/actions/runs/46043474543) 一次通过（success，headSha `860cad2`）
 
 ## 3. 红线口径
 
