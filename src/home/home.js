@@ -960,7 +960,9 @@ async function onMusicAction(e) {
     if (!title) return;
     const artist = window.prompt("艺术家（可留空）")?.trim() || "";
     const rawUrl = window
-      .prompt("音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）")
+      .prompt(
+        "音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）"
+      )
       ?.trim();
     if (!rawUrl) return;
     const url = hp.normalizeMusicUrl(rawUrl);

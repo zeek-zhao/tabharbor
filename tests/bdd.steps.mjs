@@ -6103,7 +6103,11 @@ step("那么", "添加曲目列表归属兜底且文案明确 https", () => {
   // P1-3：失效激活列表落到第一个有效列表（resolveActiveList），无列表建默认并回写。
   if (!homeJs.includes("hp.resolveActiveList(cfg.music.local.playlists"))
     throw new Error("addTrack 未走 resolveActiveList 兜底");
-  if (!homeJs.includes("音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）"))
+  if (
+    !homeJs.includes(
+      "音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）"
+    )
+  )
     throw new Error("提示文案未明确 https");
   if (!homeJs.includes("不支持 http 明文、本地文件路径与 data/blob 等"))
     throw new Error("拒绝提示未列明不支持类型");
