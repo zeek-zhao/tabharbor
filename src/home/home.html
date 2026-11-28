@@ -65,14 +65,10 @@
             <span class="home-weather-src" title="数据来源：Open-Meteo">Open-Meteo</span>
             <!-- AI 任务：今日起 4 天预报（同一次请求，不额外出站）。 -->
             <div id="homeWeatherDays" class="home-weather-days"></div>
-            <button
-              id="homeWeatherRetry"
-              class="home-weather-retry"
-              type="button"
-              title="重新获取当前位置"
-              hidden
-            >
-              重新定位
+            <!-- 2026-11-28 二次复核 P2-2：文案统一为「重试」，title 由 JS 按模式区分
+                 （定位模式"重新定位"、手动模式"重新获取天气"）。 -->
+            <button id="homeWeatherRetry" class="home-weather-retry" type="button" hidden>
+              重试
             </button>
           </section>
           <p id="homeWeatherError" class="home-weather-error" hidden></p>
@@ -81,12 +77,11 @@
             <button class="home-mini" data-act="new-tab" type="button" title="新建标签">
               新建标签
             </button>
-            <button class="home-mini" data-act="open-home" type="button" title="打开主页">
-              打开主页
+            <!-- 2026-11-28 二次复核 P1-1：移除「打开主页」自跳转重复入口；导出/备份入口只在
+                 宿主壳或设置面板保留；宿主委托类按钮（回收站）在无宿主环境（独立主页）隐藏。 -->
+            <button class="home-mini" data-act="trash" data-host-only type="button" title="回收站">
+              回收站
             </button>
-            <button class="home-mini" data-act="trash" type="button" title="回收站">回收站</button>
-            <button class="home-mini" data-act="backup" type="button" title="备份入口">备份</button>
-            <button class="home-mini" data-act="export" type="button" title="导出配置">导出</button>
           </section>
 
           <section id="homeNotesWrap" class="home-notes-wrap" hidden>

@@ -161,7 +161,7 @@ BDD 场景总数：301/301 PASS（基线 285 → 本轮 +16）。**未取得真�
 
 | ID | 任务 | 源码 | 验收 | 状态 | 证据/缺口 |
 | --- | --- | --- | --- | --- | --- |
-| F-83 | P0 打开网页后焦点留插件 | `store.js` `openTabsInBackground`（默认 true）+ `tabs-op.js` `openTab` background/focus 参数 + `shell.js`/`home.js`/快捷键表 | 普通双击/Enter 后台打开；Ctrl+Shift+Enter 显式聚焦；主页搜索/站点后台打开；快捷键表 14→15 项 | 已实现 | 30 feature（6 场景）+ E2E 快捷键表 15 项断言 |
+| F-83 | P0 打开网页后焦点留插件 | `store.js` `openTabsInBackground`（默认 true）+ `tabs-op.js` `openTab` background/focus 参数 + `shell.js`/`home.js`/快捷键表 | 普通双击/Enter 后台打开；Ctrl+Shift+Enter 显式聚焦；主页搜索/站点后台打开；快捷键表 14→15 项 | 旧口径，已迁移（被 F-105 取代，历史记录保留） | 30 feature（6 场景）+ E2E 快捷键表 15 项断言 |
 | F-84 | 常用网址改普通跳转 + 分类置顶 | `homepage.js` `SITE_CATEGORIES`/`normalizeSite`/`inferSiteCategory` + `home.js`/配置面板 | 站点点击普通跳转；按分类分组渲染、置顶优先；配置面板支持分类/置顶/排序/删除；不调用 `chrome.bookmarks` | 已实现 | 31 feature（4 场景）；真机分类渲染待手工验收 |
 | F-85 | 离线主页装饰 | `homepage.js` `decorations`/`notes` schema + `home.js`/`home.html`/`home.css` | 时钟/日期/星期/问候语、快捷操作条、本地便签、快捷键提示卡；默认仅时钟+快捷条；纯本地不出站 | 已实现 | 32 feature（3 场景）；真机渲染待手工验收 |
 | F-86 | 外链音乐播放器（阶段 1） | `homepage.js` `music` schema/`normalizeMusicUrl`/`parseMusicEmbed`/`MUSIC_PROVIDERS` + `home.js` + `docs/PRIVACY.md` | SoundCloud/Spotify/Archive/网易云外链/自定义 embed；仅安全 https、拒绝伪协议与注入；iframe 懒加载、不自动播、8 秒超时兜底；local 阶段 2 仅预留 | 已实现 | 33 feature（4 场景）；平台 CSP/真机 iframe 待手工验收 |
@@ -181,7 +181,7 @@ BDD 场景总数：325/325 PASS（基线 301 → 本轮 +24）。**未取得真�
 | ID | 审计项 | 实现 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
 | F-91 (P0) | 叶子行尾垃圾桶按钮 + 收敛右键删除 | `render.js` 行尾垃圾桶（data-act=trash）→ 共享 del 动作（主/PiP 双宿主）；叶子右键菜单移除「删除到回收站」；Delete 快捷键保留 | 36 feature；08_menu 历史场景同步更新 | 已实现 |
-| F-92 (P0) | 打开默认改 switch-keep-focus | `store.js` `openTabMode`（默认 switch-keep-focus，可选 background/focus-webpage）；`tabs-op.js` mode 分支：激活标签切换页面但不 `windows.update(focused)`；shell 打开后重新聚焦插件宿主（tabindex=-1 + focus） | 36 feature 三场景 + 30 契约更新 | 已实现 |
+| F-92 (P0) | 打开默认改 switch-keep-focus | `store.js` `openTabMode`（默认 switch-keep-focus，可选 background/focus-webpage）；`tabs-op.js` mode 分支：激活标签切换页面但不 `windows.update(focused)`；shell 打开后重新聚焦插件宿主（tabindex=-1 + focus） | 36 feature 三场景 + 30 契约更新 | 旧口径，已迁移（被 F-105 取代，历史记录保留） |
 | F-93 (P1) | 常用网址分类横向滚动 + 列数配置 | `homepage.js` `siteLayout.columns`（auto/2/3/4）+ `normalizeSiteColumns`；`.home-site-groups` 横向滚动容器；`.home-sites.cols-N` 固定网格；配置面板列数下拉 | 36 feature | 已实现 |
 | F-94 (P1) | 在线壁纸图源列表（可选接入） | 新增 `src/core/wallpaper-online.js`：Wallhaven（anime SFW 16:9，search/random）+ Nekos.best（neko/waifu）；协议常量拼接端点；仅 https；8 秒超时兜底；SFW/宽高比过滤；配置面板候选缩略图 + 来源署名 + 一键应用；自定义 https 链接保留 | 36 feature ×2；C11 放行 + C12 白名单（wallhaven.cc/w.wallhaven.cc/nekos.best）+ manifest 可选主机 | 已实现 |
 | F-95 (P1) | 天气定位失败可读化 + 卡片重试 | `geoErrorMessage` 映射 PERMISSION_DENIED/POSITION_UNAVAILABLE/TIMEOUT 可读文案；`requestLocation()` 抽取复用；天气卡片「重新定位」按钮 + 错误提示区；仍不 watchPosition、不申请 notifications | 36 feature | 已实现 |
@@ -241,3 +241,24 @@ BDD 场景总数：347/347 PASS（343 → +4，feature 38）。红线口径：�
 | F-120 (P2) | 第三方 iframe 的 CSP/CORS/可嵌入性/自动播放限制 | 维持真机验收边界（8 秒超时兜底 + 新标签打开已具备）；本轮真机 Chromium E2E 全绿 | 待手工验收 |
 
 BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46117383831](https://github.com/zeek-zhao/tabharbor/actions/runs/46117383831) 一次通过（e42d3d9）。红线口径：无 C11/C12 白名单变更、无新增权限；曲目封面为用户主动输入的 https 运行时资源（同音频直链/壁纸链接口径）。
+
+## 18. 2026-11-28 二次复核修复轮（基于 `73adef7`）
+
+> 依据《TabHarbor-最新代码二次复核-2026-11-28》（豆包文档）。上轮 9 项修复确认 8 项"已修复"、1 项"部分修复"；本轮修复二次复核提出的 P1-1~P1-5 与 P2 系列项，并补一个真实语法 bug。
+
+| ID | 二次复核问题 | 修复 | 状态 |
+| --- | --- | --- | --- |
+| F-121 (P1-1) | 主页快捷条未按宿主环境收敛（打开主页自跳转/备份导出重复入口/locate 死分支） | 移除「打开主页」「备份」「导出」按钮（导出/备份只在宿主壳或设置面板保留）；回收站按钮标 `data-host-only`，无宿主环境（`window.parent === window`）隐藏；清理 onQuickbar 中 open-home/export/locate 死分支 | 已实现 |
+| F-122 (P1-2) | 播放列表切换未持久化 activeListId，curTrackId 跨列表错位 | 切换列表立即 `persistMusicLocal()`；curTrackId 仅在新队列仍含该曲目时保留，否则重置并清定位 | 已实现 |
+| F-123 (P1-3) | 主页快捷键卡混入宿主专用动作 | keymap 注册表动作增加 `homeVisible` 标记；主页快捷键卡只渲染 homeVisible 动作（open-selected/focus-web/focus-panel/copy-selected）；BDD 断言不含 open-group/open-trash/toggle-pip/locate-selected | 已实现 |
+| F-124 (P1-4) | features/30 残留 shell 脚本与 EOF 污染行，场景名旧口径 | 清理污染行；feature 30 场景与步骤文案更名为 foreground 当前口径 | 已实现 |
+| F-125 (P1-5) | 台账 F-83/F-92、feature 30/36、shell.js/tabs-op.js 注释残留旧 switch-keep-focus/后台口径 | 台账 F-83/F-92 标注「旧口径，已迁移（被 F-105 取代，历史记录保留）」；feature 36 场景更名为 foreground 口径；源码注释更正（switch-keep-focus 仅在迁移兼容处保留） | 已实现 |
+| F-126 (P2-1) | 曲目编辑封面留空会清空已有封面 | 封面留空 = 保留原封面（prompt 文案写明）；输入新合法 https 直链才更新 | 已实现 |
+| F-127 (P2-2) | 天气重试按钮文案与手动模式行为不一致 | 按钮文案统一「重试」，title 由 JS 按模式区分（定位"重新定位"/手动"重新获取天气"） | 已实现 |
+| F-128 (P2-4) | sidePanel.open 失败静默 | SW 回传 `{ok:false, message:"未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开"}`；shell 收到失败应答 toast 提示 | 已实现 |
+| F-129 (P2-5) | feature 39 断言偏薄，静态文本匹配漏检真实语法错误 | 新增 feature 40：**源码全量 `node --check` 运行时语法门禁** + 快捷条/列表持久化/列表管理/homeVisible 过滤/文案策略断言 | 已实现 |
+| F-130 (P2-补) | renderMusic 中 `const embedUrl` 重复声明（V8 早期语法错误，home.js 模块整体加载失败，被静态断言漏检） | 移除重复声明；`node --check` 门禁防回归 | 已实现 |
+| F-131 (P2-建议5) | 音乐列表管理缺失 | 播放列表新建（＋，≤10）/重命名/删除（删除列表曲目保留在曲库）；曲目行内 ↑/↓ 排序（当前队列内交换，当前曲目定位跟随移动，持久化） | 已实现 |
+| F-132 (P2-3) | 第三方 iframe/直链音频/sidePanel 手势真机验收 | 维持真机验收边界；8 秒超时兜底 + 新标签打开 + 失败可读提示已具备 | 待手工验收 |
+
+BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。

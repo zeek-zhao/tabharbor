@@ -617,9 +617,11 @@ export async function bootShell(root) {
   // 绑定失效）时自动新建一个真实浏览器窗口，并把新窗口句柄回填到窗口节点。
   // O4（2026-11-23 UI 审计）：叶子级「打开中」标记，按钮双击 / 双击事件冒泡不并发新建多个标签。
   const openingLeafIds = new Set();
-  // 2026-11-27 审计 P0：默认 switch-keep-focus——激活标签切换页面，但不把浏览器窗口焦点
-  // 交给网页，打开后重新聚焦插件面板；Ctrl/Cmd+Shift+Enter（opts.focus）才是 focus-webpage。
-  // 设置 openTabMode 可选：switch-keep-focus（默认）| background | focus-webpage。
+  // 2026-11-27 审计 P0（2026-11-28 二次复核 P1-5 注释更正）：旧口径曾默认
+  // switch-keep-focus（激活切换页面但不交窗口焦点、重新聚焦面板），该值已一次性迁移为
+  // foreground——openTabMode 当前值域：foreground（默认，前台打开、网页获得焦点、不回收
+  // 插件键盘焦点）| background（纯后台打开，焦点回收仅此模式）；focus-webpage 为
+  // Ctrl/Cmd+Shift+Enter（opts.focus）显式聚焦的兼容别名（行为同前台）。
   const openLeafById = async (id, opts = {}) => {
     if (openingLeafIds.has(id)) return;
     const node = findNode(m, id);
@@ -1396,8 +1398,10 @@ export async function bootShell(root) {
       }
       toast("焦点已回到面板");
       try {
-        chrome?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, () => {
-          void chrome?.runtime?.lastError; // 面板已打开/无接收方：忽略
+        // 2026-11-28 二次复核 P2-4：SW 应答失败时给出可读提示，不静默。
+        chrome?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, (resp) => {
+          if (chrome?.runtime?.lastError) return; // 无接收方（非扩展环境）：忽略
+          if (resp && resp.ok === false && resp.message) toast(resp.message);
         });
       } catch {
         // 非扩展环境：忽略

@@ -379,17 +379,26 @@ function renderDecorations() {
   show("#homeQuickbar", d.quickbar);
   show("#homeNotesWrap", d.notes);
   show("#homeKeysCard", d.keysCard);
+  // 2026-11-28 二次复核 P1-1：无宿主环境（独立主页 window.parent===window）隐藏宿主委托按钮。
+  const standalone = window.parent === window;
+  document
+    .querySelectorAll("#homeQuickbar [data-host-only]")
+    .forEach((b) => (b.hidden = standalone));
   // 2026-11-27 复核 P1-5：旧单条便签 UI 已移除，只保留 noteItems 多条列表。
   renderNoteItems();
   const keysList = $("#homeKeysList");
   if (keysList) {
     // 2026-11-28 复核 G3：不再硬编码键位列表——按动作注册表渲染，键位读取本地 keymap
     // （设置面板改键后主页提示卡同步显示实际生效键串）。
+    // 2026-11-28 二次复核 P1-3：只展示 homeVisible 动作（宿主壳/树专用动作不混入主页，
+    // 避免“按了没反应”误解——独立主页无树选中态、无 PiP/回收站容器）。
     const map = keymap.normalizeKeymap(settings && settings.keymap);
-    keysList.innerHTML = keymap.KEY_ACTIONS.map(
-      (a) =>
-        `<div class="kv"><kbd>${escapeHtml(map[a.id] || a.key)}</kbd><span>${escapeHtml(a.label)}</span></div>`
-    ).join("");
+    keysList.innerHTML = keymap.KEY_ACTIONS.filter((a) => a.homeVisible)
+      .map(
+        (a) =>
+          `<div class="kv"><kbd>${escapeHtml(map[a.id] || a.key)}</kbd><span>${escapeHtml(a.label)}</span></div>`
+      )
+      .join("");
   }
   const toggles = [
     ["#decoClock", "clock"],
@@ -464,7 +473,11 @@ async function refreshWeather() {
   }
   const retryBtn = $("#homeWeatherRetry");
   // 2026-11-28 复核 G8：重试入口常驻（手动城市/定位模式均可一键重试）。
-  if (retryBtn) retryBtn.hidden = false;
+  // 2026-11-28 二次复核 P2-2：文案统一「重试」，title 按模式区分。
+  if (retryBtn) {
+    retryBtn.hidden = false;
+    retryBtn.title = w.mode === "location" ? "重新定位" : "重新获取天气";
+  }
   const errEl = $("#homeWeatherError");
   const cur = await weather.fetchCurrentWeather(coords, w.unit, globalThis.fetch);
   if (!cur) {
@@ -637,13 +650,9 @@ function renderMusic() {
   const fallback = $("#homeMusicFallback");
   if (fallback) fallback.classList.add("hidden");
   // 外链 iframe 仅在启用且配置了 embedUrl 时嵌入（兜底能力，不显示不可控伪控件）。
+  // 2026-11-28 二次复核：移除重复的 const embedUrl 声明（同作用域重复声明是 V8 早期
+  // 语法错误，会导致 home.js 整个模块加载失败——此前被静态断言型 BDD 漏检）。
   if (card.hidden || !frame || !embedUrl) return;
-  // iframe 用 JS 创建：src 经 normalizeMusicUrl 净化（仅 https、拒绝注入字符）。
-  const embedUrl = hp.normalizeMusicUrl(music.external.embedUrl);
-  if (!embedUrl) {
-    card.hidden = true;
-    return;
-  }
   const iframe = document.createElement("iframe");
   iframe.setAttribute("src", embedUrl);
   iframe.setAttribute("loading", "lazy");
@@ -679,12 +688,18 @@ function renderMusicPlayer() {
   const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
   const plBox = $("#homeMusicPlaylists");
   if (plBox) {
-    plBox.innerHTML = (local.playlists || [])
-      .map(
-        (pl) =>
-          `<button class="home-site-chip${pl.id === local.activeListId ? " active" : ""}" data-list="${escapeHtml(pl.id)}" type="button">${escapeHtml(pl.name)}</button>`
-      )
-      .join("");
+    // 2026-11-28 二次复核 P2：播放列表管理——chips + 新建（＋）+ 当前列表重命名/删除。
+    plBox.innerHTML =
+      (local.playlists || [])
+        .map(
+          (pl) =>
+            `<button class="home-site-chip${pl.id === local.activeListId ? " active" : ""}" data-list="${escapeHtml(pl.id)}" type="button">${escapeHtml(pl.name)}</button>`
+        )
+        .join("") +
+      `<button class="home-site-chip" id="homeMusicAddList" type="button" title="新建播放列表">＋</button>` +
+      (local.activeListId
+        ? `<button class="home-mini" id="homeMusicRenameList" type="button" title="重命名当前播放列表">✎</button><button class="home-mini" id="homeMusicDeleteList" type="button" title="删除当前播放列表">✕</button>`
+        : "");
   }
   musicQueue = musicListTracks();
   const cur = musicQueue[musicIndex];
@@ -708,10 +723,11 @@ function renderMusicPlayer() {
   if (dur) dur.textContent = fmtTime(cur?.duration || musicAudio?.duration || 0);
   const tracksBox = $("#homeMusicTracks");
   if (tracksBox) {
+    // 2026-11-28 二次复核 P2：曲目行内 ↑/↓ 排序（首尾自动禁用）。
     tracksBox.innerHTML = musicQueue
       .map(
         (t, i) =>
-          `<div class="home-music-track${i === musicIndex ? " active" : ""}" data-idx="${i}"><span class="no">${i + 1}</span><span class="t">${escapeHtml(t.title)}</span><span class="a">${escapeHtml(t.artist)}</span><span class="d">${fmtTime(t.duration)}</span><span class="ops"><button class="track-edit" data-idx="${i}" type="button" title="编辑曲目">✎</button><button class="track-del" data-idx="${i}" type="button" title="删除曲目">✕</button></span></div>`
+          `<div class="home-music-track${i === musicIndex ? " active" : ""}" data-idx="${i}"><span class="no">${i + 1}</span><span class="t">${escapeHtml(t.title)}</span><span class="a">${escapeHtml(t.artist)}</span><span class="d">${fmtTime(t.duration)}</span><span class="ops"><button class="track-move" data-idx="${i}" data-dir="-1" type="button" title="上移"${i === 0 ? " disabled" : ""}>↑</button><button class="track-move" data-idx="${i}" data-dir="1" type="button" title="下移"${i === musicQueue.length - 1 ? " disabled" : ""}>↓</button><button class="track-edit" data-idx="${i}" type="button" title="编辑曲目">✎</button><button class="track-del" data-idx="${i}" type="button" title="删除曲目">✕</button></span></div>`
       )
       .join("");
   }
@@ -945,15 +961,92 @@ function onMusicPlayerInput(e) {
 }
 
 function onMusicPlayerClick(e) {
+  // 2026-11-28 二次复核 P2：播放列表管理（新建/重命名/删除）与曲目排序，先于切换/播放命中。
+  const local = cfg.music?.local || {};
+  if (e.target.closest("#homeMusicAddList")) {
+    if ((local.playlists || []).length >= 10) {
+      say("播放列表最多 10 个");
+      return;
+    }
+    const name = window.prompt("新播放列表名称")?.trim();
+    if (!name) return;
+    const id = `list-${Date.now()}`;
+    local.playlists = [...(local.playlists || []), { id, name, trackIds: [] }];
+    cfg.music.local.activeListId = id;
+    musicIndex = -1;
+    void persistMusicLocal();
+    renderMusicPlayer();
+    say("播放列表已创建");
+    return;
+  }
+  if (e.target.closest("#homeMusicRenameList")) {
+    const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
+    if (!pl) return;
+    const name = window.prompt("重命名播放列表", pl.name)?.trim();
+    if (!name || name === pl.name) return;
+    pl.name = name.slice(0, 40);
+    void persistMusicLocal();
+    renderMusicPlayer();
+    say("播放列表已重命名");
+    return;
+  }
+  if (e.target.closest("#homeMusicDeleteList")) {
+    const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
+    if (!pl) return;
+    if (!window.confirm(`删除播放列表「${pl.name}」？（曲目保留在曲库中）`)) return;
+    local.playlists = (local.playlists || []).filter((p) => p.id !== pl.id);
+    const nextActive = (local.playlists || [])[0]?.id || "";
+    cfg.music.local.activeListId = nextActive;
+    musicIndex = -1;
+    // 2026-11-28 二次复核 P1-2 同口径：列表删除后 curTrackId 不在新队列则重置。
+    const nextQueue = musicListTracks();
+    if (!nextQueue.some((t) => t.id === (local.curTrackId || ""))) local.curTrackId = "";
+    void persistMusicLocal();
+    renderMusic();
+    say("播放列表已删除（曲目保留在曲库）");
+    return;
+  }
+  const moveBtn = e.target.closest("#homeMusicTracks .track-move");
+  if (moveBtn) {
+    // 曲目排序：在当前队列（激活列表 trackIds 或曲库顺序）内交换相邻位置。
+    const idx = Number(moveBtn.dataset.idx) || 0;
+    const dir = Number(moveBtn.dataset.dir) || 1;
+    const j = idx + dir;
+    if (j < 0 || j >= musicQueue.length) return;
+    const curId = musicQueue[musicIndex]?.id || "";
+    const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
+    if (pl) {
+      const arr = pl.trackIds;
+      [arr[idx], arr[j]] = [arr[j], arr[idx]];
+    } else {
+      const ids = (local.tracks || []).map((t) => t.id);
+      [ids[idx], ids[j]] = [ids[j], ids[idx]];
+      const byId = new Map((local.tracks || []).map((t) => [t.id, t]));
+      local.tracks = ids.map((id) => byId.get(id)).filter(Boolean);
+    }
+    // 排序后恢复当前播放曲目定位（同一曲目跟随移动）。
+    void persistMusicLocal();
+    musicQueue = musicListTracks();
+    musicIndex = curId ? musicQueue.findIndex((t) => t.id === curId) : -1;
+    renderMusicPlayer();
+    return;
+  }
   const chip = e.target.closest("#homeMusicPlaylists .home-site-chip");
   if (chip) {
+    // 2026-11-28 二次复核 P1-2：切换播放列表立即持久化 activeListId；
+    // curTrackId 仅在新列表仍包含该曲目时保留，否则重置，避免恢复定位落到错误列表。
+    const prevTrackId = cfg.music.local.curTrackId || "";
     cfg.music.local.activeListId = chip.dataset.list || "";
-    musicIndex = -1;
+    const nextList = musicListTracks();
+    if (!nextList.some((t) => t.id === prevTrackId)) {
+      cfg.music.local.curTrackId = "";
+      musicIndex = -1;
+    }
+    void persistMusicLocal();
     renderMusicPlayer();
     return;
   }
   // 2026-11-28 复核 G6：曲目行内编辑 / 删除（先于播放命中，避免误触播放）。
-  const local = cfg.music?.local || {};
   const editBtn = e.target.closest("#homeMusicTracks .track-edit");
   const delBtn = e.target.closest("#homeMusicTracks .track-del");
   if (editBtn || delBtn) {
@@ -987,11 +1080,16 @@ function onMusicPlayerClick(e) {
         say("仅支持 https 直链，未修改 URL");
         return;
       }
-      const rawCover = window.prompt("封面图直链（可留空）", track.cover || "")?.trim() || "";
-      const cover = rawCover ? hp.normalizeMusicUrl(rawCover) : "";
-      if (rawCover && !cover) {
-        say("封面仅支持 https 直链，未修改封面");
-        return;
+      // 2026-11-28 二次复核 P2-1：封面留空 = 保留原封面；输入新合法 https 直链才更新。
+      const rawCover = window.prompt("封面图直链（留空保留原封面）", track.cover || "")?.trim();
+      let cover = track.cover || "";
+      if (rawCover) {
+        const next = hp.normalizeMusicUrl(rawCover);
+        if (!next) {
+          say("封面仅支持 https 直链，未修改封面");
+          return;
+        }
+        cover = next;
       }
       Object.assign(track, { title, artist, url, cover });
       const src = (local.tracks || []).find((t) => t.id === track.id);
@@ -1007,22 +1105,16 @@ function onMusicPlayerClick(e) {
 }
 
 // 快捷操作条：委托到主页自身能力或向宿主发消息（此处实现可离线完成的部分）。
+// 2026-11-28 二次复核 P1-1：移除 open-home（自跳转）/export/backup/locate 死分支——
+// 导出/备份入口只在宿主壳或设置面板保留；回收站按钮在无宿主环境隐藏（renderDecorations）。
 function onQuickbar(e) {
   const btn = e.target.closest("[data-act]");
   if (!btn) return;
   const act = btn.dataset.act;
-  if (act === "new-tab" || act === "open-home") {
-    const url =
-      act === "open-home" ? chromeApi?.runtime?.getURL?.(hp.HOME_PAGE_PATH) : "about:blank";
-    if (url && chromeApi?.tabs?.create) void chromeApi.tabs.create({ url });
-  } else if (act === "export") {
-    if (window.parent !== window) {
-      void window.parent.postMessage({ type: "tabharbor-quickact", action: "backup" }, "*");
-    } else {
-      say("请在插件侧边栏或独立窗口中使用导出");
-    }
-  } else if (act === "backup" || act === "trash" || act === "locate") {
-    // 这类动作在插件宿主壳里实现；主页独立打开时无宿主，给出明确提示。
+  if (act === "new-tab") {
+    if (chromeApi?.tabs?.create) void chromeApi.tabs.create({ url: "about:blank" });
+  } else if (act === "trash") {
+    // 宿主壳动作：主页独立打开（无宿主）时按钮已隐藏，这里仅作兜底提示。
     if (window.parent !== window) {
       void window.parent.postMessage({ type: "tabharbor-quickact", action: act }, "*");
     } else {

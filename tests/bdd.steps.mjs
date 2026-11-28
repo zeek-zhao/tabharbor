@@ -4980,7 +4980,7 @@ step("那么", "明文快照未写入扩展存储历史", async () => {
 });
 
 /* ========== 2026-11-26 P0：打开网页焦点留插件（features/30）========== */
-step("假如", "默认设置开启标签后台打开", () => {
+step("假如", "默认打开模式与旧开关迁移", () => {
   // 2026-11-27 复核 P1-5：状态源收敛为 openTabMode（旧 openTabsInBackground 已删除）。
   ctx.bgSettings = store.DEFAULT_SETTINGS;
   // AI 任务：默认前台打开（foreground）；background 为可选模式。
@@ -4990,7 +4990,7 @@ step("假如", "默认设置开启标签后台打开", () => {
     throw new Error("旧字段 openTabsInBackground 未删除");
 });
 
-step("那么", "默认设置开启标签后台打开", () => {
+step("那么", "默认打开模式与旧开关迁移", () => {
   // AI 任务：默认 foreground；旧值（switch-keep-focus/focus-webpage）迁移为 foreground。
   if (store.DEFAULT_SETTINGS.openTabMode !== "foreground")
     throw new Error("默认 openTabMode 应为 foreground");
@@ -5072,7 +5072,7 @@ step("那么", "默认打开模式为 foreground 且旧值全部迁移", () => {
   if (migSkf.openTabMode !== "foreground") throw new Error("switch-keep-focus 未迁移为 foreground");
 });
 
-step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", async () => {
+step("那么", "foreground 命中已开标签激活并聚焦窗口", async () => {
   // AI 任务：switch-keep-focus 已废弃并迁移为 foreground——命中已开标签 = 激活 + 聚焦窗口。
   const mock = freshMock();
   const tabId = 557;
@@ -5093,7 +5093,7 @@ step("那么", "switch-keep-focus 命中已开标签激活但不聚焦窗口", a
     throw new Error("foreground 应 windows.update(focused) 把焦点交给网页");
 });
 
-step("那么", "switch-keep-focus 新标签默认激活且不聚焦窗口", async () => {
+step("那么", "foreground 新标签自然前台且不额外聚焦窗口", async () => {
   // AI 任务：foreground 新标签 active:true 前台打开。
   const mock = freshMock();
   const node = { id: "t_new", kind: "tab", title: "新页", url: "https://example.com/new" };
@@ -5110,7 +5110,7 @@ step("那么", "switch-keep-focus 新标签默认激活且不聚焦窗口", asyn
   if (c.winFocus.length !== 0) throw new Error("foreground 新建分支不应额外 windows.update");
 });
 
-step("那么", "插件面板在切换页面后重新聚焦宿主", () => {
+step("那么", "焦点回收仅 background 模式且宿主支持聚焦", () => {
   // AI 任务：前台为默认（网页获得焦点，不回收）；仅 background 模式回收焦点回宿主。
   const shellJs = repoFile("src/ui/shell.js");
   if (!shellJs.includes("body.focus({ preventScroll: true })"))
@@ -5302,7 +5302,7 @@ step("那么", "常用网址支持分类chip切换与每行列数配置", () => 
     throw new Error("缺分组管理卡");
 });
 
-step("那么", "主页搜索与站点点击走后台打开且焦点留插件", () => {
+step("那么", "主页搜索与站点点击统一走 openTabMode", () => {
   const homeJs = repoFile("src/home/home.js");
   // 2026-11-27 复核 P0-2/P1-5：主页统一走 openTabMode（旧 openTabsInBackground 已弃用）。
   if (homeJs.includes("openTabsInBackground"))
@@ -5914,4 +5914,120 @@ step("那么", "天气失败态显示错误与重试入口", () => {
   const rlBlock = homeJs.slice(rlIdx, homeJs.indexOf("// ===== 2026-11-26", rlIdx));
   if (!rlBlock.includes("card.hidden = false")) throw new Error("定位失败未显示卡片");
   if (!rlBlock.includes("retryBtn.hidden = false")) throw new Error("定位失败缺重试入口");
+});
+
+/* ========== 2026-11-28 二次复核修复（features/40）========== */
+step("那么", "源码模块语法检查通过", async () => {
+  // P2-5：静态文本断言漏检了 renderMusic 中 const embedUrl 重复声明（V8 早期语法错误）。
+  // 这里对 src 全量 JS 模块执行 node --check 真实语法门禁，防回归。
+  const { execFileSync } = await import("node:child_process");
+  const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".js")) files.push(p);
+    }
+  };
+  walk(srcDir);
+  if (files.length < 15) throw new Error("src JS 文件数量异常：" + files.length);
+  for (const f of files) {
+    try {
+      execFileSync(process.execPath, ["--check", f], { stdio: "pipe" });
+    } catch (err) {
+      throw new Error("语法检查失败 " + path.relative(srcDir, f) + ": " + err.stderr);
+    }
+  }
+});
+
+step("那么", "主页快捷条按宿主环境收敛", () => {
+  // P1-1：移除「打开主页」自跳转；导出/备份入口只在宿主壳或设置面板保留；
+  // 宿主委托按钮（回收站）标 data-host-only 并在无宿主环境隐藏；locate 死分支清理。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('data-act="open-home"')) throw new Error("仍保留「打开主页」自跳转按钮");
+  if (html.includes('data-act="backup"'))
+    throw new Error("快捷条仍保留备份入口（应在宿主壳/设置面板）");
+  if (html.includes('data-act="export"'))
+    throw new Error("快捷条仍保留导出入口（应在宿主壳/设置面板）");
+  const qbIdx = html.indexOf('id="homeQuickbar"');
+  const qbBlock = html.slice(qbIdx, html.indexOf("</section>", qbIdx));
+  if (!qbBlock.includes("data-host-only")) throw new Error("宿主委托按钮未标 data-host-only");
+  const homeJs = repoFile("src/home/home.js");
+  if (/act === "locate"/.test(homeJs)) throw new Error("onQuickbar 仍保留 locate 死分支");
+  if (/act === "open-home"/.test(homeJs)) throw new Error("onQuickbar 仍保留 open-home 分支");
+  if (/act === "export"/.test(homeJs)) throw new Error("onQuickbar 仍保留 export 死分支");
+  if (!homeJs.includes("data-host-only")) throw new Error("无宿主环境未隐藏宿主委托按钮");
+  if (!homeJs.includes("window.parent === window")) throw new Error("缺独立主页判定");
+});
+
+step("那么", "播放列表切换立即持久化且curTrackId按新队列校验", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const clickIdx = homeJs.indexOf("function onMusicPlayerClick");
+  const block = homeJs.slice(clickIdx, homeJs.indexOf("function bind(", clickIdx));
+  // P1-2：切换列表立即持久化 activeListId。
+  if (!block.includes("void persistMusicLocal()")) throw new Error("切换播放列表未立即持久化");
+  // curTrackId 仅在新队列包含该曲目时保留，否则重置。
+  if (!block.includes("nextList.some((t) => t.id === prevTrackId)"))
+    throw new Error("切换列表未校验 curTrackId 是否仍在队列");
+  if (!block.includes('cfg.music.local.curTrackId = ""')) throw new Error("curTrackId 未重置");
+  // schema 层：curTrackId 持久化幂等（非法回退空）。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https:" + "//e.com/a" }],
+    playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+    activeListId: "p1",
+    curTrackId: "t1",
+  });
+  if (n.curTrackId !== "t1") throw new Error("curTrackId 未持久化");
+});
+
+step("那么", "播放列表管理新建重命名删除与曲目排序可用", () => {
+  const homeJs = repoFile("src/home/home.js");
+  for (const id of ["homeMusicAddList", "homeMusicRenameList", "homeMusicDeleteList"])
+    if (!homeJs.includes(`#${id}`)) throw new Error("缺播放列表管理入口：" + id);
+  if (!homeJs.includes("track-move")) throw new Error("缺曲目排序按钮");
+  const moveIdx = homeJs.indexOf("const moveBtn");
+  const moveBlock = homeJs.slice(moveIdx, homeJs.indexOf("const chip", moveIdx));
+  if (!moveBlock.includes("[arr[idx], arr[j]] = [arr[j], arr[idx]]"))
+    throw new Error("排序未交换相邻位置");
+  if (!moveBlock.includes("void persistMusicLocal()")) throw new Error("排序未持久化");
+  // 列表上限与删除保护（曲目保留在曲库）。
+  if (!homeJs.includes("播放列表最多 10 个")) throw new Error("缺列表数量上限");
+  if (!homeJs.includes("曲目保留在曲库")) throw new Error("删除列表未说明曲目保留");
+});
+
+step("那么", "主页快捷键卡仅展示homeVisible动作", () => {
+  // P1-3：注册表动作加 homeVisible 标记；主页只渲染主页可执行动作。
+  const visible = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  for (const banned of ["open-group", "open-trash", "toggle-pip", "locate-selected"])
+    if (visible.includes(banned)) throw new Error("homeVisible 不应包含宿主专用动作：" + banned);
+  for (const need of ["open-selected", "focus-web", "focus-panel", "copy-selected"])
+    if (!visible.includes(need)) throw new Error("homeVisible 缺主页可执行动作：" + need);
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("KEY_ACTIONS.filter((a) => a.homeVisible)"))
+    throw new Error("主页快捷键卡未按 homeVisible 过滤");
+});
+
+step("那么", "重试文案统一且封面留空保留原封面", () => {
+  // P2-2：天气重试按钮文案统一「重试」，title 由 JS 按模式区分。
+  const html = repoFile("src/home/home.html");
+  const rIdx = html.indexOf('id="homeWeatherRetry"');
+  const rBlock = html.slice(rIdx, html.indexOf("</button>", rIdx));
+  if (!rBlock.includes("重试")) throw new Error("重试按钮文案未统一为「重试」");
+  if (rBlock.includes("重新获取当前位置")) throw new Error("重试按钮仍硬编码定位文案");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('retryBtn.title = w.mode === "location" ? "重新定位" : "重新获取天气"'))
+    throw new Error("重试 title 未按模式区分");
+  // P2-1：曲目编辑封面留空 = 保留原封面。
+  if (!homeJs.includes("留空保留原封面")) throw new Error("封面留空策略未写清");
+  const cIdx = homeJs.indexOf("留空保留原封面");
+  const cBlock = homeJs.slice(cIdx, cIdx + 400);
+  if (!cBlock.includes('let cover = track.cover || ""')) throw new Error("留空未保留原封面");
+  // P2-4：sidePanel.open 失败不静默——SW 回传可读提示，shell toast。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("请点击浏览器工具栏的 TabHarbor 图标打开"))
+    throw new Error("SW 调起侧边栏失败未回传可读提示");
+  if (!sw.includes("sendResponse?.({ ok: true })")) throw new Error("SW 成功路径未应答");
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("resp.ok === false")) throw new Error("shell 未处理失败应答");
 });

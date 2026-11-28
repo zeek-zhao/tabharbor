@@ -231,10 +231,11 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   chromeApi.windows?.onCreated?.addListener?.(resyncFromBrowser);
   chromeApi.windows?.onRemoved?.addListener?.(resyncFromBrowser);
   // D13a：面板激活/聚焦时由 UI 请求的一次性快照兜底（事件漏发/SW 未唤醒时使用）。
-  chromeApi.runtime?.onMessage?.addListener?.((msg, sender) => {
+  chromeApi.runtime?.onMessage?.addListener?.((msg, sender, sendResponse) => {
     if (msg?.type === "tabharbor:resync") resyncFromBrowser();
     // 2026-11-28 复核 G2：focus-panel 在面板未打开的上下文（独立窗口/主页等）按 ← 时，
     // 通过消息桥调起侧边栏：SW 侧执行 sidePanel.open（keydown 属用户手势，满足调用前提）。
+    // 2026-11-28 二次复核 P2-4：失败不再静默——回传可读提示，UI 侧 toast 告知手动入口。
     if (msg?.type === "tabharbor:open-side-panel") {
       void (async () => {
         try {
@@ -245,10 +246,15 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
             const w = await chromeApi.windows.getLastFocused();
             if (w?.id != null) await chromeApi.sidePanel.open({ windowId: w.id });
           }
+          sendResponse?.({ ok: true });
         } catch {
-          // 面板已打开或调用被拒绝：忽略
+          sendResponse?.({
+            ok: false,
+            message: "未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开",
+          });
         }
       })();
+      return true; // 异步 sendResponse
     }
   });
 }

@@ -72,7 +72,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 353/353 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 359/359 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -82,7 +82,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 353 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 359 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |

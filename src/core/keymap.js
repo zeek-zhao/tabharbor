@@ -3,10 +3,18 @@
 // 左右方向键新口径：→ 聚焦当前网页（focus-web）、← 回到插件面板（focus-panel），均可自定义。
 
 // 动作注册表：id 唯一；key 为默认键位（规范串：Ctrl/Alt/Shift/Meta+主键，或单键）。
+// 2026-11-28 二次复核 P1-3：homeVisible=true 的动作才在主页快捷键提示卡展示
+// （其余为宿主壳/PiP 树专用动作，独立主页无对应对象，展示会造成“按了没反应”）。
 export const KEY_ACTIONS = [
   { id: "cursor-prev", label: "上移选择", desc: "选择上一条标签", key: "ArrowUp" },
   { id: "cursor-next", label: "下移选择", desc: "选择下一条标签", key: "ArrowDown" },
-  { id: "open-selected", label: "打开选中标签", desc: "前台跳转，双击同效", key: "Enter" },
+  {
+    id: "open-selected",
+    label: "打开选中标签",
+    desc: "前台跳转，双击同效",
+    key: "Enter",
+    homeVisible: true,
+  },
   {
     id: "open-selected-focus",
     label: "显式聚焦网页",
@@ -14,7 +22,13 @@ export const KEY_ACTIONS = [
     key: "Ctrl+Shift+Enter",
   },
   { id: "trash-selected", label: "删除到回收站", desc: "移入回收站", key: "Delete" },
-  { id: "copy-selected", label: "复制当前标签", desc: "直出链接", key: "Ctrl+C" },
+  {
+    id: "copy-selected",
+    label: "复制当前标签",
+    desc: "直出链接",
+    key: "Ctrl+C",
+    homeVisible: true,
+  },
   { id: "locate-selected", label: "定位当前标签", desc: "在浏览器中定位该标签", key: "Ctrl+L" },
   { id: "toggle-collapse", label: "展开 / 收起全部", desc: "切换树状态", key: "Ctrl+E" },
   { id: "toggle-links", label: "显示 / 隐藏链接", desc: "切换链接列", key: "Ctrl+Shift+L" },
@@ -25,8 +39,20 @@ export const KEY_ACTIONS = [
     key: "Ctrl+O",
   },
   { id: "toggle-pip", label: "置顶小窗", desc: "切换置顶小窗模式", key: "Ctrl+P" },
-  { id: "focus-web", label: "聚焦当前网页", desc: "→ 前台聚焦选中标签所在网页", key: "ArrowRight" },
-  { id: "focus-panel", label: "回到插件面板", desc: "← 回到面板并选中当前行", key: "ArrowLeft" },
+  {
+    id: "focus-web",
+    label: "聚焦当前网页",
+    desc: "→ 前台聚焦选中标签所在网页",
+    key: "ArrowRight",
+    homeVisible: true,
+  },
+  {
+    id: "focus-panel",
+    label: "回到插件面板",
+    desc: "← 回到面板并选中当前行",
+    key: "ArrowLeft",
+    homeVisible: true,
+  },
   { id: "open-trash", label: "打开回收站", desc: "查看已删除标签", key: "Ctrl+Backspace" },
   { id: "toggle-theme", label: "切换主题", desc: "深色 / 浅色", key: "Ctrl+D" },
 ];

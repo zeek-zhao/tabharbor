@@ -148,7 +148,7 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       host.seedId =
         made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
     }
-    // background 显式 active:false；switch-keep-focus / focus-webpage 用默认 active:true 切换页面。
+    // background 显式 active:false；foreground / focus-webpage 兼容别名用默认 active:true 前台打开。
     const activeOpt = background ? { active: false } : {};
     const created =
       host.windowId != null
@@ -156,8 +156,8 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
         : await chromeApi.tabs.create({ url: node.url, ...activeOpt });
     const tabId = created && created.id != null ? created.id : undefined;
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
-    // 2026-11-27 复核 P0-2：新建标签也要带模式标记——switch-keep-focus 时 active:true 会切换
-    // AI 任务：新建标签 active:true 前台切换，UI 层按模式决定是否回收焦点。
+    // 2026-11-27 复核 P0-2：新建标签也要带模式标记——foreground 时 active:true 自然前台切换
+    // （旧 switch-keep-focus 口径已迁移为 foreground），UI 层按模式决定是否回收焦点。
     return {
       created: true,
       tabId,
