@@ -3,8 +3,10 @@
 // 左右方向键新口径：→ 聚焦当前网页（focus-web）、← 回到插件面板（focus-panel），均可自定义。
 
 // 动作注册表：id 唯一；key 为默认键位（规范串：Ctrl/Alt/Shift/Meta+主键，或单键）。
-// 2026-11-28 二次复核 P1-3：homeVisible=true 的动作才在主页快捷键提示卡展示
-// （其余为宿主壳/PiP 树专用动作，独立主页无对应对象，展示会造成“按了没反应”）。
+// 2026-11-28 二次复核 P1-3 / 三轮复核 P1-1：homeVisible=true 的动作才在主页快捷键提示卡
+// 展示，且必须是主页真实绑定可执行的动作（home.js onHomeKeydown 分发）——目前仅
+// focus-panel（发 tabharbor:open-side-panel 消息桥调起侧边栏）。open-selected/focus-web/
+// copy-selected 依赖树选中叶子/当前标签对象，主页无对应目标，不展示（避免"按了没反应"）。
 export const KEY_ACTIONS = [
   { id: "cursor-prev", label: "上移选择", desc: "选择上一条标签", key: "ArrowUp" },
   { id: "cursor-next", label: "下移选择", desc: "选择下一条标签", key: "ArrowDown" },
@@ -13,7 +15,6 @@ export const KEY_ACTIONS = [
     label: "打开选中标签",
     desc: "前台跳转，双击同效",
     key: "Enter",
-    homeVisible: true,
   },
   {
     id: "open-selected-focus",
@@ -27,7 +28,6 @@ export const KEY_ACTIONS = [
     label: "复制当前标签",
     desc: "直出链接",
     key: "Ctrl+C",
-    homeVisible: true,
   },
   { id: "locate-selected", label: "定位当前标签", desc: "在浏览器中定位该标签", key: "Ctrl+L" },
   { id: "toggle-collapse", label: "展开 / 收起全部", desc: "切换树状态", key: "Ctrl+E" },
@@ -44,7 +44,6 @@ export const KEY_ACTIONS = [
     label: "聚焦当前网页",
     desc: "→ 前台聚焦选中标签所在网页",
     key: "ArrowRight",
-    homeVisible: true,
   },
   {
     id: "focus-panel",

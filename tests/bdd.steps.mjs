@@ -5810,7 +5810,7 @@ step("那么", "focus-panel 未开面板时经后台桥调起侧边栏", () => {
   const shellJs = repoFile("src/ui/shell.js");
   const fpIdx = shellJs.indexOf('action === "focus-panel"');
   if (fpIdx < 0) throw new Error("缺 focus-panel 分支");
-  const block = shellJs.slice(fpIdx, shellJs.indexOf("return;", fpIdx) + 7);
+  const block = shellJs.slice(fpIdx, shellJs.indexOf("  });", fpIdx));
   if (!block.includes("tabharbor:open-side-panel"))
     throw new Error("focus-panel 未发调起侧边栏消息");
   // SW：消息桥处理并调用 sidePanel.open（优先 sender 窗口，回退最后聚焦窗口）。
@@ -5967,10 +5967,10 @@ step("那么", "播放列表切换立即持久化且curTrackId按新队列校验
   const block = homeJs.slice(clickIdx, homeJs.indexOf("function bind(", clickIdx));
   // P1-2：切换列表立即持久化 activeListId。
   if (!block.includes("void persistMusicLocal()")) throw new Error("切换播放列表未立即持久化");
-  // curTrackId 仅在新队列包含该曲目时保留，否则重置。
-  if (!block.includes("nextList.some((t) => t.id === prevTrackId)"))
-    throw new Error("切换列表未校验 curTrackId 是否仍在队列");
-  if (!block.includes('cfg.music.local.curTrackId = ""')) throw new Error("curTrackId 未重置");
+  // curTrackId 校验与 activeListId 解析走 switchActiveList 纯函数（三轮复核 P2-5）。
+  if (!block.includes("hp.switchActiveList(cfg.music.local"))
+    throw new Error("切换列表未走 switchActiveList 纯函数");
+  if (!block.includes("switched.curTrackId")) throw new Error("curTrackId 未按新队列校验重置");
   // schema 层：curTrackId 持久化幂等（非法回退空）。
   const n = homepage.normalizeMusicLocal({
     tracks: [{ id: "t1", url: "https:" + "//e.com/a" }],
@@ -5988,8 +5988,8 @@ step("那么", "播放列表管理新建重命名删除与曲目排序可用", (
   if (!homeJs.includes("track-move")) throw new Error("缺曲目排序按钮");
   const moveIdx = homeJs.indexOf("const moveBtn");
   const moveBlock = homeJs.slice(moveIdx, homeJs.indexOf("const chip", moveIdx));
-  if (!moveBlock.includes("[arr[idx], arr[j]] = [arr[j], arr[idx]]"))
-    throw new Error("排序未交换相邻位置");
+  if (!moveBlock.includes("hp.moveTrackInList("))
+    throw new Error("排序未走 moveTrackInList 纯函数");
   if (!moveBlock.includes("void persistMusicLocal()")) throw new Error("排序未持久化");
   // 列表上限与删除保护（曲目保留在曲库）。
   if (!homeJs.includes("播放列表最多 10 个")) throw new Error("缺列表数量上限");
@@ -5999,10 +5999,21 @@ step("那么", "播放列表管理新建重命名删除与曲目排序可用", (
 step("那么", "主页快捷键卡仅展示homeVisible动作", () => {
   // P1-3：注册表动作加 homeVisible 标记；主页只渲染主页可执行动作。
   const visible = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
-  for (const banned of ["open-group", "open-trash", "toggle-pip", "locate-selected"])
-    if (visible.includes(banned)) throw new Error("homeVisible 不应包含宿主专用动作：" + banned);
-  for (const need of ["open-selected", "focus-web", "focus-panel", "copy-selected"])
-    if (!visible.includes(need)) throw new Error("homeVisible 缺主页可执行动作：" + need);
+  // 三轮复核 P1-1：homeVisible 收敛为仅 focus-panel（open-selected/focus-web/copy-selected
+  // 依赖树选中态，主页无目标不展示；主页自有能力由卡片单独如实列出）。
+  const visibleIds = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  for (const banned of [
+    "open-group",
+    "open-trash",
+    "toggle-pip",
+    "locate-selected",
+    "open-selected",
+    "focus-web",
+    "copy-selected",
+  ])
+    if (visibleIds.includes(banned))
+      throw new Error("homeVisible 不应包含主页无目标动作：" + banned);
+  if (!visibleIds.includes("focus-panel")) throw new Error("homeVisible 缺 focus-panel");
   const homeJs = repoFile("src/home/home.js");
   if (!homeJs.includes("KEY_ACTIONS.filter((a) => a.homeVisible)"))
     throw new Error("主页快捷键卡未按 homeVisible 过滤");
@@ -6030,4 +6041,153 @@ step("那么", "重试文案统一且封面留空保留原封面", () => {
   if (!sw.includes("sendResponse?.({ ok: true })")) throw new Error("SW 成功路径未应答");
   const shellJs = repoFile("src/ui/shell.js");
   if (!shellJs.includes("resp.ok === false")) throw new Error("shell 未处理失败应答");
+});
+
+/* ========== 2026-11-28 三轮复核修复（features/41）========== */
+step("那么", "主页快捷键卡只展示真实绑定可执行的动作且主页有 keydown 分发", () => {
+  // P1-1：注册表 homeVisible 只保留主页真实绑定动作（focus-panel）；
+  // open-selected/focus-web/copy-selected 依赖树选中态，主页无目标，不展示。
+  const visible = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  if (visible.join(",") !== "focus-panel")
+    throw new Error("homeVisible 应仅含 focus-panel，实际：" + visible.join(","));
+  // 主页有真实 keydown 分发：focus-panel 发消息桥 + 站点网格方向键导航。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function onHomeKeydown")) throw new Error("缺 onHomeKeydown 分发");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (!kdBlock.includes('type: "tabharbor:open-side-panel"'))
+    throw new Error("focus-panel 未绑定消息桥");
+  if (!kdBlock.includes("matchAction")) throw new Error("未按注册表键串匹配");
+  if (!kdBlock.includes("a.home-site")) throw new Error("站点网格缺方向键导航");
+  if (!homeJs.includes('addEventListener("keydown", onHomeKeydown)'))
+    throw new Error("keydown 未绑定");
+  // 卡片如实列出主页自有能力（站点 Enter/方向键）。
+  if (!homeJs.includes("打开选中的站点") || !homeJs.includes("在站点间移动选择"))
+    throw new Error("快捷键卡未列站点键盘能力");
+});
+
+step("那么", "音乐本地外链三态分域显隐", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  // P1-2：三态计算 + 分域显隐（external 隐藏本地控件区与列表管理；local 隐藏外链兜底）。
+  if (!rmBlock.includes('? "mixed" : hasLocal ? "local" : "external"'))
+    throw new Error("缺三态计算");
+  if (!rmBlock.includes('playerWrap.hidden = musicMode === "external"'))
+    throw new Error("external 态未隐藏本地控件区");
+  if (!rmBlock.includes('plSection.hidden = musicMode === "external"'))
+    throw new Error("external 态未隐藏播放列表管理入口");
+  if (!rmBlock.includes('openExternalBtn.hidden = musicMode === "local"'))
+    throw new Error("local 态未隐藏外链兜底入口");
+  // schema 层 phase 同步真实化（纯函数运行时断言）。
+  const ext = homepage.normalizeMusic({
+    enabled: true,
+    external: { embedUrl: "https://w.soundcloud.com/player/?url=https://x" },
+  });
+  if (ext.phase !== "external") throw new Error("仅外链应 phase=external，实际 " + ext.phase);
+  const loc = homepage.normalizeMusic({
+    enabled: true,
+    local: { tracks: [{ id: "t1", url: "https://e.com/a.mp3" }] },
+  });
+  if (loc.phase !== "local") throw new Error("仅本地应 phase=local，实际 " + loc.phase);
+  const mixed = homepage.normalizeMusic({
+    enabled: true,
+    external: { embedUrl: "https://w.soundcloud.com/player/?url=https://x" },
+    local: { tracks: [{ id: "t1", url: "https://e.com/a.mp3" }] },
+  });
+  if (mixed.phase !== "mixed") throw new Error("双来源应 phase=mixed，实际 " + mixed.phase);
+});
+
+step("那么", "添加曲目列表归属兜底且文案明确 https", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // P1-3：失效激活列表落到第一个有效列表（resolveActiveList），无列表建默认并回写。
+  if (!homeJs.includes("hp.resolveActiveList(cfg.music.local.playlists"))
+    throw new Error("addTrack 未走 resolveActiveList 兜底");
+  if (!homeJs.includes("音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）"))
+    throw new Error("提示文案未明确 https");
+  if (!homeJs.includes("不支持 http 明文、本地文件路径与 data/blob 等"))
+    throw new Error("拒绝提示未列明不支持类型");
+  // 纯函数口径：resolveActiveList 失效回退第一个列表。
+  const pls = [
+    { id: "p1", name: "P1", trackIds: [] },
+    { id: "p2", name: "P2", trackIds: [] },
+  ];
+  if (homepage.resolveActiveList(pls, "gone").id !== "p1")
+    throw new Error("失效激活列表未回退第一个有效列表");
+  if (homepage.resolveActiveList(pls, "p2").id !== "p2") throw new Error("有效激活列表应命中自身");
+  if (homepage.resolveActiveList([], "p1") !== null) throw new Error("无列表应返回 null");
+});
+
+step("那么", "音乐状态流纯函数运行时断言", () => {
+  // P2-5：状态流可执行校验（非代码字符串）——
+  const local = {
+    tracks: [
+      { id: "t1", url: "https://e.com/1" },
+      { id: "t2", url: "https://e.com/2" },
+      { id: "t3", url: "https://e.com/3" },
+    ],
+    playlists: [
+      { id: "p1", name: "P1", trackIds: ["t1", "t2", "t3"] },
+      { id: "p2", name: "P2", trackIds: ["t2"] },
+    ],
+    activeListId: "p1",
+    curTrackId: "t2",
+  };
+  // 新建列表（模拟：切换到新列表 p2）→ 持久化字段读回一致（activeListId/curTrackId 校验）。
+  const sw = homepage.switchActiveList(local, "p2");
+  if (sw.activeListId !== "p2") throw new Error("切换列表 activeListId 错误");
+  if (sw.curTrackId !== "t2") throw new Error("t2 在新列表中应保留 curTrackId");
+  const sw2 = homepage.switchActiveList(local, "p1");
+  if (sw2.curTrackId !== "t2") throw new Error("t2 在 p1 队列中应保留 curTrackId");
+  // 切到不含 curTrackId 的队列：curTrackId 重置空。
+  const sw3 = homepage.switchActiveList({ ...local, curTrackId: "t1" }, "p2");
+  if (sw3.curTrackId !== "") throw new Error("t1 不在 p2 队列，curTrackId 应重置");
+  // 曲目上移/下移 → trackIds 顺序变化；边界安全。
+  const moved = homepage.moveTrackInList(["t1", "t2", "t3"], 1, 0);
+  if (moved.join(",") !== "t2,t1,t3") throw new Error("上移结果错误：" + moved.join(","));
+  const moved2 = homepage.moveTrackInList(["t1", "t2", "t3"], 0, 5);
+  if (moved2.join(",") !== "t1,t2,t3") throw new Error("越界应原序返回");
+  if (homepage.moveTrackInList(["t1"], 0, 0).join(",") !== "t1") throw new Error("单元素应原序");
+  // 删除曲目 → 曲库 + 全部列表 trackIds + curTrackId 一致清理；当前曲目跟随。
+  const cleaned = homepage.removeTrackEverywhere(local, "t2");
+  if (cleaned.tracks.length !== 2) throw new Error("曲库未删除");
+  if (cleaned.playlists[0].trackIds.join(",") !== "t1,t3") throw new Error("p1 trackIds 未清理");
+  if (cleaned.playlists[1].trackIds.length !== 0) throw new Error("p2 trackIds 未清理");
+  if (cleaned.curTrackId !== "") throw new Error("删除当前曲目后 curTrackId 未重置");
+  const cleaned2 = homepage.removeTrackEverywhere(local, "t1");
+  if (cleaned2.curTrackId !== "t2") throw new Error("删除非当前曲目不应影响 curTrackId");
+  // 失效激活列表兜底（addTrack 归属）。
+  const fallback = homepage.resolveActiveList(local.playlists, "deleted");
+  if (fallback.id !== "p1") throw new Error("失效兜底应落第一个有效列表");
+});
+
+step("那么", "过期注释与文档口径清理且 phase 真实化", () => {
+  // P2-3：注释/文档与现状一致。
+  const tabsOp = repoFile("src/core/tabs-op.js");
+  if (tabsOp.includes("仅 focus-webpage 才把窗口焦点交给网页"))
+    throw new Error("tabs-op 注释仍写旧口径");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes("失败/离线隐藏卡片")) throw new Error("home.js 天气注释仍是旧口径");
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (privacy.includes("离线或失败时隐藏卡片")) throw new Error("PRIVACY 天气段落仍是旧口径");
+  const matrix = repoFile("docs/testing/test-matrix.md");
+  if (/36_2026_11_27_audit.*switch-keep-focus/.test(matrix))
+    throw new Error("test-matrix feature 36 名称仍是旧口径");
+  // phase 真实化：不再硬编码 external。
+  const hpSrc = repoFile("src/core/homepage.js");
+  if (hpSrc.includes('phase: "external", // 阶段 2 local 不启用'))
+    throw new Error("phase 仍硬编码 external");
+});
+
+step("那么", "focus-panel 面板已聚焦时跳过后台调桥", () => {
+  // P2-4：shell 文档持焦点且可见时只做宿主内 focus，不重复发 open-side-panel 消息。
+  const shellJs = repoFile("src/ui/shell.js");
+  const fpIdx = shellJs.indexOf('action === "focus-panel"');
+  const fpBlock = shellJs.slice(fpIdx, shellJs.indexOf("  });", fpIdx));
+  if (!fpBlock.includes('document.hasFocus?.() === true && document.visibilityState === "visible"'))
+    throw new Error("缺面板已聚焦判定");
+  const guardIdx = fpBlock.indexOf("document.hasFocus?.()");
+  const sendIdx = fpBlock.indexOf("sendMessage");
+  if (guardIdx < 0 || sendIdx < 0 || guardIdx > sendIdx)
+    throw new Error("已聚焦判定未先于消息发送短路");
 });

@@ -128,7 +128,8 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       // 后台模式：已开标签仅确保存在，不抢焦点、不切换浏览器激活标签与窗口。
       return { backgrounded: true, tabId: hit.id };
     }
-    // 切换页面：激活标签；仅 focus-webpage 才把窗口焦点交给网页。
+    // 切换页面：激活标签并把窗口焦点交给网页（foreground 命中已开标签即聚焦窗口；
+    // 「焦点留插件」仅指打开后 UI 层的宿主内焦点回收，见 shell openTabMode 处理）。
     await chromeApi.tabs.update(hit.id, { active: true });
     await chromeApi.windows.update(hit.windowId, { focused: true });
     return { focused: true };

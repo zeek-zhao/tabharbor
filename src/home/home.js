@@ -315,6 +315,41 @@ function onSearch(e) {
   else window.location.href = url;
 }
 
+// 2026-11-28 三轮复核 P1-1：主页真实键盘能力绑定（此前卡片提示了动作但主页无 keydown
+// 监听，“按了没反应”）——
+// 1) focus-panel（注册表 homeVisible 动作）→ tabharbor:open-side-panel 消息桥调起侧边栏；
+// 2) 站点网格方向键在站点卡间移动焦点，Enter 由 <a href> 原生打开（卡片如实提示）。
+function onHomeKeydown(e) {
+  const t = e.target;
+  if (t && (t.closest?.("input, textarea, select, [contenteditable]") || t.isContentEditable))
+    return;
+  const site = t?.closest?.("#homeSites a.home-site");
+  if (site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+    const sites = [...document.querySelectorAll("#homeSites a.home-site")];
+    const i = sites.indexOf(site);
+    if (i >= 0 && sites.length) {
+      const delta = e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 1;
+      const next = (i + delta + sites.length) % sites.length;
+      if (sites[next]) {
+        sites[next].focus();
+        e.preventDefault();
+      }
+    }
+    return;
+  }
+  const actionId = keymap.matchAction(settings && settings.keymap, e);
+  if (actionId !== "focus-panel") return;
+  e.preventDefault();
+  try {
+    chromeApi?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, () => {
+      void chromeApi?.runtime?.lastError; // 面板已打开/无接收方：忽略
+    });
+    say("已请求调起插件侧边栏");
+  } catch {
+    say("当前环境不支持调起侧边栏");
+  }
+}
+
 // 常用网址点击：有 chrome.tabs 时拦截默认跳转，按后台规则用 tabs.create 打开。
 function onSiteClick(e) {
   // 2026-11-27 复核 P1-4：分类 chip 点击——切换显示对应分类站点网格。
@@ -390,15 +425,19 @@ function renderDecorations() {
   if (keysList) {
     // 2026-11-28 复核 G3：不再硬编码键位列表——按动作注册表渲染，键位读取本地 keymap
     // （设置面板改键后主页提示卡同步显示实际生效键串）。
-    // 2026-11-28 二次复核 P1-3：只展示 homeVisible 动作（宿主壳/树专用动作不混入主页，
-    // 避免“按了没反应”误解——独立主页无树选中态、无 PiP/回收站容器）。
+    // 2026-11-28 三轮复核 P1-1：只展示主页真实绑定可执行的动作（homeVisible + home.js
+    // onHomeKeydown 分发），并如实列出主页自有键盘能力（站点卡聚焦后 Enter 原生打开链接），
+    // 杜绝“提示可按但按了无效”。
     const map = keymap.normalizeKeymap(settings && settings.keymap);
-    keysList.innerHTML = keymap.KEY_ACTIONS.filter((a) => a.homeVisible)
-      .map(
-        (a) =>
-          `<div class="kv"><kbd>${escapeHtml(map[a.id] || a.key)}</kbd><span>${escapeHtml(a.label)}</span></div>`
-      )
-      .join("");
+    const regRows = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map(
+      (a) =>
+        `<div class="kv"><kbd>${escapeHtml(map[a.id] || a.key)}</kbd><span>${escapeHtml(a.label)}</span></div>`
+    );
+    const homeRows = [
+      `<div class="kv"><kbd>Enter</kbd><span>打开选中的站点</span></div>`,
+      `<div class="kv"><kbd>↑ ↓</kbd><span>在站点间移动选择</span></div>`,
+    ];
+    keysList.innerHTML = [...regRows, ...homeRows].join("");
   }
   const toggles = [
     ["#decoClock", "clock"],
@@ -452,7 +491,7 @@ function renderWeatherControls() {
   if (unit) unit.value = w.unit || "celsius";
 }
 
-// 仅主页打开时请求一次；成功显示，失败/离线隐藏卡片（不写敏感日志）。
+// 仅主页打开时请求一次；失败保留卡片并显示可读错误与重试入口（不写敏感日志）。
 async function refreshWeather() {
   const card = $("#homeWeather");
   if (!card) return;
@@ -642,9 +681,16 @@ function renderMusic() {
   const hasLocal = (music.local?.tracks || []).length > 0;
   const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
   card.hidden = !(music.enabled && (hasLocal || embedUrl));
-  // 2026-11-28 复核 G6：仅外链模式（无本地曲目）时隐藏本地 <audio> 控件区，不留伪控件。
+  // 2026-11-28 三轮复核 P1-2：三态显隐收敛——
+  // external-only：隐藏本地控件区 + 播放列表管理入口（chips/新建/重命名/删除）；
+  // local-only：隐藏「外链兜底打开」（无外链 URL 时点击无意义）；mixed：全部显示。
+  const musicMode = hasLocal && embedUrl ? "mixed" : hasLocal ? "local" : "external";
   const playerWrap = $("#homeMusicPlayer");
-  if (playerWrap) playerWrap.hidden = !hasLocal && !!embedUrl;
+  if (playerWrap) playerWrap.hidden = musicMode === "external";
+  const plSection = $("#homeMusicPlaylists");
+  if (plSection) plSection.hidden = musicMode === "external";
+  const openExternalBtn = $("#homeMusicOpen");
+  if (openExternalBtn) openExternalBtn.hidden = musicMode === "local";
   renderMusicPlayer();
   if (frame) frame.innerHTML = "";
   const fallback = $("#homeMusicFallback");
@@ -913,30 +959,35 @@ async function onMusicAction(e) {
     const title = window.prompt("曲目名称")?.trim();
     if (!title) return;
     const artist = window.prompt("艺术家（可留空）")?.trim() || "";
-    const rawUrl = window.prompt("音频直链（以浏览器协议开头，如 example.com/a.mp3）")?.trim();
+    const rawUrl = window
+      .prompt("音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）")
+      ?.trim();
     if (!rawUrl) return;
     const url = hp.normalizeMusicUrl(rawUrl);
     if (!url) {
-      say("仅支持 https 直链");
+      say("仅支持合法 https 直链（不支持 http 明文、本地文件路径与 data/blob 等）");
       return;
     }
-    // 2026-11-28 复核 G6：新增曲目带显式 id，并自动补入当前播放列表 trackIds。
+    // 2026-11-28 复核 G6 / 三轮复核 P1-3：新增曲目带显式 id，并自动补入当前播放列表
+    // trackIds；激活列表失效时落到第一个有效列表，无任何列表则建默认列表并回写。
     const newId = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     cfg.music.local.tracks = [
       ...(cfg.music.local.tracks || []),
       { id: newId, title, artist, url },
     ].slice(0, 50);
-    if (!cfg.music.local.activeListId && !cfg.music.local.playlists.length) {
+    let pl = hp.resolveActiveList(cfg.music.local.playlists, cfg.music.local.activeListId);
+    if (pl && pl.id !== cfg.music.local.activeListId) {
+      // P1-3：activeListId 指向已删除/不存在的列表——落到第一个有效列表并回写。
+      cfg.music.local.activeListId = pl.id;
+    }
+    if (!pl) {
       const id = `list-${Date.now()}`;
       cfg.music.local.playlists = [
         { id, name: "默认播放列表", trackIds: cfg.music.local.tracks.map((t) => t.id) },
       ];
       cfg.music.local.activeListId = id;
-    } else {
-      const pl = (cfg.music.local.playlists || []).find(
-        (p) => p.id === cfg.music.local.activeListId
-      );
-      if (pl && !pl.trackIds.includes(newId)) pl.trackIds = [...pl.trackIds, newId];
+    } else if (!pl.trackIds.includes(newId)) {
+      pl.trackIds = [...pl.trackIds, newId];
     }
     await persistMusicLocal();
     renderMusic();
@@ -1008,7 +1059,8 @@ function onMusicPlayerClick(e) {
   }
   const moveBtn = e.target.closest("#homeMusicTracks .track-move");
   if (moveBtn) {
-    // 曲目排序：在当前队列（激活列表 trackIds 或曲库顺序）内交换相邻位置。
+    // 曲目排序：在当前队列（激活列表 trackIds 或曲库顺序）内移动相邻位置。
+    // 2026-11-28 三轮复核 P2-5：排序走 moveTrackInList 纯函数（越界安全、BDD 运行时断言）。
     const idx = Number(moveBtn.dataset.idx) || 0;
     const dir = Number(moveBtn.dataset.dir) || 1;
     const j = idx + dir;
@@ -1016,11 +1068,13 @@ function onMusicPlayerClick(e) {
     const curId = musicQueue[musicIndex]?.id || "";
     const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
     if (pl) {
-      const arr = pl.trackIds;
-      [arr[idx], arr[j]] = [arr[j], arr[idx]];
+      pl.trackIds = hp.moveTrackInList(pl.trackIds, idx, j);
     } else {
-      const ids = (local.tracks || []).map((t) => t.id);
-      [ids[idx], ids[j]] = [ids[j], ids[idx]];
+      const ids = hp.moveTrackInList(
+        (local.tracks || []).map((t) => t.id),
+        idx,
+        j
+      );
       const byId = new Map((local.tracks || []).map((t) => [t.id, t]));
       local.tracks = ids.map((id) => byId.get(id)).filter(Boolean);
     }
@@ -1033,15 +1087,12 @@ function onMusicPlayerClick(e) {
   }
   const chip = e.target.closest("#homeMusicPlaylists .home-site-chip");
   if (chip) {
-    // 2026-11-28 二次复核 P1-2：切换播放列表立即持久化 activeListId；
-    // curTrackId 仅在新列表仍包含该曲目时保留，否则重置，避免恢复定位落到错误列表。
-    const prevTrackId = cfg.music.local.curTrackId || "";
-    cfg.music.local.activeListId = chip.dataset.list || "";
-    const nextList = musicListTracks();
-    if (!nextList.some((t) => t.id === prevTrackId)) {
-      cfg.music.local.curTrackId = "";
-      musicIndex = -1;
-    }
+    // 2026-11-28 二次复核 P1-2 / 三轮复核 P2-5：切换播放列表立即持久化；curTrackId 校验
+    // 与 activeListId 解析走 homepage 纯函数（switchActiveList，BDD 运行时断言同一实现）。
+    const switched = hp.switchActiveList(cfg.music.local, chip.dataset.list || "");
+    cfg.music.local.activeListId = switched.activeListId;
+    cfg.music.local.curTrackId = switched.curTrackId;
+    if (!switched.curTrackId) musicIndex = -1;
     void persistMusicLocal();
     renderMusicPlayer();
     return;
@@ -1056,11 +1107,12 @@ function onMusicPlayerClick(e) {
     if (delBtn) {
       if (!window.confirm(`删除曲目「${track.title}」？`)) return;
       const tid = track.id;
-      local.tracks = (local.tracks || []).filter((t) => t.id !== tid);
-      for (const pl of local.playlists || []) {
-        pl.trackIds = (pl.trackIds || []).filter((id) => id !== tid);
-      }
-      if (local.curTrackId === tid) local.curTrackId = "";
+      // 2026-11-28 三轮复核 P2-5：删除走 removeTrackEverywhere 纯函数（曲库 + 全部列表
+      // trackIds + curTrackId 一致清理，BDD 运行时断言同一实现）。
+      const cleaned = hp.removeTrackEverywhere(cfg.music.local, tid);
+      cfg.music.local.tracks = cleaned.tracks;
+      cfg.music.local.playlists = cleaned.playlists;
+      cfg.music.local.curTrackId = cleaned.curTrackId;
       // 当前播放中的曲目被删除：停止播放并重置定位。
       if (musicQueue[musicIndex]?.id === tid) {
         if (musicAudio) musicAudio.pause();
@@ -1127,6 +1179,8 @@ function bind() {
   $("#homeSearchForm")?.addEventListener("submit", onSearch);
   $("#homeSites")?.addEventListener("click", onSiteClick);
   $("#homeQuickbar")?.addEventListener("click", onQuickbar);
+  // 2026-11-28 三轮复核 P1-1：主页键盘分发——focus-panel 消息桥 + 站点网格方向键导航。
+  document.addEventListener("keydown", onHomeKeydown);
 
   // 2026-11-27 P1：多条便签——添加 / 删除 / 完成 / 日期 / 提醒。
   $("#homeNoteAdd")?.addEventListener("click", () => {

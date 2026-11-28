@@ -262,3 +262,21 @@ BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constrai
 | F-132 (P2-3) | 第三方 iframe/直链音频/sidePanel 手势真机验收 | 维持真机验收边界；8 秒超时兜底 + 新标签打开 + 失败可读提示已具备 | 待手工验收 |
 
 BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46131020010](https://github.com/zeek-zhao/tabharbor/actions/runs/46131020010) 一次通过（c0f3fd3）。红线口径：无 C11/C12 白名单变更、无新增权限。
+
+## 19. 2026-11-28 三轮复核修复轮（基于 `c66fda5`）
+
+> 依据《TabHarbor-最新代码第三轮复核-2026-11-28》（豆包文档）。复核确认二次复核 P1 主线全部落地；本轮修复 P1-1/P1-2/P1-3 与 P2 系列（P2-3/P2-4/P2-5）及两条建议项。
+
+| ID | 三轮复核问题 | 修复 | 状态 |
+| --- | --- | --- | --- |
+| F-133 (P1-1) | 主页快捷键卡展示的动作主页未绑定 keydown，“提示可按但按了无效” | keymap `homeVisible` 收敛为仅 focus-panel（open-selected/focus-web/copy-selected 依赖树选中态，主页无目标）；home.js 新增 `onHomeKeydown` 分发：focus-panel 按注册表键串（matchAction）发 `tabharbor:open-side-panel` 消息桥；站点网格方向键在站点卡间移动焦点、Enter 由 `<a href>` 原生打开；快捷键卡如实列出主页自有能力（Enter 打开选中站点 / ↑↓ 移动选择） | 已实现 |
+| F-134 (P1-2) | 外链模式仍露出播放列表/曲目列表/添加曲目等本地管理入口；本地-only 模式「外链兜底打开」常驻 | renderMusic 按内容计算三态（local/external/mixed）：external 隐藏 `#homeMusicPlayer` + `#homeMusicPlaylists`（含新建/重命名/删除管理入口）；local 隐藏 `#homeMusicOpen` 外链兜底；mixed 全显 | 已实现 |
+| F-135 (P1-3) | activeListId 失效但列表非空时新曲目只进曲库，列表归属丢失；音频直链提示文案与 normalizeMusicUrl 实际约束不符 | addTrack 归属解析走 `resolveActiveList` 纯函数（失效落第一个有效列表并回写，无列表建默认）；文案改「音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）」，拒绝提示明确不支持 http 明文/本地路径/data/blob | 已实现 |
+| F-136 (P2-3) | tabs-op/home.js 注释、PRIVACY.md 天气段落、test-matrix feature 36 名称残留旧口径 | 四处全部更正为 foreground 当前口径（tabs-op 命中分支注释、home.js 天气注释、PRIVACY「保留卡片+错误+重试」、test-matrix feature 36 名称） | 已实现 |
+| F-137 (P2-4) | focus-panel 在面板已打开聚焦时仍重复发 open-side-panel 消息 | shell 分支加 `document.hasFocus() && visibilityState==="visible"` 守卫：面板已聚焦时只做宿主内 focus+选中行，跳过调桥 | 已实现 |
+| F-138 (P2-5) | 音乐状态流仅静态文本断言，覆盖不到真实内存状态 | homepage.js 提取纯函数 `resolveActiveList`/`switchActiveList`/`moveTrackInList`/`removeTrackEverywhere`；home.js 列表切换/删除/排序/归属兜底全部复用同一实现；BDD 以真实调用断言：切换列表读回一致、curTrackId 按新队列校验重置、上下移顺序变化、越界安全、删除曲目曲库+全部列表+curTrackId 一致清理 | 已实现 |
+| F-139 (P2-建议) | music.phase 硬编码 "external" | normalizeMusic 按实际内容计算 phase：local（仅本地曲目）/ external（仅外链）/ mixed（两者都有），BDD 运行时断言三态 | 已实现 |
+| F-140 (P2-6) | 第三方 iframe/直链音频/sidePanel 手势/定位授权/远程壁纸回退真机验收 | 维持真机验收边界；本地真机 Chromium E2E 复跑全绿；浏览器账号环境项仍待手工验收 | 待手工验收 |
+| F-141 (P2-建议) | 主页快捷条「新建标签」打开 about:blank | 维持 about:blank 口径（新建空白标签语义，浏览器默认新标签页行为接管），未改 | 维持现状 |
+
+BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。

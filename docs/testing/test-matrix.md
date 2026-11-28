@@ -38,7 +38,7 @@
 | 33_external_music | 4 | 外链音乐播放器阶段 1（iframe 卡片、供应商白名单、安全 https、失败兜底、懒加载不自动播） |
 | 34_weather_card | 3 | 天气卡片（手动城市优先、Open-Meteo 白名单单次请求、显式定位、失败隐藏+署名） |
 | 35_featured_wallpaper_gallery | 4 | 精选壁纸画廊（10 张原创 CC0 + 元数据、远程模式清本地元信息、8 秒超时回退） |
-| 36_2026_11_27_audit | 13 | 2026-11-27 审计修复（叶子行尾垃圾桶、switch-keep-focus 打开模式、常用网址分类chip+列数、在线壁纸图源白名单、天气定位错误可读化+重试、多条便签、快捷键卡默认展示、顶部音乐入口、主页 footer） |
+| 36_2026_11_27_audit | 13 | 2026-11-27 审计修复（叶子行尾垃圾桶、foreground 打开模式、常用网址分类chip+列数、在线壁纸图源白名单、天气定位错误可读化+重试、多条便签、快捷键卡默认展示、顶部音乐入口、主页 footer） |
 | 37_2026_11_27_review | 5 | 2026-11-27 复核修复（叶子右键彻底禁用、焦点回收覆盖新建标签/游离窗口、音乐/设置入口解耦、分类chip单选+恢复推荐站点、openTabsInBackground/notes 旧状态源收敛） |
 | 38_keymap_foreground | 4 | AI 任务轮（foreground 默认打开、快捷键动作注册表+录制/冲突/恢复、左右键焦点切换、完整音乐播放器、天气预报 4 天） |
 | 18_merge_audit | 6 | 菜单收敛/PiP 宿主化/打开态/定位静态契约 |
@@ -72,7 +72,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 359/359 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 365/365 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -82,7 +82,7 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 359 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 365 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |

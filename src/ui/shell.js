@@ -1397,6 +1397,9 @@ export async function bootShell(root) {
         }
       }
       toast("焦点已回到面板");
+      // 2026-11-28 三轮复核 P2-4：面板已打开且聚焦（shell 文档持焦点）时只做宿主内
+      // focus + 选中行，不再重复调后台桥（避免多余 sidePanel.open 调用与控制台噪声）。
+      if (document.hasFocus?.() === true && document.visibilityState === "visible") return;
       try {
         // 2026-11-28 二次复核 P2-4：SW 应答失败时给出可读提示，不静默。
         chrome?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, (resp) => {

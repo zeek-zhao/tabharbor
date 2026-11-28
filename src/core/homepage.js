@@ -592,9 +592,14 @@ export function normalizeMusic(raw) {
   const embedUrl =
     normalizeMusicUrl(ex.embedUrl) ||
     (sourceUrl ? parseMusicEmbed(sourceUrl, provider)?.embedUrl || "" : "");
+  const local = normalizeMusicLocal(src.local);
+  // 2026-11-28 三轮复核 P2-建议：phase 不再硬编码 "external"——按实际内容计算
+  // local（仅本地曲目）/ external（仅外链）/ mixed（两者都有）。
+  const phase =
+    local.tracks.length && embedUrl ? "mixed" : local.tracks.length ? "local" : "external";
   return {
     enabled: src.enabled === true,
-    phase: "external", // 阶段 2 local 不启用
+    phase,
     external: {
       provider,
       sourceUrl,
@@ -609,7 +614,7 @@ export function normalizeMusic(raw) {
       fallbackUrl: normalizeMusicUrl(ex.fallbackUrl) || sourceUrl,
     },
     // AI 任务：完整播放器——本地/直链曲目原生 <audio> 播放；external iframe 仅作嵌入兜底。
-    local: normalizeMusicLocal(src.local),
+    local,
   };
 }
 
@@ -661,6 +666,48 @@ export function normalizeMusicLocal(raw) {
     volume: Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 0.8,
     muted: src.muted === true,
   };
+}
+
+/**
+ * 2026-11-28 三轮复核 P2-5：音乐状态流纯函数——列表切换/删除/排序/归属兜底的
+ * 可执行校验（BDD 直接运行时断言；home.js UI 层复用同一实现，杜绝状态逻辑漂移）。
+ */
+
+// 激活列表解析：activeListId 命中返回该列表；失效时回退第一个有效列表；无列表返回 null。
+export function resolveActiveList(playlists, activeListId) {
+  const list = Array.isArray(playlists) ? playlists : [];
+  return list.find((p) => p && p.id === activeListId) || list[0] || null;
+}
+
+// 切换播放列表：返回新 activeListId 与校验后的 curTrackId（新列表不含该曲目则重置空）。
+export function switchActiveList(local, nextListId) {
+  const nextList = resolveActiveList(local?.playlists, nextListId);
+  const activeListId = nextList ? nextList.id : "";
+  const queueIds = Array.isArray(nextList?.trackIds) ? nextList.trackIds : [];
+  const curTrackId = queueIds.includes(local?.curTrackId) ? String(local.curTrackId) : "";
+  return { activeListId, curTrackId };
+}
+
+// 排序：把 trackIds[from] 移动到 to 位置（越界/非法参数返回原序副本，不抛错）。
+export function moveTrackInList(trackIds, from, to) {
+  const arr = Array.isArray(trackIds) ? [...trackIds] : [];
+  if (!Number.isInteger(from) || !Number.isInteger(to)) return arr;
+  if (from < 0 || from >= arr.length || to < 0 || to >= arr.length) return arr;
+  const [moved] = arr.splice(from, 1);
+  arr.splice(to, 0, moved);
+  return arr;
+}
+
+// 删除曲目：从曲库移除，同步清理所有播放列表 trackIds；当前曲目命中时回退空。
+// 返回新 local 子集（不修改入参，调用方直接整对象回写）。
+export function removeTrackEverywhere(local, trackId) {
+  const tracks = (local?.tracks || []).filter((t) => t.id !== trackId);
+  const playlists = (local?.playlists || []).map((pl) => ({
+    ...pl,
+    trackIds: (pl.trackIds || []).filter((id) => id !== trackId),
+  }));
+  const curTrackId = local?.curTrackId === trackId ? "" : String(local?.curTrackId || "");
+  return { tracks, playlists, curTrackId, activeListId: String(local?.activeListId || "") };
 }
 
 // 2026-11-27 审计 P1：多条便签规范化——文本限长 1000、日期 YYYY-MM-DD、提醒 HH:MM、完成态布尔。
