@@ -41,7 +41,7 @@
 | `npm run contrast` | 深浅主题全部达标 |
 | `npm run test:e2e` | 本地真机 Chromium 全绿 |
 
-CI run 链接见提交推送后的补充记录（docs 与本报告同步更新）。
+CI：[run 46131020010](https://github.com/zeek-zhao/tabharbor/actions/runs/46131020010) 一次通过（`c0f3fd3`，test + e2e 双 job success，2026-11-28）。
 
 ## 风险与待办（延续）
 

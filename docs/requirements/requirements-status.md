@@ -261,4 +261,4 @@ BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constrai
 | F-131 (P2-建议5) | 音乐列表管理缺失 | 播放列表新建（＋，≤10）/重命名/删除（删除列表曲目保留在曲库）；曲目行内 ↑/↓ 排序（当前队列内交换，当前曲目定位跟随移动，持久化） | 已实现 |
 | F-132 (P2-3) | 第三方 iframe/直链音频/sidePanel 手势真机验收 | 维持真机验收边界；8 秒超时兜底 + 新标签打开 + 失败可读提示已具备 | 待手工验收 |
 
-BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。
+BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46131020010](https://github.com/zeek-zhao/tabharbor/actions/runs/46131020010) 一次通过（c0f3fd3）。红线口径：无 C11/C12 白名单变更、无新增权限。
