@@ -12,23 +12,8 @@
       <div class="home-top">
         <div class="home-brand"><span class="logo-mark"></span> TabHarbor</div>
         <div class="home-top-actions">
-          <!-- 2026-11-27 审计 P1-8：顶部音乐图标入口——已配置则展开播放器，未配置则打开设置面板。 -->
-          <button id="homeMusicToggle" class="tbtn" title="音乐" aria-label="音乐">
-            <svg
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M9 18V5l12-2v13" />
-              <circle cx="6" cy="18" r="3" />
-              <circle cx="18" cy="16" r="3" />
-            </svg>
-          </button>
+          <!-- 2026-11-28 浏览器实测任务：移除右上角单独音乐图标入口——音乐只在右栏
+               homeMusicCard 中呈现；配置入口保留在设置面板音乐分页。 -->
           <button id="homeSettings" class="tbtn" title="主页设置" aria-label="主页设置">
             <svg
               viewBox="0 0 24 24"
@@ -253,9 +238,18 @@
           <h3>主页设置</h3>
           <button id="homeCfgClose" class="x tbtn" type="button" aria-label="关闭">✕</button>
         </header>
+        <!-- 2026-11-28 浏览器实测任务：设置面板分段导航（六分页，每次只显示当前页）。 -->
+        <nav id="homeCfgNav" class="home-cfg-nav" aria-label="设置分页">
+          <button class="home-cfg-tab" data-page="appearance" type="button">外观与壁纸</button>
+          <button class="home-cfg-tab" data-page="search" type="button">搜索引擎</button>
+          <button class="home-cfg-tab" data-page="sites" type="button">常用网址</button>
+          <button class="home-cfg-tab" data-page="music" type="button">音乐</button>
+          <button class="home-cfg-tab" data-page="weather" type="button">天气</button>
+          <button class="home-cfg-tab" data-page="data" type="button">数据导入导出</button>
+        </nav>
         <div class="content home-cfg-grid">
           <!-- 外观与壁纸 -->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="appearance">
             <div class="sec-title">外观与壁纸（仅内部主页）</div>
             <div class="field-row">
               <label for="wpMode">壁纸模式</label>
@@ -342,7 +336,7 @@
           </section>
 
           <!-- 搜索引擎 -->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="search">
             <div class="sec-title">搜索引擎</div>
             <div id="engineList" class="home-cfg-engines"></div>
             <div class="field-row">
@@ -370,7 +364,7 @@
           </section>
 
           <!-- 常用网址 -->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="sites">
             <div class="sec-title">常用网址</div>
             <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
             <div class="field-row">
@@ -389,7 +383,7 @@
           </section>
 
           <!-- 外链音乐（阶段 1）-->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="music">
             <div class="sec-title">外链音乐（阶段 1）</div>
             <p class="home-hint">
               粘贴公开音乐链接，自动解析为嵌入播放器；仅
@@ -417,10 +411,18 @@
               <button id="musicAddTrack" class="btn" type="button">添加本地曲目</button>
             </div>
             <p id="musicHint" class="home-hint"></p>
+            <!-- 2026-11-28 浏览器实测任务：公开可测试候选音源（不预置版权保护曲目）。 -->
+            <div class="home-music-suggestions">
+              <span class="home-sites-title">公开候选音源</span>
+              <div id="musicSuggestions" class="home-music-suggestion-list"></div>
+              <p class="home-hint">
+                默认不接入 Spotify / 网易云 / YouTube / 热门 SoundCloud 版权曲目；候选来源的许可与嵌入限制请逐首核对。本地音频优先使用可公开访问的 https 直链，不承诺读取任意本地文件路径永久播放。
+              </p>
+            </div>
           </section>
 
           <!-- 天气（任务 4）-->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="weather">
             <div class="sec-title">天气（手动城市优先）</div>
             <p class="home-hint">
               默认手动输入城市，不主动定位；仅打开主页时请求一次 Open-Meteo，离线自动隐藏。
@@ -447,7 +449,7 @@
           </section>
 
           <!-- 配置导入导出 -->
-          <section class="home-cfg-card">
+          <section class="home-cfg-card home-cfg-page" data-page="data">
             <div class="sec-title">配置导入导出（M9）</div>
             <p class="home-hint">
               导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。

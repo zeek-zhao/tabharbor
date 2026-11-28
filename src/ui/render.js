@@ -44,10 +44,32 @@ function genericFaviconKind(url) {
   return "web";
 }
 
+// 2026-11-28 浏览器实测任务：父级索引预计算——一次模型更新构建 nodeById /
+// groupsByParent / tabsByParent Map，childrenInner 按 parentId O(1) 取子节点，
+// 消除每层递归重新 filter 全量 groups/tabs 的 O(n²)。与旧输出顺序完全一致。
+export function buildRenderIndex(m) {
+  const nodeById = new Map();
+  const groupsByParent = new Map();
+  const tabsByParent = new Map();
+  const push = (map, key, value) => {
+    const arr = map.get(key);
+    if (arr) arr.push(value);
+    else map.set(key, [value]);
+  };
+  for (const n of [...(m?.windows || []), ...(m?.groups || []), ...(m?.tabs || [])]) {
+    if (n && n.id != null) nodeById.set(n.id, n);
+  }
+  for (const g of m?.groups || []) push(groupsByParent, g.parentId, g);
+  for (const t of m?.tabs || []) push(tabsByParent, t.parentId, t);
+  return { nodeById, groupsByParent, tabsByParent };
+}
+
 export function renderTree(m, opts = {}) {
   const out = [];
+  const index = opts.index || buildRenderIndex(m);
+  const nextOpts = opts.index ? opts : { ...opts, index };
   for (const w of m.windows) {
-    out.push(containerOpen(w, opts, 0));
+    out.push(containerOpen(w, nextOpts, 0));
     // D5（评审稿）：窗口与分组共用折叠规则——折叠的窗口子树不进 DOM
     if (opts.collapsed && opts.collapsed.has(w.id)) {
       out.push(`<div class="node-children"></div>`);
@@ -70,8 +92,10 @@ export function renderChildrenInner(m, parentId, opts, depth) {
 }
 
 function childrenInner(m, parentId, opts, depth) {
-  const groups = m.groups.filter((g) => g.parentId === parentId);
-  const tabs = m.tabs.filter((t) => t.parentId === parentId);
+  // 父级索引优先（O(1) 取子节点），无索引时回退 filter（兼容旧调用方）。
+  const index = opts.index || buildRenderIndex(m);
+  const groups = index.groupsByParent.get(parentId) || [];
+  const tabs = index.tabsByParent.get(parentId) || [];
   let out = "";
   for (const g of groups) {
     out += containerOpen(g, opts, depth);
@@ -129,7 +153,7 @@ function leafRow(t, opts) {
   const stateCls = open ? "on" : "off";
   let fav;
   if (favUrl) {
-    fav = `<img class="fav ${stateCls}" src="${escapeHtml(favUrl)}" alt="" title="${open ? "网页已打开" : "网页未打开"}"/>`;
+    fav = `<img class="fav ${stateCls}" src="${escapeHtml(favUrl)}" loading="lazy" decoding="async" alt="" title="${open ? "网页已打开" : "网页未打开"}"/>`;
   } else {
     // O8：内部页 / 文件页 / 扩展页统一通用兜底图标，按协议选形
     const kind = genericFaviconKind(t.url);

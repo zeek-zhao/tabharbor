@@ -4918,9 +4918,9 @@ step("那么", "主页设置弹窗按四类分区且宽屏两栏窄屏单列", (
   ]) {
     if (!html.includes(needle)) throw new Error(`home.html 缺布局要素：${needle}`);
   }
-  // 4 张分区卡片
-  const cards = (html.match(/class="home-cfg-card"/g) || []).length;
-  if (cards < 4) throw new Error(`分区卡片应为 4 张，实际 ${cards}`);
+  // 6 张分页卡片（2026-11-28 浏览器实测任务：设置面板由堆叠改六分页导航）。
+  const cards = (html.match(/class="home-cfg-card home-cfg-page"/g) || []).length;
+  if (cards < 6) throw new Error(`分页卡片应为 6 张，实际 ${cards}`);
   // 两栏 grid + 560px 媒体查询回退单列
   if (!/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/.test(css))
     throw new Error("未定义两栏网格");
@@ -5165,16 +5165,15 @@ step("那么", "快捷键卡位于搜索框下方且默认展示", () => {
 
 /* ========== 2026-11-27 审计 P1：主页顶部音乐图标入口（features/36）========== */
 step("那么", "主页顶部音乐图标入口已配置展开播放器未配置引导设置", () => {
+  // 2026-11-28 浏览器实测任务：右上角单独音乐图标已移除——音乐只在右栏卡片呈现，
+  // 配置入口在设置面板音乐分页；本场景保留为「音乐入口演进」历史契约断言。
   const html = repoFile("src/home/home.html");
-  if (!html.includes('id="homeMusicToggle"')) throw new Error("缺顶部音乐图标按钮");
+  if (html.includes('id="homeMusicToggle"')) throw new Error("顶部音乐图标未移除");
+  if (!html.includes('id="homeMusicCard"')) throw new Error("右栏音乐卡片缺失");
   const homeJs = repoFile("src/home/home.js");
-  if (!homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标未绑定事件");
-  // 已配置：切换播放器显示；未配置：打开设置面板并引导。
-  // 2026-11-27 复核 P1-3：未配置走独立 openHomeConfig("#musicEnabled")，不再调用齿轮。
-  if (homeJs.includes('$("#homeSettings")?.click()')) throw new Error("音乐入口仍耦合齿轮按钮点击");
-  if (!homeJs.includes('openHomeConfig("#musicEnabled")'))
-    throw new Error("未配置时未引导到音乐分区");
-  if (!homeJs.includes("card.hidden = !card.hidden")) throw new Error("已配置时未切换播放器显示");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标事件未清理");
+  // 设置面板音乐分页入口仍在（深链 #musicEnabled）。
+  if (!homeJs.includes('openHomeConfig("#musicEnabled")')) throw new Error("音乐配置深链入口缺失");
 });
 
 /* ========== 2026-11-27 审计 P1：主页 footer（features/36）========== */
@@ -5717,7 +5716,8 @@ step("那么", "快捷键动作注册表支持录制冲突提示与恢复默认"
   // 匹配与冲突。
   const ev = { key: "Enter", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
   if (keymap.matchAction(null, ev) !== "open-selected") throw new Error("事件匹配失败");
-  const ev2 = { key: "L", ctrlKey: true, altKey: false, shiftKey: true, metaKey: false };
+  // 浏览器实测任务：toggle-links 默认键从 Ctrl+Shift+L（保留键冲突）改 Alt+Shift+K。
+  const ev2 = { key: "K", ctrlKey: false, altKey: true, shiftKey: true, metaKey: false };
   if (keymap.matchAction(null, ev2) !== "toggle-links") throw new Error("组合键匹配失败");
   const conf = keymap.findConflicts({ "cursor-prev": "Q" }, "Q", "cursor-next");
   if (!conf.includes("cursor-prev")) throw new Error("冲突检测失败");
@@ -6232,16 +6232,16 @@ step("那么", "启用音乐无本地无外链时卡片空状态可见且添加�
 });
 
 step("那么", "顶部音乐开关覆盖本地only状态", () => {
-  // P1-2：enabled && (hasLocal || embedUrl) 才折叠/展开；无内容才进配置引导。
+  // 2026-11-28 浏览器实测任务：顶部图标已移除，音乐卡片可见性由 renderMusic 四态决定
+  // （enabled 即显示，local-only 也显示本地播放器）；旧开关判断断言随功能下线。
   const homeJs = repoFile("src/home/home.js");
-  const tgIdx = homeJs.indexOf('$("#homeMusicToggle")?.addEventListener');
-  const tgBlock = homeJs.slice(tgIdx, homeJs.indexOf('$("#homeCfgClose")', tgIdx));
-  if (!tgBlock.includes("music.enabled && (hasLocal || embedUrl)"))
-    throw new Error("开关判断未覆盖本地-only");
-  if (tgBlock.includes("music.enabled && music.external?.embedUrl"))
-    throw new Error("开关仍用旧判断（忽略本地曲目）");
-  if (!tgBlock.includes("先在设置中添加本地曲目或粘贴音乐外链"))
-    throw new Error("未配置引导文案未更新");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("顶部音乐图标绑定未清理");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  if (!rmBlock.includes("card.hidden = !music.enabled"))
+    throw new Error("音乐卡片未按 enabled 常显（本地-only 不可达）");
+  if (!rmBlock.includes('hasLocal ? "local" : embedUrl ? "external" : "empty"'))
+    throw new Error("四态判断缺失");
 });
 
 step("那么", "body级方向键fallback聚焦首个站点", () => {
@@ -6249,12 +6249,10 @@ step("那么", "body级方向键fallback聚焦首个站点", () => {
   const homeJs = repoFile("src/home/home.js");
   const kdIdx = homeJs.indexOf("function onHomeKeydown");
   const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
-  if (
-    !kdBlock.includes(
-      '!site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)'
-    )
-  )
+  if (!kdBlock.includes('!site && ["ArrowUp", "ArrowDown", "ArrowRight"].includes(e.key)'))
     throw new Error("缺 body 级方向键 fallback");
+  // 浏览器实测任务：← 专属 focus-panel，不得被站点 fallback 拦截。
+  if (kdBlock.includes('"ArrowLeft"')) throw new Error("ArrowLeft 仍被站点导航数组包含");
   if (!kdBlock.includes('document.querySelector("#homeSites a.home-site")'))
     throw new Error("fallback 未聚焦首个站点");
 });
@@ -6331,4 +6329,241 @@ step("那么", "时长输入解析与编辑持久化", () => {
   if (!editBlock.includes("hp.parseDurationInput")) throw new Error("编辑流程未接时长解析");
   if (!homeJs.includes("{ title, artist, url, cover, duration }"))
     throw new Error("编辑结果未持久化时长");
+});
+
+/* ========== 2026-11-28 浏览器实测任务（features/43）========== */
+step("那么", "默认键位避开浏览器保留键且自定义能力保留", () => {
+  // 任务1.3：默认键移除 Ctrl+L/P/D/O、Ctrl+Shift+L，改 Alt+Shift 组合；用户自定义仍生效。
+  const map = keymap.defaultKeymap();
+  for (const banned of ["Ctrl+L", "Ctrl+P", "Ctrl+D", "Ctrl+O", "Ctrl+Shift+L"]) {
+    for (const [id, key] of Object.entries(map))
+      if (key === banned) throw new Error("默认键仍占用保留键 " + banned + "（" + id + "）");
+  }
+  const expected = {
+    "locate-selected": "Alt+Shift+L",
+    "toggle-links": "Alt+Shift+K",
+    "open-group": "Alt+Shift+G",
+    "toggle-pip": "Alt+Shift+P",
+    "toggle-theme": "Alt+Shift+T",
+  };
+  for (const [id, key] of Object.entries(expected))
+    if (map[id] !== key) throw new Error(id + " 默认键应为 " + key + "，实际 " + map[id]);
+  // 自定义保留：normalizeKeymap 仍接受合法自定义键串（含旧保留键，用户主动选择不拦）。
+  const custom = keymap.normalizeKeymap({ "locate-selected": "Ctrl+L" });
+  if (custom["locate-selected"] !== "Ctrl+L") throw new Error("用户自定义键未保留");
+});
+
+step("那么", "ArrowLeft专属focus-panel且站点导航只吃上下右", () => {
+  // 任务1.2：body fallback 与站点网格导航都排除 ArrowLeft；← 由注册表 focus-panel 分发。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (kdBlock.includes('"ArrowLeft"')) throw new Error("onHomeKeydown 站点导航仍含 ArrowLeft");
+  if (keymap.defaultKeymap()["focus-panel"] !== "ArrowLeft")
+    throw new Error("focus-panel 默认键应为 ArrowLeft");
+  if (!kdBlock.includes("matchAction")) throw new Error("← 分发未走注册表");
+});
+
+step("那么", "面板动作全走注册表且无选中态给出可读提示", () => {
+  // 任务1.1 + 1.4 + 2.2：面板 keydown 单一 matchAction 入口、无硬编码键位分支；
+  // 无选中标签时 open/copy/open-group/trash 给出可读提示。
+  const shellJs = repoFile("src/ui/shell.js");
+  const docIdx = shellJs.indexOf('document.addEventListener("keydown", async (e) => {');
+  const kdBlock = shellJs.slice(docIdx, shellJs.indexOf("  });", docIdx));
+  if (!kdBlock.includes("keymap.matchAction")) throw new Error("keydown 未走注册表");
+  for (const hard of ['e.key === "Enter"', 'e.key === "ArrowLeft"', 'e.key === "Ctrl+L"'])
+    if (kdBlock.includes(hard)) throw new Error("事件分支仍有硬编码键位：" + hard);
+  // 输入框/可编辑区不触发（keydown 顶部守卫）。
+  if (!kdBlock.includes("t.isContentEditable")) throw new Error("输入框/可编辑区守卫缺失");
+  // 无选中态可读提示（至少 4 处）。
+  const promptCount = (kdBlock.match(/toast\("请先选择一个标签"\)/g) || []).length;
+  if (promptCount < 4) throw new Error("无选中态可读提示不足：" + promptCount);
+  if (!kdBlock.includes('toast("先选中一个标签")')) throw new Error("focus-web 提示缺失");
+});
+
+step("那么", "输入框内不触发树动作且冲突检测恢复默认可用", () => {
+  // 任务1.5：输入框守卫 + 冲突检测 + 恢复默认（纯函数运行时断言）。
+  const shellJs = repoFile("src/ui/shell.js");
+  const docIdx = shellJs.indexOf('document.addEventListener("keydown", async (e) => {');
+  const kdBlock = shellJs.slice(docIdx, shellJs.indexOf("  });", docIdx));
+  const guardIdx = kdBlock.indexOf("isContentEditable");
+  const matchIdx = kdBlock.indexOf("matchAction");
+  if (guardIdx < 0 || guardIdx > matchIdx) throw new Error("输入框守卫未先于动作匹配");
+  const conflicts = keymap.findConflicts({ "cursor-prev": "Alt+Shift+P" }, "Alt+Shift+P");
+  if (!conflicts.includes("cursor-prev") || !conflicts.includes("toggle-pip"))
+    throw new Error("冲突检测失败：" + conflicts.join(","));
+  const def = keymap.defaultKeymap();
+  if (def["toggle-pip"] !== "Alt+Shift+P") throw new Error("恢复默认未还原新默认键");
+  // normalizeKeyBinding 接受 Alt+Shift 组合（录制链路可用）。
+  if (keymap.normalizeKeyBinding("alt+shift+f") !== "Alt+Shift+F")
+    throw new Error("Alt+Shift 组合键规范化失败");
+});
+
+/* ========== 2026-11-28 浏览器实测 AI 任务（features/44）========== */
+step("那么", "渲染索引与性能计数可执行断言", async () => {
+  // 任务2.2：buildRenderIndex 运行时断言（O(1) 父级索引，顺序与旧 filter 一致）。
+  const m = {
+    windows: [{ id: "w1", kind: "window", title: "W" }],
+    groups: [
+      { id: "g1", kind: "group", parentId: "w1", title: "G1" },
+      { id: "g2", kind: "group", parentId: "w1", title: "G2" },
+    ],
+    tabs: [
+      { id: "t1", kind: "tab", parentId: "g1", title: "T1" },
+      { id: "t2", kind: "tab", parentId: "g2", title: "T2" },
+      { id: "t3", kind: "tab", parentId: "w1", title: "T3" },
+    ],
+  };
+  const idx = render.buildRenderIndex(m);
+  if (idx.nodeById.size !== 6) throw new Error("nodeById 数量错误：" + idx.nodeById.size);
+  if (idx.nodeById.get("t2")?.title !== "T2") throw new Error("nodeById 取值错误");
+  if ((idx.groupsByParent.get("w1") || []).map((g) => g.id).join(",") !== "g1,g2")
+    throw new Error("groupsByParent 顺序错误");
+  if ((idx.tabsByParent.get("w1") || []).map((t) => t.id).join(",") !== "t3")
+    throw new Error("tabsByParent 错误");
+  // 索引渲染与无索引渲染输出一致（防回归）。
+  const a = render.renderTree(m, {});
+  const b = render.renderTree(m, { index: idx });
+  if (a !== b) throw new Error("带索引渲染输出与旧路径不一致");
+  // 任务2.6：perf 计数器运行时断言。
+  const perf = await import("../src/core/perf.js");
+  perf.resetPerf();
+  perf.markPerf("tabsQuery", 3);
+  perf.markPerf("storageWrites", 2);
+  perf.measurePerf("renders", () => 42);
+  if (perf.perfCounters.tabsQuery !== 3 || perf.perfCounters.storageWrites !== 2)
+    throw new Error("perf 计数错误");
+  if (perf.perfCounters.renders !== 1) throw new Error("render 计数错误");
+  if (perf.visibleBatches(1200, 500).length !== 3) throw new Error("分批接口错误");
+  if (perf.visibleBatches(300, 500).join(",") !== "0,300") throw new Error("小树不应分批");
+});
+
+step("那么", "搜索防抖与存储变更合并且增量刷新不重建树", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  // 任务2.1：搜索 input 120ms 防抖。
+  if (!shellJs.includes("window.setTimeout(() => void render(), 120)"))
+    throw new Error("搜索输入未做 120ms 防抖");
+  // 任务2.4：storage 变更 80ms 合并 + 结构未变增量刷新（不重建整树）。
+  if (!shellJs.includes("modelRefreshTimer = window.setTimeout(() => {"))
+    throw new Error("storage 变更未合并");
+  const timerIdx = shellJs.indexOf("modelRefreshTimer = window.setTimeout(");
+  const timerBlock = shellJs.slice(timerIdx, timerIdx + 1400);
+  if (!/\},\s*80\s*\)/.test(timerBlock)) throw new Error("storage 合并间隔非 80ms");
+  if (!shellJs.includes("const same =") || !shellJs.includes("await applyOpenState();"))
+    throw new Error("结构未变时未增量刷新打开态");
+  // 任务2.3：选中态局部 class 更新。
+  const selIdx = shellJs.indexOf("const selectLeaf = async (id) => {");
+  const selBlock = shellJs.slice(selIdx, shellJs.indexOf("const visibleLeaves", selIdx));
+  if (!selBlock.includes('classList.remove("selected")')) throw new Error("选中态未局部更新 class");
+  // 任务2.5：favicon 懒加载 + 父级索引调用。
+  const renderJs = repoFile("src/ui/render.js");
+  if (!renderJs.includes('loading="lazy" decoding="async"')) throw new Error("favicon 未懒加载");
+  if (!renderJs.includes("index.groupsByParent.get(parentId)"))
+    throw new Error("childrenInner 未用父级索引");
+});
+
+step("那么", "主页音乐图标移除与置顶站点独立行", () => {
+  // 任务3：右上角音乐图标移除，音乐只在右栏卡片；置顶站点独立行排在 chip 前。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('id="homeMusicToggle"')) throw new Error("音乐图标未移除");
+  if (!html.includes('id="homeMusicCard"')) throw new Error("音乐卡片缺失");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标事件未清理");
+  if (!homeJs.includes('class="home-pinned-row"')) throw new Error("缺置顶独立行");
+  const rsIdx = homeJs.indexOf("function renderSites");
+  const rsBlock = homeJs.slice(rsIdx, homeJs.indexOf("function renderSiteEditList", rsIdx));
+  if (rsBlock.includes('name: "置顶"')) throw new Error("置顶仍作为分类 chip 重复展示");
+  if (!rsBlock.includes("sites.filter((s) => !s.pinned)")) throw new Error("网格未排除置顶站点");
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-pinned-row")) throw new Error("置顶行缺样式");
+  // 列数自适应/4/5/6 保持（既有能力）。
+  const cols = homepage.normalizeSiteColumns("6");
+  if (cols !== "6") throw new Error("列数 6 规范化失败");
+});
+
+step("那么", "音乐添加自动启用清除保留本地与时长分秒校验", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const flowBlock = homeJs.slice(flowIdx, homeJs.indexOf("async function onMusicAction", flowIdx));
+  // 任务5.1：添加曲目自动启用卡片。
+  if (!flowBlock.includes("cfg.music.enabled = true")) throw new Error("添加曲目未自动启用卡片");
+  // 任务5.5：新增曲目补 cover 默认字段。
+  if (!flowBlock.includes('cover: "", duration')) throw new Error("新增曲目缺 cover 默认字段");
+  // 任务5.4：清除外链保留本地曲目/播放列表。
+  const clrIdx = homeJs.indexOf('id === "musicClear"');
+  const clrBlock = homeJs.slice(clrIdx, clrIdx + 700);
+  if (!clrBlock.includes("external: {}")) throw new Error("清除音乐未只重置 external");
+  if (clrBlock.includes("hp.normalizeMusic(null)")) throw new Error("清除音乐仍整体清空");
+  if (!clrBlock.includes("本地曲目已保留")) throw new Error("清除提示未说明保留本地");
+  // 任务5.5：时长分/秒 <60 运行时断言。
+  if (homepage.parseDurationInput("3:05") !== 185) throw new Error("合法 mm:ss 解析错误");
+  if (homepage.parseDurationInput("99:99") !== null) throw new Error("99:99 应被拒绝");
+  if (homepage.parseDurationInput("1:99:00") !== null) throw new Error("小时格式分钟≥60 应被拒绝");
+  if (homepage.parseDurationInput("2:30") !== 150) throw new Error("合法 mm:ss 解析错误");
+});
+
+step("那么", "公开候选音源与本地路径边界说明", () => {
+  // 任务5.2/5.3：公开候选（Archive embed / Radio 电台 / Jamendo 配置说明），
+  // 不预置版权保护曲目；本地路径边界写明。
+  const suggests = homepage.MUSIC_SUGGESTIONS.map((s) => s.id);
+  for (const id of ["archive", "radio", "jamendo"])
+    if (!suggests.includes(id)) throw new Error("缺公开候选音源：" + id);
+  if (homepage.musicSuggestionUrl("archive", "abc").includes("/details/abc") !== true)
+    throw new Error("Archive 条目标识未转 details 链接");
+  if (homepage.musicSuggestionUrl("radio", "http://x") !== "")
+    throw new Error("电台非 https 应拒绝");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="musicSuggestions"')) throw new Error("设置面板缺候选音源列表");
+  if (!html.includes("本地文件路径")) throw new Error("主页未写本地路径边界");
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (!privacy.includes("本地音乐路径边界")) throw new Error("隐私说明缺本地路径边界");
+  if (!privacy.includes("不承诺")) throw new Error("隐私说明未写明不承诺永久播放");
+  if (!privacy.includes("坐标仅用于当次天气请求")) throw new Error("隐私说明缺坐标仅当次请求");
+});
+
+step("那么", "设置面板六分页导航与导入导出覆盖keymap", () => {
+  const html = repoFile("src/home/home.html");
+  const pages = [...html.matchAll(/class="home-cfg-card home-cfg-page" data-page="([^"]+)"/g)].map(
+    (m) => m[1]
+  );
+  const want = ["appearance", "search", "sites", "music", "weather", "data"];
+  if (pages.join(",") !== want.join(","))
+    throw new Error("六分页缺失或顺序错误：" + pages.join(","));
+  if (!html.includes('id="homeCfgNav"')) throw new Error("缺分页导航条");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("const switchConfigPage = (page)")) throw new Error("缺分页切换函数");
+  if (!homeJs.includes("const pageOfSection = (sectionId)")) throw new Error("缺深链映射");
+  if (!homeJs.includes("btn.dataset.page === page")) throw new Error("导航未高亮当前页");
+  // 配置字段迁移/导入导出：normalizeHomeConfig 运行时断言含全部字段。
+  const cfg = homepage.normalizeHomeConfig({
+    sites: [{ title: "S", url: "https://e.com" }],
+    siteLayout: { columns: "6" },
+    noteItems: [{ text: "note" }],
+    music: {
+      enabled: true,
+      local: {
+        tracks: [{ id: "t1", url: "https://e.com/a.mp3" }],
+        playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+      },
+    },
+    weather: { mode: "manual", city: "北京" },
+    wallpaper: { mode: "gradient" },
+    keymap: { "cursor-prev": "Q" },
+  });
+  if (cfg.siteLayout.columns !== "6") throw new Error("siteLayout 未迁移");
+  if (cfg.noteItems.length !== 1) throw new Error("便签未迁移");
+  if (cfg.music.local.playlists[0].id !== "p1") throw new Error("音乐播放列表未迁移");
+  if (cfg.weather.city !== "北京") throw new Error("天气字段未迁移");
+  if (cfg.keymap["cursor-prev"] !== "Q") throw new Error("keymap 未纳入导出字段");
+  const exported = homepage.exportHomepageConfig(cfg, "2026-11-28T00:00:00.000Z");
+  if (!exported.includes("keymap")) throw new Error("导出文件缺 keymap");
+});
+
+step("那么", "空状态CSS焦点环与减少动态偏好", () => {
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-music-empty")) throw new Error("空状态缺 CSS");
+  if (!css.includes(".home-music-empty[hidden]")) throw new Error("空状态显隐样式缺失");
+  if (!css.includes(":focus-visible")) throw new Error("焦点环缺失");
+  if (!css.includes("prefers-reduced-motion")) throw new Error("未尊重减少动态偏好");
+  if (!css.includes("var(--accent)")) throw new Error("主操作按钮未区分强调色");
 });

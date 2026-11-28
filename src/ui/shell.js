@@ -9,6 +9,7 @@ import * as homepage from "../core/homepage.js";
 import * as io from "../core/import-export.js";
 import * as tabsOp from "../core/tabs-op.js";
 import * as keymap from "../core/keymap.js";
+import { perfCounters, markPerf, measurePerf, visibleBatches } from "../core/perf.js";
 import * as editOp from "../core/edit-op.js";
 import * as trashOp from "../core/trash-op.js";
 import {
@@ -162,6 +163,12 @@ const GUIDE_HTML = `
   <li><b>设置分类与反馈：</b>设置内只分外观、备份、复制三类；外观里可改主题（默认深色）、打开方式、「在上次位置打开」和扩展主页入口。反馈不在设置里——点击页脚「快速上手指南」图标右侧的 GitHub 图标即可前往项目反馈页（侧边栏 / 独立窗口 / 置顶小窗均显示）。</li>
 </ol>`;
 
+// 2026-11-28 浏览器实测任务：tabs.query 次数计数（真机验收读 perfCounters）。
+const perfTabsQuery = (...args) => {
+  markPerf("tabsQuery");
+  return chrome.tabs.query(...args);
+};
+
 // N3（m10950）：一次 tabs.query 同时派生「打开态集合」与「浏览器标签页自身图标表」。
 // D17（定稿）：图标表只按 tabId 精确索引（`id:${tabId}`），叶子渲染时按 tabId 取，无 URL 兜底
 // （同一链接多开会串图标）。图标是派生态、不入库；Chrome 不提供图标时回退通用兜底图标
@@ -170,7 +177,7 @@ async function deriveOpenState(m) {
   const empty = { openIds: new Set(), favicons: new Map() };
   try {
     if (typeof chrome === "undefined" || !chrome.tabs?.query) return empty;
-    const tabs = await chrome.tabs.query({});
+    const tabs = await perfTabsQuery({});
     // 合并审计 P0-3（2026-11-24）：拆分「存活集合」与「展示集合」。
     // 打开态只信 tabId，与 URL 无关——Chrome 标签在导航提交前 url 为空、目标在 pendingUrl，
     // 若先按 url 非空过滤会把存活 tabId 排除，导致「先亮后灰」误判（违背 D17 tabId-only）。
@@ -197,7 +204,7 @@ async function deriveOpenState(m) {
 // 浏览器当前打开的页面（D11：全部类型）→ bootAlign/realignIfEmpty 入参 [{id,title,url}]
 async function queryOpenTabs() {
   if (typeof chrome === "undefined" || !chrome.tabs?.query) return [];
-  const tabs = await chrome.tabs.query({});
+  const tabs = await perfTabsQuery({});
   // 2026-11-25 审计 P0-2：不再因 url 为空丢弃有 tabId 的标签（导航提交前地址在 pendingUrl）。
   // 快照元数据统一携带 pendingUrl/index/active/windowId；绑定仍只按 tabId。
   return tabs
@@ -263,7 +270,7 @@ export async function bootShell(root) {
     return dz;
   };
   ensureDropzone();
-  const { renderTree, renderEmpty, renderStats } = await import("./render.js");
+  const { renderTree, renderEmpty, renderStats, buildRenderIndex } = await import("./render.js");
 
   // ===== 合并审计 P1-2（2026-11-24）：宿主上下文（主页面 / PiP 各一份）=====
   // 状态栏、toast、弹窗输入框、右键菜单都按宿主文档隔离；核心数据动作共享闭包，
@@ -320,15 +327,22 @@ export async function bootShell(root) {
   };
   const render = async () => {
     const view = searchQ ? editOp.searchFilter(m, searchQ) : m;
-    body.innerHTML = view.windows.length
-      ? renderTree(view, {
-          openIds,
-          favicons,
-          linkShow: !!settings.linkShow,
-          selectedId,
-          collapsed,
-        })
-      : renderEmpty();
+    // 2026-11-28 浏览器实测任务：父级索引 O(n) 预构建 + 渲染计数/耗时/DOM 节点数。
+    const index = buildRenderIndex(view);
+    measurePerf("renders", () => {
+      body.innerHTML = view.windows.length
+        ? renderTree(view, {
+            openIds,
+            favicons,
+            linkShow: !!settings.linkShow,
+            selectedId,
+            collapsed,
+            index,
+          })
+        : renderEmpty();
+    });
+    perfCounters.domNodes = body.querySelectorAll("*").length;
+    if (perfCounters.domNodes > 500) visibleBatches(perfCounters.domNodes, 500);
     ensureDropzone();
     const stats = root.querySelector("#stats");
     if (stats) stats.innerHTML = renderStats(m, openIds);
@@ -628,7 +642,7 @@ export async function bootShell(root) {
     if (!node?.url) return;
     openingLeafIds.add(id);
     try {
-      const urls = new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
+      const urls = new Set((await perfTabsQuery({})).map((t) => t.url).filter(Boolean));
       const winId = boundWindowId(m, id);
       // AI 任务：默认前台打开（网页获得浏览器焦点）；仅设置为 background 时后台打开。
       // Ctrl+Shift+Enter 显式聚焦动作走 focus-webpage 兼容别名（行为同前台）。
@@ -1246,7 +1260,15 @@ export async function bootShell(root) {
   };
   const selectLeaf = async (id) => {
     selectedId = id;
-    await render();
+    // 2026-11-28 浏览器实测任务：选中态优先局部 class 更新（仅切换 .selected），
+    // 避免每次选中都整树 innerHTML 重建；视图中找不到目标时回退整树渲染。
+    const target = body.querySelector(`.leaf[data-id="${id}"]`);
+    if (target && !searchQ) {
+      body.querySelectorAll(".leaf.selected").forEach((el) => el.classList.remove("selected"));
+      target.classList.add("selected");
+    } else {
+      await render();
+    }
     const el = body.querySelector(`.leaf[data-id="${id}"]`);
     if (el) el.scrollIntoView({ block: "nearest" });
   };
@@ -1278,13 +1300,19 @@ export async function bootShell(root) {
       return;
     }
     if (action === "open-selected" || action === "open-selected-focus") {
-      if (!selectedId) return;
+      if (!selectedId) {
+        toast("请先选择一个标签");
+        return;
+      }
       e.preventDefault();
       await openLeafById(selectedId, { focus: action === "open-selected-focus" });
       return;
     }
     if (action === "trash-selected") {
-      if (!selectedId) return;
+      if (!selectedId) {
+        toast("请先选择一个标签");
+        return;
+      }
       e.preventDefault();
       const node = findNode(m, selectedId);
       if (!node) return;
@@ -1299,7 +1327,10 @@ export async function bootShell(root) {
       return;
     }
     if (action === "copy-selected") {
-      if (!selectedId) return;
+      if (!selectedId) {
+        toast("请先选择一个标签");
+        return;
+      }
       e.preventDefault();
       try {
         await copyNode(selectedId);
@@ -1324,14 +1355,17 @@ export async function bootShell(root) {
       return;
     }
     if (action === "open-group") {
-      if (!selectedId) return;
+      if (!selectedId) {
+        toast("请先选择一个标签");
+        return;
+      }
       e.preventDefault();
       const leaf = findNode(m, selectedId);
       const gid =
         leaf?.parentId && findNode(m, leaf.parentId)?.kind === "group" ? leaf.parentId : null;
       if (gid) {
         try {
-          const urls = new Set((await chrome.tabs.query({})).map((x) => x.url).filter(Boolean));
+          const urls = new Set((await perfTabsQuery({})).map((x) => x.url).filter(Boolean));
           const n = await tabsOp.openAll(chrome, m, gid, urls);
           await applyOpenAllRebind(n);
           await refreshOpen();
@@ -1369,7 +1403,7 @@ export async function bootShell(root) {
       if (node?.tabId != null) {
         try {
           await chrome.tabs.update(node.tabId, { active: true });
-          const tab = (await chrome.tabs.query({})).find((x) => x.id === node.tabId);
+          const tab = (await perfTabsQuery({})).find((x) => x.id === node.tabId);
           if (tab?.windowId != null) await chrome.windows.update(tab.windowId, { focused: true });
           toast("已聚焦网页（按 ← 回到面板）");
         } catch (err) {
@@ -1537,7 +1571,7 @@ export async function bootShell(root) {
   const openUrlsNow = async () => {
     try {
       if (typeof chrome === "undefined" || !chrome.tabs?.query) return new Set();
-      return new Set((await chrome.tabs.query({})).map((t) => t.url).filter(Boolean));
+      return new Set((await perfTabsQuery({})).map((t) => t.url).filter(Boolean));
     } catch {
       return new Set();
     }
@@ -1617,7 +1651,7 @@ export async function bootShell(root) {
     let activeTab = null;
     try {
       if (typeof chrome?.tabs?.query === "function") {
-        const actives = await chrome.tabs.query({ active: true, currentWindow: true });
+        const actives = await perfTabsQuery({ active: true, currentWindow: true });
         activeTab = actives && actives[0];
       }
     } catch {
@@ -1695,9 +1729,12 @@ export async function bootShell(root) {
     toast(collapsed.size ? "已全部收起" : "已全部展开");
   });
   const searchInput = root.querySelector("#q");
+  // 2026-11-28 浏览器实测任务：搜索输入 120ms 防抖（逐键全量渲染卡顿主因之一）。
+  let searchTimer = 0;
   searchInput?.addEventListener("input", async () => {
     searchQ = searchInput.value;
-    await render();
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => void render(), 120);
   });
 
   // ---- 设置弹窗：四分类 + 外观/备份方式/复制默认参数 ----
@@ -2830,6 +2867,7 @@ export async function bootShell(root) {
   // UI 通过下方 storage.onChanged 订阅刷新，避免 UI 定时器重渲染与拖拽/折叠交互竞态。
 
   // ---- 存储联动 ----
+  let modelRefreshTimer = 0;
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     // O1（2026-11-23 UI 审计）：浏览器命令快捷键广播（service-worker 写 storage.cmd）→ UI 订阅。
@@ -2860,7 +2898,44 @@ export async function bootShell(root) {
             .map((key) => [key, changes[key].newValue || []])
         ),
       };
-      void refreshOpen();
+      // 2026-11-28 浏览器实测任务：storage 变更 80ms 合并（多条模型键同批只刷一次）。
+      // 结构未变时只增量刷新打开态 class，不重建整树——避免与用户折叠/选中交互竞态
+      // （整树 innerHTML 重建会吃掉折叠态）；结构变化才回退整树刷新。
+      // trash 变更涉及角标/列表，走整树刷新（角标在 render 内更新）。
+      if (changes.trash) {
+        window.clearTimeout(modelRefreshTimer);
+        void render();
+        return;
+      }
+      window.clearTimeout(modelRefreshTimer);
+      modelRefreshTimer = window.setTimeout(() => {
+        void (async () => {
+          const domIds = new Set(
+            [...body.querySelectorAll("[data-id]")].map((el) => el.dataset.id)
+          );
+          const modelIds = new Set(
+            [...(m.windows || []), ...(m.groups || []), ...(m.tabs || [])].map((n) => n.id)
+          );
+          const same = domIds.size === modelIds.size && [...modelIds].every((id) => domIds.has(id));
+          if (same) {
+            await applyOpenState();
+            body.querySelectorAll(".leaf[data-id]").forEach((el) => {
+              const node = findNode(m, el.dataset.id);
+              const open = node?.tabId != null && openIds.has(node.id);
+              el.classList.toggle("open", !!open);
+              el.classList.toggle("dimmed", !open);
+              const fav = el.querySelector(".fav");
+              if (fav) {
+                fav.classList.toggle("on", !!open);
+                fav.classList.toggle("off", !open);
+              }
+            });
+            pipRefresh();
+          } else {
+            await refreshOpen();
+          }
+        })();
+      }, 80);
     }
     if (changes.settings) {
       settings = changes.settings.newValue || {};

@@ -508,6 +508,41 @@ export const MUSIC_PROVIDERS = [
   { id: "custom", name: "自定义嵌入链接", host: "" },
 ];
 
+/**
+ * 2026-11-28 浏览器实测任务：公开可测试候选音源（默认列表中不接入版权保护曲目）。
+ * Internet Archive embed 与 Radio Browser 电台优先；Jamendo 需 client_id，仅作配置项说明。
+ * 每项许可/来源需用户逐首核对；电台为直播流，不支持单曲上一首/下一首。
+ */
+export const MUSIC_SUGGESTIONS = [
+  {
+    id: "archive",
+    name: "Internet Archive",
+    hint: "公共领域/收藏集较多；逐首核对许可；条目 details 链接自动变换为 embed。",
+  },
+  {
+    id: "radio",
+    name: "Radio Browser 电台",
+    hint: "开放数据、免 key、HTTPS、CORS 可访问；直播流不支持上一首/下一首，需标注电台来源。",
+  },
+  {
+    id: "jamendo",
+    name: "Jamendo（需 client_id）",
+    hint: "CC 独立音乐目录；非商业 API 需 client_id，暂仅作配置项，不预置默认列表。",
+  },
+];
+
+// 候选来源 → 可填入配置面板的公开链接（协议用 P 拼接，遵守 C12 出站白名单扫描）。
+export function musicSuggestionUrl(kind, value) {
+  const v = String(value || "").trim();
+  if (!v) return "";
+  if (kind === "archive") {
+    if (/^https?:\/\//i.test(v)) return normalizeMusicUrl(v); // 用户粘贴 details 链接
+    return `${P}archive.org/details/${encodeURIComponent(v)}`; // 条目标识
+  }
+  if (kind === "radio") return normalizeMusicUrl(v); // 电台 https 直链（直播流）
+  return "";
+}
+
 // 外链 URL 规范化（2026-11-26）：仅 https；拒绝 javascript:/blob:/file:/data: 伪协议与
 // 引号/空白/尖括号等注入字符；返回净化后的 URL，非法返回空串。协议用常量 P 拼接遵守 C12。
 export function normalizeMusicUrl(raw) {
@@ -714,13 +749,17 @@ export function removeTrackEverywhere(local, trackId) {
 
 /**
  * 2026-11-28 四轮复核 P2-5：时长输入解析——纯数字按秒；mm:ss（或 h:mm:ss）按时分秒；
- * 非法/负数/超上限（≤359999 秒）返回 null（调用方保留现值）。
+ * 非法/负数/超上限（≤359999 秒）/分秒 ≥60 返回 null（调用方保留现值）。
  */
 export function parseDurationInput(raw) {
   const s = typeof raw === "string" ? raw.trim() : "";
   if (!s) return null;
   const parts = s.split(":").map((p) => p.trim());
   if (parts.some((p) => !/^\d+$/.test(p))) return null;
+  // 2026-11-28 浏览器实测任务：mm:ss / h:mm:ss 的分钟与秒必须 <60
+  // （此前 "99:99" 被算成 6039 秒，属无效时长）。
+  if (parts.length >= 2 && Number(parts[parts.length - 1]) >= 60) return null;
+  if (parts.length === 3 && Number(parts[1]) >= 60) return null;
   let sec = 0;
   if (parts.length === 1) sec = Number(parts[0]);
   else if (parts.length === 2) sec = Number(parts[0]) * 60 + Number(parts[1]);
@@ -938,6 +977,9 @@ export function normalizeHomeConfig(raw) {
     noteItems: normalizeNoteItems(migratedNotes.noteItems),
     music: normalizeMusic(src.music),
     weather: normalizeWeather(src.weather),
+    // 2026-11-28 浏览器实测任务：导入导出覆盖 keymap（面板设置随主页配置导出/回写，
+    // 具体合法化由 keymap.normalizeKeymap 在写回设置时完成）。
+    keymap: src.keymap && typeof src.keymap === "object" ? { ...src.keymap } : undefined,
   };
 }
 

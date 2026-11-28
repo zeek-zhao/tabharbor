@@ -316,3 +316,20 @@ BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constrai
 | 快捷条「新建标签」about:blank | 维持现状，台账 F-141 记录 |
 
 核验时本地门禁：371/371 BDD PASS；constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。CI 说明：docs-only 提交 `0167e2d` 的 e2e job 偶发失败（同代码 `d883c64` run 全绿），空提交 `b963424` 重跑一次通过（run 46140339330），确认为 CI 环境偶发而非代码回归。
+
+## 22. 浏览器实测 AI 任务轮（基于 `49efe55`）
+
+> 依据《TabHarbor-浏览器实测、卡顿排查与主页/音乐/天气/设置面板 AI 任务-2026-11-28.md》。按文档执行顺序（快捷键 → 性能 → 音乐一致性 → 设置分页/主页视觉 → 音源/验收）落地，完整交付报告见 `docs/2026-11-28_BROWSER_TASKS_EXEC_REPORT.md`。
+
+| ID | 任务 | 摘要 | 状态 |
+| --- | --- | --- | --- |
+| F-152 (1) | 快捷键归属/保留键 | ← 专属 focus-panel；默认键避开 Ctrl+L/P/D/O/Ctrl+Shift+L 改 Alt+Shift；单一 matchAction 入口 + 无选中提示 + 输入控件守卫 | 已实现 |
+| F-153 (2) | 卡顿排查/性能 | 搜索 120ms 防抖、storage 80ms 合并 + 增量打开态刷新（消除折叠竞态）、父级索引 O(n)、选中局部更新、favicon 懒加载、perfCounters 埋点 + 500 行分批接口 | 已实现 |
+| F-154 (3) | 主页布局 | 移除右上角音乐图标；置顶站点独立行（网格去重）；列数自适应/4/5/6 | 已实现 |
+| F-155 (4) | 天气 | 定位边界核验通过（仅点击触发/三错误码/重试/不轮询）；PRIVACY 补「坐标仅当次请求」 | 已实现 |
+| F-156 (5) | 音乐一致性 | 添加自动启用；清除外链保留本地；空状态 CSS；时长分秒<60；cover 默认值；公开候选音源（Archive/Radio/Jamendo 说明）；本地路径边界说明 | 已实现 |
+| F-157 (6) | 设置面板 | 六分页导航 + 深链 + 不丢输入 + 配置字段迁移 + 导入导出覆盖 keymap | 已实现 |
+| F-158 (7) | UI/验证 | 焦点环、prefers-reduced-motion、空/失败态；E2E 新增 3 项真实 DOM 契约；BDD 382/382 | 已实现 |
+| F-159 (8) | 真机验收 | 快捷键矩阵/手势/定位授权/iframe CSP/远程资源/大标签性能仍需解包扩展环境逐项复测（风险清单见执行报告） | 待手工验收 |
+
+BDD 场景总数：382/382 PASS（371 → +11，feature 43/44）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿（含新增 3 项 DOM 契约）。红线：无 C11/C12 白名单变更、无新增权限、未注入内容脚本、未读书签/历史。

@@ -5,6 +5,7 @@
 // H3（2026-11-24 主页审计）：主页配置存于 settings.homepage，settings 已在 ALL_KEYS 中，
 // 无需新增顶层键；此处引入默认值供全新安装与迁移合并。
 // P0（2026-11-25）：迁移时需按当前默认集合补齐字段/引擎回退，故引入规范化工具。
+import { markPerf } from "./perf.js";
 import { DEFAULT_HOMEPAGE } from "./homepage.js";
 import { defaultKeymap, normalizeKeymap } from "./keymap.js";
 import {
@@ -118,6 +119,7 @@ export async function loadAll(chromeApi = globalThis.chrome) {
 }
 
 export async function saveModel(m, chromeApi = globalThis.chrome) {
+  markPerf("storageWrites");
   await chromeApi.storage.local.set({
     windows: m.windows || [],
     groups: m.groups || [],
@@ -130,6 +132,7 @@ export async function saveModel(m, chromeApi = globalThis.chrome) {
 export async function saveSettings(patch, chromeApi = globalThis.chrome) {
   const { settings } = await loadAll(chromeApi);
   const next = { ...settings, ...patch };
+  markPerf("storageWrites");
   await chromeApi.storage.local.set({ settings: next });
   return next;
 }
@@ -137,6 +140,7 @@ export async function saveSettings(patch, chromeApi = globalThis.chrome) {
 export async function appendTrash(entry) {
   const { trash } = await loadAll();
   const next = [{ ...entry, savedAt: entry.savedAt || new Date().toISOString() }, ...trash];
+  markPerf("storageWrites");
   await chrome.storage.local.set({ trash: next });
   return next;
 }
@@ -145,6 +149,7 @@ export async function appendTrash(entry) {
 export async function saveBounds(patch, chromeApi = globalThis.chrome) {
   const got = await chromeApi.storage.local.get(["lastBounds"]);
   const next = { ...(got.lastBounds || {}), ...(patch || {}) };
+  markPerf("storageWrites");
   await chromeApi.storage.local.set({ lastBounds: next });
   return next;
 }

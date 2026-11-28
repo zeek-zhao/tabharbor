@@ -249,8 +249,9 @@ function renderSites() {
   const siteHtml = (s) =>
     `<a class="home-site${s.pinned ? " pinned" : ""}" data-idx="${cfg.sites.indexOf(s)}" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer" title="${escapeHtml(s.url)}"><span class="home-site-icon">${initialOf(s.title)}</span><span class="home-site-title">${escapeHtml(s.title)}</span></a>`;
   const pinned = sites.filter((s) => s.pinned);
-  const groups = [{ id: "__all__", name: "全部", list: sites }];
-  if (pinned.length) groups.push({ id: "__pinned__", name: "置顶", list: pinned });
+  // 2026-11-28 浏览器实测任务：置顶站点单独一行排在分类轨道之前，网格中不再重复展示；
+  // 去掉原「置顶」分类 chip（置顶已有独立行）。
+  const groups = [{ id: "__all__", name: "全部", list: sites.filter((s) => !s.pinned) }];
   for (const cat of hp.SITE_CATEGORIES) {
     const inCat = sites.filter((s) => !s.pinned && (s.category || "other") === cat.id);
     if (inCat.length) groups.push({ id: cat.id, name: cat.name, list: inCat });
@@ -268,7 +269,11 @@ function renderSites() {
         `<button class="home-site-chip${g.id === active.id ? " active" : ""}" data-cat="${escapeHtml(g.id)}" type="button">${escapeHtml(g.name)}<span class="chip-count">${g.list.length}</span></button>`
     )
     .join("");
-  box.innerHTML = `<div class="home-site-chips" role="tablist" aria-label="常用网址分类">${chipHtml}</div><div class="home-site-group"><div class="home-sites${gridCls}">${active.list.map(siteHtml).join("")}</div></div>`;
+  // 置顶独立行即使当前分类为空也常驻（置顶语义优先于分类过滤）。
+  const pinnedRow = pinned.length
+    ? `<div class="home-pinned-row" aria-label="置顶站点">${pinned.map(siteHtml).join("")}</div>`
+    : "";
+  box.innerHTML = `${pinnedRow}<div class="home-site-chips" role="tablist" aria-label="常用网址分类">${chipHtml}</div><div class="home-site-group"><div class="home-sites${gridCls}">${active.list.map(siteHtml).join("")}</div></div>`;
 }
 
 // 配置面板里的可编辑站点列表（编辑/删除/上移/下移）
@@ -324,11 +329,12 @@ function onHomeKeydown(e) {
   if (t && (t.closest?.("input, textarea, select, [contenteditable]") || t.isContentEditable))
     return;
   const site = t?.closest?.("#homeSites a.home-site");
-  if (site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+  // 2026-11-28 浏览器实测任务：← 专属 focus-panel（回面板），站点导航只吃 ↑/↓/→。
+  if (site && ["ArrowUp", "ArrowDown", "ArrowRight"].includes(e.key)) {
     const sites = [...document.querySelectorAll("#homeSites a.home-site")];
     const i = sites.indexOf(site);
     if (i >= 0 && sites.length) {
-      const delta = e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 1;
+      const delta = e.key === "ArrowUp" ? -1 : 1;
       const next = (i + delta + sites.length) % sites.length;
       if (sites[next]) {
         sites[next].focus();
@@ -339,7 +345,7 @@ function onHomeKeydown(e) {
   }
   // 2026-11-28 四轮复核 P2-1：body 级方向键 fallback——焦点不在站点卡上时首次按
   // 方向键聚焦第一个站点（提示卡“↑↓ 在站点间移动选择”从此可达，不必先点击/Tab）。
-  if (!site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+  if (!site && ["ArrowUp", "ArrowDown", "ArrowRight"].includes(e.key)) {
     const firstSite = document.querySelector("#homeSites a.home-site");
     if (firstSite) {
       firstSite.focus();
@@ -900,6 +906,14 @@ function renderMusicControls() {
   if (provider) provider.value = music.external.provider || "soundcloud";
   const source = $("#musicSource");
   if (source) source.value = music.external.sourceUrl || "";
+  // 2026-11-28 浏览器实测任务：公开候选音源（Archive embed / Radio 电台 / Jamendo 配置说明）。
+  const suggestions = $("#musicSuggestions");
+  if (suggestions && !suggestions.childElementCount) {
+    suggestions.innerHTML = hp.MUSIC_SUGGESTIONS.map(
+      (s) =>
+        `<button class="home-site-chip" data-suggest="${escapeHtml(s.id)}" type="button" title="${escapeHtml(s.hint)}">${escapeHtml(s.name)}</button>`
+    ).join("");
+  }
   const hint = $("#musicHint");
   if (hint) hint.textContent = music.external.embedUrl ? "已解析嵌入链接。" : "";
 }
@@ -938,12 +952,15 @@ async function musicAddTrackFlow() {
       duration = parsed;
     }
   }
+  // 2026-11-28 浏览器实测任务：添加本地曲目后自动启用音乐卡片（勾选 musicEnabled），
+  // 否则设置面板添加后卡片仍隐藏，用户以为添加失败。
+  cfg.music.enabled = true;
   // 2026-11-28 复核 G6 / 三轮复核 P1-3：新增曲目带显式 id，并自动补入当前播放列表
   // trackIds；激活列表失效时落到第一个有效列表，无任何列表则建默认列表并回写。
   const newId = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   cfg.music.local.tracks = [
     ...(cfg.music.local.tracks || []),
-    { id: newId, title, artist, url, duration },
+    { id: newId, title, artist, url, cover: "", duration },
   ].slice(0, 50);
   let pl = hp.resolveActiveList(cfg.music.local.playlists, cfg.music.local.activeListId);
   if (pl && pl.id !== cfg.music.local.activeListId) {
@@ -992,12 +1009,20 @@ async function onMusicAction(e) {
     });
     say("外链音乐已应用（不自动播放）");
   } else if (id === "musicClear") {
-    cfg.music = hp.normalizeMusic(null);
+    // 2026-11-28 浏览器实测任务：清除外链音乐必须保留本地曲目/播放列表/偏好——
+    // 仅重置 external 段（enabled 随本地内容存在与否保留），不动 local。
+    const prev = cfg.music || hp.DEFAULT_HOMEPAGE.music;
+    const hasLocal = (prev.local?.tracks || []).length > 0;
+    cfg.music = hp.normalizeMusic({
+      ...prev,
+      enabled: prev.enabled && hasLocal,
+      external: {},
+    });
     void persist().then(() => {
       renderMusic();
       renderMusicControls();
     });
-    say("已清除外链音乐");
+    say(hasLocal ? "已清除外链音乐（本地曲目已保留）" : "已清除外链音乐");
   } else if (id === "musicEnabled") {
     cfg.music = hp.normalizeMusic({
       ...(cfg.music || {}),
@@ -1294,6 +1319,38 @@ function bind() {
       renderDecorations();
     });
   }
+  // 2026-11-28 浏览器实测任务：公开候选音源按钮（委托）——Archive 填 details 链接并切
+  // provider；Radio 填 https 电台直链并提示直播流边界；Jamendo 仅说明 client_id 配置。
+  $("#homeCfgMask")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("#musicSuggestions [data-suggest]");
+    if (!btn) return;
+    const kind = btn.dataset.suggest;
+    if (kind === "jamendo") {
+      say("Jamendo 非商业 API 需 client_id，暂仅作配置项，未预置默认列表");
+      return;
+    }
+    const label =
+      kind === "archive"
+        ? "Internet Archive 条目 ID 或 details 链接"
+        : "电台 https 音频直链（来源 Radio Browser）";
+    const raw = window.prompt(label)?.trim();
+    if (!raw) return;
+    const url = hp.musicSuggestionUrl(kind, raw);
+    if (!url) {
+      say("链接无效：仅支持合法 https（电台直链）或 Archive 条目标识");
+      return;
+    }
+    const provider = $("#musicProvider");
+    const source = $("#musicSource");
+    if (provider) provider.value = kind;
+    if (source) source.value = url;
+    say(
+      kind === "radio"
+        ? "已填入电台直链：直播流不支持上一首/下一首，请标注电台来源"
+        : "已填入 Archive 条目，点「解析并应用」自动转 embed"
+    );
+  });
+
   // 外链音乐：配置面板应用/清除/开关 + 卡片内"在新标签打开"兜底。
   // 2026-11-28 四轮复核 P1-1：空状态添加/配置入口 + 设置面板本地曲目入口同链路绑定。
   for (const id of [
@@ -1340,6 +1397,34 @@ function bind() {
 
   // 2026-11-27 复核 P1-3：独立的「打开配置分区」入口——齿轮回到面板默认顶部，
   // 音乐入口只滚动到音乐分区；两者不再互相调用，避免滚动位置互相残留。
+  // 2026-11-28 浏览器实测任务：设置面板六分页导航——每次只显示当前分页，
+  // 隐藏的分页保留 DOM（未保存输入不丢失）；关闭后记住上次分页，刷新回默认页。
+  const CFG_PAGES = ["appearance", "search", "sites", "music", "weather", "data"];
+  let lastCfgPage = "appearance";
+  const switchConfigPage = (page) => {
+    const mask = $("#homeCfgMask");
+    if (!mask || !CFG_PAGES.includes(page)) return;
+    lastCfgPage = page;
+    mask.querySelectorAll(".home-cfg-page").forEach((el) => {
+      el.hidden = el.dataset.page !== page;
+    });
+    mask.querySelectorAll(".home-cfg-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.page === page);
+    });
+    const content = mask.querySelector(".content");
+    if (content) content.scrollTop = 0;
+  };
+  // 深链：既有 sectionId 入口（#musicEnabled / #siteEditList / #wpMode 等）映射到分页。
+  const pageOfSection = (sectionId) => {
+    if (!sectionId) return lastCfgPage;
+    if (/music|#music/i.test(sectionId)) return "music";
+    if (/site/i.test(sectionId)) return "sites";
+    if (/engine/i.test(sectionId)) return "search";
+    if (/weather|location/i.test(sectionId)) return "weather";
+    if (/import|export|backup/i.test(sectionId)) return "data";
+    if (/wallpaper|wp|deco|keys/i.test(sectionId)) return "appearance";
+    return lastCfgPage;
+  };
   const openHomeConfig = (sectionId) => {
     wpEditMode = null; // 每次打开都回到已持久化的真实模式
     renderEngines();
@@ -1351,42 +1436,29 @@ function bind() {
     const mask = $("#homeCfgMask");
     if (!mask) return;
     mask.hidden = false;
-    const content = mask.querySelector(".content");
-    if (content) content.scrollTop = 0; // 复位上次滚动位置
+    switchConfigPage(pageOfSection(sectionId));
+    // 深链目标控件在当前分页内聚焦（而非跨卡片 scrollIntoView）。
     if (sectionId) {
-      // 等一帧让布局稳定后再滚动到目标分区。
       requestAnimationFrame(() => {
-        $(sectionId)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        const el = $(sectionId);
+        if (el && !el.hidden) {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          if (typeof el.focus === "function") el.focus({ preventScroll: true });
+        }
       });
     }
   };
+  $("#homeCfgNav")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".home-cfg-tab");
+    if (btn) switchConfigPage(btn.dataset.page);
+  });
   $("#homeSettings")?.addEventListener("click", () => openHomeConfig(null));
   // 2026-11-27 审计 P1-8：顶部音乐图标——已配置则切换播放器显示，未配置则打开音乐分区。
   // AI 任务：右栏分组卡「管理」按钮——打开设置面板常用网址区。
   $("#homeGroupManage")?.addEventListener("click", () => {
     openHomeConfig("#siteEditList");
   });
-  $("#homeMusicToggle")?.addEventListener("click", () => {
-    const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
-    // 2026-11-28 四轮复核 P1-2：开关判断覆盖本地曲目——enabled && (hasLocal || embedUrl)
-    // 才折叠/展开播放器；仅「无本地且无外链」时才进入配置引导。
-    const hasLocal = (music.local?.tracks || []).length > 0;
-    const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
-    if (music.enabled && (hasLocal || embedUrl)) {
-      const card = $("#homeMusicCard");
-      if (card) {
-        card.hidden = !card.hidden;
-        if (!card.hidden) {
-          renderMusic();
-          card.scrollIntoView({ block: "nearest", behavior: "smooth" });
-        }
-      }
-      return;
-    }
-    // 未配置：直接打开配置面板的音乐分区（不经过齿轮入口）。
-    openHomeConfig("#musicEnabled");
-    say("先在设置中添加本地曲目或粘贴音乐外链");
-  });
+  // 2026-11-28 浏览器实测任务：右上角音乐图标已移除，音乐只在右栏卡片呈现。
   $("#homeCfgClose")?.addEventListener("click", () => {
     $("#homeCfgMask").hidden = true;
   });
@@ -1703,7 +1775,8 @@ function bind() {
 
   // M9/B6/Q4：主页配置导出/导入（独立配置文件）
   $("#homeExportCfg")?.addEventListener("click", () => {
-    const content = hp.exportHomepageConfig(cfg);
+    // 2026-11-28 浏览器实测任务：主页配置导出覆盖 keymap/音乐播放列表/便签/天气/壁纸字段。
+    const content = hp.exportHomepageConfig({ ...cfg, keymap: settings && settings.keymap });
     const filename = "tabharbor-homepage-" + Date.now() + ".json";
     const dataUrl =
       "data:application/json;charset=utf-8;base64," + btoa(unescape(encodeURIComponent(content)));
@@ -1726,6 +1799,11 @@ function bind() {
         return;
       cfg = next;
       wpEditMode = null;
+      // keymap 随导入回写面板设置（若文件含该字段），保持导入导出字段全覆盖。
+      if (next.keymap) {
+        await store.saveSettings({ keymap: next.keymap }, chromeApi);
+        settings = await store.loadAll(chromeApi).then((a) => a.settings || settings);
+      }
       await persist();
       renderEngineSelect();
       renderSiteEditList();

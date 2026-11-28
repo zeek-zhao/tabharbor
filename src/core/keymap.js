@@ -1,6 +1,8 @@
 // #AI-task 2026-11-27：面板快捷键动作注册表 + 本地键位映射（可录制/冲突提示/恢复默认）。
 // 红线：仅本地存储；浏览器全局命令仍由 Chrome 快捷键页管理（manifest commands 不变）。
 // 左右方向键新口径：→ 聚焦当前网页（focus-web）、← 回到插件面板（focus-panel），均可自定义。
+// 2026-11-28 浏览器实测任务：默认键位避开浏览器保留键 Ctrl+L/P/D/O、Ctrl+Shift+L，
+// 改用 Alt+Shift 组合（用户自定义能力保留，normalizeKeymap 兼容旧键串）。
 
 // 动作注册表：id 唯一；key 为默认键位（规范串：Ctrl/Alt/Shift/Meta+主键，或单键）。
 // 2026-11-28 二次复核 P1-3 / 三轮复核 P1-1：homeVisible=true 的动作才在主页快捷键提示卡
@@ -29,16 +31,21 @@ export const KEY_ACTIONS = [
     desc: "直出链接",
     key: "Ctrl+C",
   },
-  { id: "locate-selected", label: "定位当前标签", desc: "在浏览器中定位该标签", key: "Ctrl+L" },
+  {
+    id: "locate-selected",
+    label: "定位当前标签",
+    desc: "在浏览器中定位该标签",
+    key: "Alt+Shift+L",
+  },
   { id: "toggle-collapse", label: "展开 / 收起全部", desc: "切换树状态", key: "Ctrl+E" },
-  { id: "toggle-links", label: "显示 / 隐藏链接", desc: "切换链接列", key: "Ctrl+Shift+L" },
+  { id: "toggle-links", label: "显示 / 隐藏链接", desc: "切换链接列", key: "Alt+Shift+K" },
   {
     id: "open-group",
     label: "打开当前分组",
     desc: "按默认参数打开选中叶子所在分组",
-    key: "Ctrl+O",
+    key: "Alt+Shift+G",
   },
-  { id: "toggle-pip", label: "置顶小窗", desc: "切换置顶小窗模式", key: "Ctrl+P" },
+  { id: "toggle-pip", label: "置顶小窗", desc: "切换置顶小窗模式", key: "Alt+Shift+P" },
   {
     id: "focus-web",
     label: "聚焦当前网页",
@@ -53,7 +60,7 @@ export const KEY_ACTIONS = [
     homeVisible: true,
   },
   { id: "open-trash", label: "打开回收站", desc: "查看已删除标签", key: "Ctrl+Backspace" },
-  { id: "toggle-theme", label: "切换主题", desc: "深色 / 浅色", key: "Ctrl+D" },
+  { id: "toggle-theme", label: "切换主题", desc: "深色 / 浅色", key: "Alt+Shift+T" },
 ];
 
 const DEFAULT_MAP = Object.fromEntries(KEY_ACTIONS.map((a) => [a.id, a.key]));

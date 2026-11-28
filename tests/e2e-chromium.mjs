@@ -316,16 +316,27 @@ try {
   assert.ok(selected, "单击标签未出现 leaf.selected");
   const groupRow = win.locator('.node[data-id="g_project"] .node-row');
   await groupRow.click();
+  await win.waitForFunction(
+    () => {
+      const g = document.querySelector('.node[data-id="g_project"]');
+      return (
+        !!g && g.classList.contains("collapsed") && !g.querySelector('.leaf[data-id="t_project_1"]')
+      );
+    },
+    undefined,
+    { timeout: 5000 }
+  );
   const collapsedNow = await win.evaluate(() => {
     const g = document.querySelector('.node[data-id="g_project"]');
     return g.classList.contains("collapsed") && !g.querySelector('.leaf[data-id="t_project_1"]');
   });
   assert.ok(collapsedNow, "单击分组未折叠子树（FR-013）");
   await groupRow.click();
-  const expandedAgain = await win.evaluate(
-    () => !!document.querySelector('.leaf[data-id="t_project_1"]')
+  await win.waitForFunction(
+    () => !!document.querySelector('.leaf[data-id="t_project_1"]'),
+    undefined,
+    { timeout: 5000 }
   );
-  assert.ok(expandedAgain, "再次单击未展开子树");
   console.log("E2E 8/7 原型树标记 + 单击选中/折叠（FR-036/013）通过");
 
   // —— 缺陷修复轮：D3 双击打开 / D2 行内打开 / D4 显示链接 / D8 单关 / D9 折叠自动展开 ——
@@ -1484,6 +1495,95 @@ try {
     assert.equal(after, 0, "删除叶子到回收站后对应浏览器标签未被关闭");
     console.log("E2E 回收站口径反转：删除已开叶子同步关闭浏览器标签通过");
   }
+
+  // —— 主页 DOM 契约（浏览器实测任务）：真实扩展主页 + 配置注入 + 显隐/分页断言 ——
+  const homePage = await context.newPage();
+  await homePage.goto(`chrome-extension://${extId}/home/home.html`, {
+    waitUntil: "domcontentloaded",
+  });
+  await homePage.waitForFunction(() => !!document.querySelector("#homeMusicCard"), undefined, {
+    timeout: 10000,
+  });
+  // 注入：启用音乐但无本地曲目/无外链；一个置顶站点；验证空状态与置顶独立行。
+  await homePage.evaluate(async () => {
+    const { settings } = await chrome.storage.local.get("settings");
+    await chrome.storage.local.set({
+      settings: {
+        ...(settings || {}),
+        homepage: {
+          engine: "bing",
+          sites: [
+            { id: "pinned-1", title: "置顶站", url: "https://example.com/pinned", pinned: true },
+            { id: "site-1", title: "普通站", url: "https://example.com/normal" },
+          ],
+          music: {
+            enabled: true,
+            local: { tracks: [], playlists: [] },
+            external: { embedUrl: "" },
+          },
+        },
+      },
+    });
+  });
+  await homePage.reload({ waitUntil: "domcontentloaded" });
+  await homePage.waitForFunction(
+    () =>
+      document.querySelector("#homeMusicEmpty") &&
+      !document.querySelector("#homeMusicEmpty").hidden,
+    undefined,
+    { timeout: 10000 }
+  );
+  const domState = await homePage.evaluate(() => ({
+    cardVisible: !document.querySelector("#homeMusicCard").hidden,
+    emptyVisible: !document.querySelector("#homeMusicEmpty").hidden,
+    addBtn: !!document.querySelector("#homeMusicEmptyAdd"),
+    musicIcon: !!document.querySelector("#homeMusicToggle"),
+    pinnedRow: !!document.querySelector("#home-pinned-row, .home-pinned-row"),
+    pinnedChip: [...document.querySelectorAll(".home-site-chip")].some((b) =>
+      b.textContent.includes("置顶")
+    ),
+  }));
+  assert.ok(
+    domState.cardVisible && domState.emptyVisible && domState.addBtn,
+    "音乐空状态 DOM 契约失败"
+  );
+  assert.ok(!domState.musicIcon, "右上角音乐图标未移除");
+  assert.ok(domState.pinnedRow && !domState.pinnedChip, "置顶站点独立行 DOM 契约失败");
+  console.log("E2E 主页空状态/音乐图标移除/置顶独立行 DOM 契约通过");
+
+  // 设置面板六分页：打开后默认 appearance，仅当前页可见；切 music 页后其它页隐藏。
+  await homePage.click("#homeSettings");
+  await homePage.waitForFunction(() => !document.querySelector("#homeCfgMask").hidden, undefined, {
+    timeout: 5000,
+  });
+  const tabs = await homePage.$$eval(".home-cfg-tab", (els) => els.length);
+  assert.equal(tabs, 6, "设置面板分页数量应为 6");
+  await homePage.click('.home-cfg-tab[data-page="music"]');
+  const pageState = await homePage.evaluate(() => ({
+    musicVisible: !document.querySelector('.home-cfg-page[data-page="music"]').hidden,
+    othersHidden: [...document.querySelectorAll(".home-cfg-page")]
+      .filter((el) => el.dataset.page !== "music")
+      .every((el) => el.hidden),
+  }));
+  assert.ok(pageState.musicVisible && pageState.othersHidden, "设置分页 DOM 契约失败");
+  await homePage.evaluate(() => (document.querySelector("#homeCfgMask").hidden = true));
+  console.log("E2E 设置面板六分页深链/显隐 DOM 契约通过");
+
+  // 方向键归属：→ 从 body 聚焦首个站点；← 专属 focus-panel，不把焦点留在站点。
+  await homePage.evaluate(() => document.body.focus());
+  await homePage.keyboard.press("ArrowRight");
+  const focusedAfterRight = await homePage.evaluate(
+    () => !!document.activeElement?.matches("#homeSites a.home-site")
+  );
+  assert.ok(focusedAfterRight, "body 级 → 未聚焦首个站点");
+  await homePage.evaluate(() => document.activeElement?.blur?.());
+  await homePage.keyboard.press("ArrowLeft");
+  const focusedAfterLeft = await homePage.evaluate(
+    () => !!document.activeElement?.matches("#homeSites a.home-site")
+  );
+  assert.ok(!focusedAfterLeft, "← 被站点导航拦截（应留给 focus-panel）");
+  console.log("E2E 方向键归属（← focus-panel / → 站点网格）DOM 契约通过");
+  await homePage.close();
 
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {
