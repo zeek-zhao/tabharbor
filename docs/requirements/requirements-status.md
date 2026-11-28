@@ -279,4 +279,4 @@ BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constrai
 | F-140 (P2-6) | 第三方 iframe/直链音频/sidePanel 手势/定位授权/远程壁纸回退真机验收 | 维持真机验收边界；本地真机 Chromium E2E 复跑全绿；浏览器账号环境项仍待手工验收 | 待手工验收 |
 | F-141 (P2-建议) | 主页快捷条「新建标签」打开 about:blank | 维持 about:blank 口径（新建空白标签语义，浏览器默认新标签页行为接管），未改 | 维持现状 |
 
-BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。
+BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46136160623](https://github.com/zeek-zhao/tabharbor/actions/runs/46136160623) 一次通过（13efb5d）。红线口径：无 C11/C12 白名单变更、无新增权限（首轮 run 曾因文案含示例 URL 字面量命中 C12，改写后 0 命中）。

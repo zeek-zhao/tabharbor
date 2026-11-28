@@ -22,7 +22,7 @@
 - **BDD：365/365 PASS**（359 → +6，`features/41_2026_11_28_review3.feature`）
 - **六项门禁**：constraints / compliance / format:check / committer / contrast 0 命中
 - **真机 Chromium E2E**：本地复跑全绿
-- **CI**：run 一次通过（提交推送后补记）
+- **CI**：[run 46136160623](https://github.com/zeek-zhao/tabharbor/actions/runs/46136160623) 一次通过（`13efb5d`，test + e2e 双 job success，2026-11-28）。注：首个 run（46135868193，`11a0525`）红线扫描命中 C12——prompt 文案含 `https://example.com/a.mp3` URL 字面量，已改写为不含 URL 前缀的等价文案（`13efb5d`）后通过
 - 红线守住：无 C11/C12 白名单变更、无新增权限
 
 ## 遗留待办（真机手工验收，复核文档原清单）
