@@ -299,3 +299,20 @@ BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constrai
 | F-151 (P2-8) | 第三方 iframe/直链音频/sidePanel 手势/定位授权/远程壁纸回退真机验收 | 维持真机验收边界；本地真机 Chromium E2E 复跑全绿；浏览器账号环境项仍待手工验收 | 待手工验收 |
 
 BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46138538657](https://github.com/zeek-zhao/tabharbor/actions/runs/46138538657) 一次通过（d883c64）。红线口径：无 C11/C12 白名单变更、无新增权限。
+
+## 21. 第三轮复核文档重读核验（2026-11-28）
+
+> 复核文档《TabHarbor-最新代码第三轮复核-2026-11-28.md》被再次提供（链接 FxnYbiCISota8MxfAW0cJr3x69f）。经比对，其内容与第 17 节所依据的第三轮复核文档完全相同（基线 73adef7 → c66fda5、BDD 359/359、同一问题清单），所列问题已在第 17/19/20 节全部修复。本轮为核验轮，无代码变更：
+
+| 复核问题（第三轮原文） | 当前状态核验 |
+| --- | --- |
+| P1-1 主页快捷键卡展示未绑定动作 | 已修复：`homeVisible` 仅 focus-panel + `onHomeKeydown` 分发 + 站点方向键导航（F-133） |
+| P1-2 音乐双态 UI 未收敛 | 已修复并加强：四态 local/external/mixed/empty 分域显隐（F-134 + F-142） |
+| P1-3 失效激活列表兜底 + https 文案 | 已修复：`resolveActiveList` 纯函数兜底 + 明确 https 文案（F-135 + F-146 schema 层回退） |
+| P2-3 注释/PRIVACY/test-matrix 残留 | 已修复：四处口径全部更正（F-136），核验 `grep` 0 命中 |
+| P2-4 focus-panel 重复调桥 | 已修复：`hasFocus && visible` 守卫（F-137） |
+| P2-5 状态流缺可执行校验 | 已修复：4 个纯函数 + BDD 运行时断言（F-138），并扩展时长解析/失效回退断言（F-148/F-150） |
+| music.phase 硬编码 external | 已修复：按内容计算 local/external/mixed（F-139） |
+| 快捷条「新建标签」about:blank | 维持现状，台账 F-141 记录 |
+
+核验时本地门禁：371/371 BDD PASS；constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。CI 说明：docs-only 提交 `0167e2d` 的 e2e job 偶发失败（同代码 `d883c64` run 全绿），空提交 `b963424` 重跑一次通过（run 46140339330），确认为 CI 环境偶发而非代码回归。
