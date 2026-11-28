@@ -22,7 +22,7 @@
 - **BDD：371/371 PASS**（365 → +6，`features/42_2026_11_28_review4.feature`）
 - **六项门禁**：constraints / compliance / format:check / committer / contrast 0 命中
 - **真机 Chromium E2E**：本地复跑全绿
-- **CI**：run 一次通过（提交推送后补记）
+- **CI**：[run 46138538657](https://github.com/zeek-zhao/tabharbor/actions/runs/46138538657) 一次通过（`d883c64`，test + e2e 双 job success，2026-11-28）
 - 红线守住：无 C11/C12 白名单变更、无新增权限
 
 ## 遗留待办（真机手工验收，复核文档原清单）

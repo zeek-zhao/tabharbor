@@ -298,4 +298,4 @@ BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constrai
 | F-150 (P2-7) | UI 显隐/开关分支仍主要靠源码字符串匹配 | 维持字符串断言 + 关键状态流（normalizeMusic 空内容 schema、parseDurationInput、normalizeMusicLocal 失效回退）纯函数运行时断言组合覆盖 | 已实现 |
 | F-151 (P2-8) | 第三方 iframe/直链音频/sidePanel 手势/定位授权/远程壁纸回退真机验收 | 维持真机验收边界；本地真机 Chromium E2E 复跑全绿；浏览器账号环境项仍待手工验收 | 待手工验收 |
 
-BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。
+BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46138538657](https://github.com/zeek-zhao/tabharbor/actions/runs/46138538657) 一次通过（d883c64）。红线口径：无 C11/C12 白名单变更、无新增权限。
