@@ -42,13 +42,20 @@ const RULES = [
   {
     id: "C11",
     re: /\bfetch\s*\(|XMLHttpRequest\b/g,
-    desc: "网络出站（红线 7 修订白名单：仅 GitHub 备份模块）",
-    allowFiles: ["src/core/import-export.js"],
+    desc: "代码主动网络出站（白名单：GitHub 备份 + 天气 Open-Meteo + 在线壁纸图源）",
+    allowFiles: [
+      "src/core/import-export.js",
+      "src/core/weather.js",
+      "src/core/wallpaper-online.js",
+    ],
   },
   {
     id: "C12",
-    re: /https?:\/\/(?!api\.github\.com)/g,
-    desc: "出站 URL 必须是 https://api.github.com（红线 7 修订）",
+    // 出站白名单：GitHub 备份、Open-Meteo（天气）、Wallhaven / Nekos.best（在线壁纸图源）。
+    // manifest.json 的可选主机权限字符串由此豁免。
+    // 远程壁纸/外链音乐均为用户运行时输入的 URL，不落源码字面量，仍被本规则禁止硬编码。
+    re: /https?:\/\/(?!api\.github\.com|api\.open-meteo\.com|geocoding-api\.open-meteo\.com|wallhaven\.cc|w\.wallhaven\.cc|nekos\.best)/g,
+    desc: "源码出站 URL 白名单：GitHub 备份 + Open-Meteo 天气 + 在线壁纸图源",
     allowFiles: ["src/core/import-export.js"],
   },
 ];
@@ -102,5 +109,7 @@ for (const h of hits) {
   console.log(h.file.padEnd(46) + String(h.line).padEnd(6) + h.rule.padEnd(7) + h.desc);
   console.log("    > " + h.code);
 }
-console.log("\n受限例外：fetch/XHR 仅限 src/core/backup-core.js；书签 API 无例外。");
+console.log(
+  "\n受限例外：fetch/XHR 仅限 src/core/import-export.js（GitHub 备份）、src/core/weather.js（Open-Meteo 天气）、src/core/wallpaper-online.js（在线壁纸图源）；书签 API 无例外。"
+);
 process.exit(1);

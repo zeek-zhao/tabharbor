@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { step, stepMatch } from "../tools/bdd-runner.mjs";
 import * as model from "../src/core/model.js";
 import * as homepage from "../src/core/homepage.js";
+import * as weather from "../src/core/weather.js";
+import * as onlineWp from "../src/core/wallpaper-online.js";
 import * as crypto from "../src/core/crypto.js";
 import * as io from "../src/core/import-export.js";
 import * as trashOp from "../src/core/trash-op.js";
@@ -965,6 +967,7 @@ step("那么", "{} 的快捷栏图标序为 {}", (rel, expect) => {
 
 /* ---------- 场景组：存储层 v2（FR-008~011，SRS §3.2） ---------- */
 import * as store from "../src/core/store.js";
+import * as keymap from "../src/core/keymap.js";
 
 step("当", "首次读取存储层", async () => {
   ctx.all = await store.loadAll();
@@ -2206,6 +2209,57 @@ step("那么", "auto-backup alarm 不存在", () => {
     throw new Error("关闭自动备份后 alarm 仍存在");
 });
 
+step("那么", "service-worker 对 alarm 用 Token 获取 login 派生密码备份", () => {
+  const sw = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
+  const io = fs.readFileSync(path.resolve(TEST_ROOT, "src/core/import-export.js"), "utf8");
+  if (!sw.includes("runAutoBackup(chromeApi, model, settings)"))
+    throw new Error("alarm 未触发实际备份");
+  if (!io.includes("fetchGitHubLogin") || !io.includes("const login = await fetchGitHubLogin"))
+    throw new Error("runAutoBackup 未用 login 派生密码");
+  if (/settings\??\.ghBackupPassword/.test(io))
+    throw new Error("备份链路仍读取 settings.ghBackupPassword");
+});
+
+step("假如", "GitHub 备份配置完整且含 daily 频率", async () => {
+  ctx.mock = makeChromeMock();
+  const settings = {
+    backupTarget: "github",
+    ghToken: "fixture-token",
+    ghGistId: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    ghDesc: "TabHarbor encrypted backup",
+    ghFileName: "tabharbor-backup.tbh",
+    ghPrivate: true,
+    ghBackupFreq: "daily",
+  };
+  await ctx.mock.chrome.storage.local.set({ settings });
+  ctx.githubSettings = settings;
+  ctx.fetchCalls = [];
+  ctx.fetchMock = async (url, options) => {
+    ctx.fetchCalls.push({ url, options });
+    if (url === "https://api.github.com/user")
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ login: "zeek-zhao" }),
+      };
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: settings.ghGistId, html_url: "https://gist.github.com/x/y" }),
+    };
+  };
+  ctx.mock.chrome.permissions = { contains: async () => true };
+  ctx.mock.chrome.runtime.getManifest = () => ({ version: "0.3.0" });
+  ctx.mock.chrome.runtime.getURL = (path) => `chrome-extension://test/${path}`;
+  globalThis.chrome = ctx.mock.chrome;
+});
+
+step("那么", "auto-backup alarm 已注册且 periodInMinutes 为 1440", () => {
+  const a = ctx.mock.calls.alarms.find((x) => x.name === "auto-backup");
+  if (!a) throw new Error("auto-backup alarm 未注册");
+  if (a.periodInMinutes !== 1440) throw new Error(`periodInMinutes=${a.periodInMinutes} ≠ 1440`);
+});
+
 const gistConfig = (withId) => ({
   backupTarget: "github",
   ghToken: "fixture-token",
@@ -2968,14 +3022,14 @@ step("那么", "主页路径常量为 home/home.html", () => {
 step("那么", "主页新建标签标题为主页", () => {
   if (homepage.HOME_TITLE !== "主页") throw new Error(`主页标题=${homepage.HOME_TITLE}`);
 });
-step("那么", "内置搜索引擎包含 {} 四个默认引擎", (need) => {
+step("那么", "内置搜索引擎包含 {} 九个默认引擎", (need) => {
   const names = homepage.BUILTIN_ENGINES.map((e) => e.name).join(",");
   for (const n of String(need).split(",")) {
     if (!homepage.BUILTIN_ENGINES.some((e) => e.name === n))
       throw new Error(`内置引擎缺 ${n}；现有 ${names}`);
   }
-  if (homepage.BUILTIN_ENGINES.length !== 4)
-    throw new Error(`内置引擎应恰为 4 个，实际 ${homepage.BUILTIN_ENGINES.length}`);
+  if (homepage.BUILTIN_ENGINES.length !== 9)
+    throw new Error(`内置引擎应恰为 9 个，实际 ${homepage.BUILTIN_ENGINES.length}`);
 });
 step("那么", "默认引擎为必应且含 %s 占位", () => {
   const bing = homepage.BUILTIN_ENGINES.find((e) => e.id === "bing");
@@ -2989,6 +3043,12 @@ step("那么", "引擎 {} 代入关键词 {} 得到 {}", (engineId, q, want) => 
 step("那么", "默认常用网址有 {} 个", (n) => {
   if (homepage.DEFAULT_SITES.length !== Number(n))
     throw new Error(`默认站点=${homepage.DEFAULT_SITES.length} ≠ ${n}`);
+});
+
+step("那么", "默认常用网址均为安全 http 协议", () => {
+  for (const s of homepage.DEFAULT_SITES) {
+    if (!/^https:\/\//i.test(s.url)) throw new Error(`站点 ${s.title} 非安全协议：${s.url}`);
+  }
 });
 step("那么", "主页配置规范化去重并按 %s 过滤引擎", () => {
   const cfg = homepage.normalizeHomeConfig({
@@ -3241,6 +3301,8 @@ step("那么", "完整快照打包书签与主页配置且本地/Gist 均加密"
     throw new Error("未走 api.github.com Gist");
 });
 step("那么", "备份 UI 仅本地与 Gist 两类且去 localFormat", () => {
+  // 2026-11-25 备份三分类重构：本步骤保留旧名（feature 场景已改写），
+  // 现校验三张卡片结构 + 无 localFormat 旧三格式。
   for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
     const s = repoFile(f);
     if (!s.includes('data-setting="backup" data-value="github"'))
@@ -3425,19 +3487,39 @@ step("那么", "指南文案反映三分类与右下角反馈", () => {
 });
 
 // ===== 2026-11-24 合并审计（18_merge_audit.feature，基线 9adc32b）=====
-// 任务一：叶子右键菜单收敛
+// 任务一：叶子右键菜单收敛（2026-11-27 起删除入口移到行尾垃圾桶，右键无危险动作）
 step("那么", "叶子右键菜单模板仅一项且为删除", () => {
   const html = menu.menuHtml("leaf");
   const count = (html.match(/data-act=/g) || []).length;
-  if (count !== 1) throw new Error(`叶子菜单项数=${count}，应为 1`);
-  if (!html.includes('data-act="del"') || !html.includes("删除到回收站"))
-    throw new Error("叶子菜单缺删除到回收站");
-  if (!html.includes('class="mi danger"')) throw new Error("删除项未标危险色");
+  // 口径更新：右键不再提供删除动作（删除走行尾垃圾桶 / Delete 快捷键），只读提示项无 data-act。
+  if (count !== 0) throw new Error(`叶子菜单不应有可执行动作项，实际=${count}`);
+  if (html.includes('data-act="del"')) throw new Error("叶子右键仍暴露删除入口");
 });
 step("那么", "叶子右键菜单不再暴露备注与复制动作", () => {
   const html = menu.menuHtml("leaf");
   for (const bad of ['data-act="note"', 'data-act="copy"', 'data-act="edit"', 'data-act="rename"'])
     if (html.includes(bad)) throw new Error(`叶子菜单仍暴露 ${bad}`);
+});
+
+// 2026-11-27 P0：行尾垃圾桶（删除到回收站唯一行内入口），右键删除入口移除，Delete 保留。
+step("那么", "叶子行尾有垃圾桶按钮且右键无删除入口且 Delete 快捷键保留", () => {
+  const renderSrc = repoFile("src/ui/render.js");
+  const shellSrc = repoFile("src/ui/shell.js");
+  const menuSrc = repoFile("src/ui/menu.js");
+  // 渲染层：叶子行渲染 data-act="trash" 垃圾桶按钮。
+  if (!renderSrc.includes('data-act="trash"')) throw new Error("叶子行缺垃圾桶按钮");
+  if (!renderSrc.includes("trash-x")) throw new Error("垃圾桶按钮缺 trash-x 样式类");
+  // 接线层：主宿主与 PiP 宿主均委托 trash 到共享 del 动作。
+  const trashHandlers = shellSrc.split('[data-act="trash"]').length - 1;
+  if (trashHandlers < 2) throw new Error("主宿主与 PiP 未同时接线 trash 按钮");
+  if (!shellSrc.includes('runMenuAct("del"')) throw new Error("垃圾桶未复用共享删除动作");
+  // 右键菜单：2026-11-27 复核 P0-1 彻底禁用——叶子模板为空、双宿主 contextmenu 对叶子空操作。
+  const leafMenu = menu.menuHtml("leaf");
+  if (leafMenu.trim() !== "") throw new Error("叶子右键菜单模板应完全为空");
+  const ctxGuards = shellSrc.split('el.dataset.kind === "leaf"').length - 1;
+  if (ctxGuards < 2) throw new Error("主宿主与 PiP 未同时对叶子右键空操作");
+  // Delete 快捷键删除保留。
+  if (!shellSrc.includes('e.key === "Delete"')) throw new Error("Delete 快捷键删除被移除");
 });
 
 // 任务四：打开态派生（静态契约）
@@ -3710,4 +3792,2778 @@ step("假如", "浏览器已打开 id 为 {} 的存活标签", (id) => {
     windowId: 1,
     active: true,
   });
+});
+
+/* ---------- 2026-11-25 审计 P0：模型叶子位次 / pendingUrl 补收 ---------- */
+step("假如", "模型含窗口与同父锚点叶子", () => {
+  ctx.m = model.buildModel();
+  ctx.named = {};
+  const win = model.addWindow(ctx.m, "W");
+  const group = model.addGroup(ctx.m, "G", win.id);
+  const anchor = model.addTab(ctx.m, "锚点", "https://example.com/a", group.id);
+  model.addTab(ctx.m, "尾部", "https://example.com/b", group.id);
+  model.addTab(ctx.m, "别组", "https://example.com/c", win.id);
+  ctx.named = { W: win, G: group, 锚点: anchor };
+});
+
+step("当", "在锚点叶子之后插入新叶子 {}", (title) => {
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.G.id,
+    ctx.named.锚点.id
+  );
+});
+
+step("当", "在窗口直属插入新叶子 {} 且锚点为 {}", (title, anchorTitle) => {
+  const anchor = ctx.named[anchorTitle];
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.W.id,
+    anchor ? anchor.id : null
+  );
+});
+
+step("当", "在锚点不存在时插入新叶子 {}", (title) => {
+  ctx.inserted = model.insertTabAfter(
+    ctx.m,
+    title,
+    "https://example.com/new",
+    ctx.named.G.id,
+    "t_missing_anchor"
+  );
+});
+
+step("那么", "新叶子紧跟锚点叶子之后", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.G.id);
+  const i = tabs.findIndex((t) => t.id === ctx.inserted.id);
+  const a = tabs.findIndex((t) => t.id === ctx.named.锚点.id);
+  if (i !== a + 1) throw new Error(`新叶子位次=${i} ≠ 锚点后 ${a + 1}`);
+});
+
+step("那么", "新叶子位于窗口直属末尾且父级不变", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.W.id);
+  if (ctx.inserted.parentId !== ctx.named.W.id)
+    throw new Error(`新叶子父级=${ctx.inserted.parentId} ≠ 窗口 ${ctx.named.W.id}`);
+  if (tabs[tabs.length - 1].id !== ctx.inserted.id) throw new Error("新叶子未在窗口直属末尾");
+});
+
+step("那么", "新叶子追加到分组末尾", () => {
+  const tabs = ctx.m.tabs.filter((t) => t.parentId === ctx.named.G.id);
+  if (tabs[tabs.length - 1].id !== ctx.inserted.id) throw new Error("新叶子未在分组末尾");
+});
+
+step("那么", "容器加号新建使用锚点位次插入", () => {
+  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/ui/shell.js"), "utf8");
+  if (
+    !src.includes("leafByTabId(m, insert.openerTabId)") ||
+    !/insertTabAfter\([\s\S]{0,200}anchorLeaf \? anchorLeaf\.id : null/.test(src)
+  )
+    throw new Error("容器加号未按 tabId 找锚点并使用 insertTabAfter");
+});
+
+step("那么", "align 快照补入携带 pendingUrl 与 index", () => {
+  const src = fs.readFileSync(path.resolve(TEST_ROOT, "src/core/align.js"), "utf8");
+  const sw = fs.readFileSync(path.resolve(TEST_ROOT, "src/background/service-worker.js"), "utf8");
+  if (!src.includes("pageAddressOf") || !src.includes("insertTabAfter"))
+    throw new Error("align 未处理 pendingUrl 回退或锚点插入");
+  if (!sw.includes("pendingUrl: t.pendingUrl") || !sw.includes("index: t.index"))
+    throw new Error("后台快照未携带 pendingUrl/index");
+});
+
+step("假如", "浏览器激活标签只有 tabId 与 pendingUrl", () => {
+  ctx.m = model.buildModel();
+  model.addWindow(ctx.m, "Window", "w1", 1);
+  ctx.syncSnapshot = {
+    windows: [
+      {
+        id: 1,
+        focused: true,
+        tabs: [
+          {
+            id: 77,
+            url: "",
+            pendingUrl: "https://example.com/pending",
+            title: "",
+            active: true,
+            index: 0,
+          },
+        ],
+      },
+    ],
+    tabs: [
+      {
+        id: 77,
+        url: "",
+        pendingUrl: "https://example.com/pending",
+        title: "",
+        active: true,
+        index: 0,
+        windowId: 1,
+      },
+    ],
+  };
+});
+
+step("那么", "待导航叶子以 pendingUrl 标题补入且 tabId 精确绑定", () => {
+  const leaf = ctx.m.tabs.find((t) => t.tabId === 77);
+  if (!leaf) throw new Error("待导航标签未被补入模型");
+  if (leaf.title !== "https://example.com/pending") throw new Error(`标题=${leaf.title}`);
+  if (leaf.url !== "") throw new Error(`url 应保留空值待导航完成回写，实际 ${leaf.url}`);
+});
+
+step("假如", "窗口已有锚点叶子绑定 tabId 77 且浏览器激活", () => {
+  ctx.m = model.buildModel();
+  const win = model.addWindow(ctx.m, "Window", "w1", 1);
+  const group = model.addGroup(ctx.m, "G", win.id);
+  const anchor = model.addTab(ctx.m, "锚点", "https://example.com/a", group.id);
+  anchor.tabId = 77;
+  anchor.open = true;
+  ctx.anchorLeaf = anchor;
+  ctx.syncSnapshot = {
+    windows: [
+      {
+        id: 1,
+        focused: true,
+        tabs: [
+          { id: 77, url: "https://example.com/a", title: "锚点", active: true, index: 0 },
+          {
+            id: 88,
+            url: "",
+            pendingUrl: "https://example.com/new",
+            title: "",
+            active: false,
+            index: 1,
+          },
+        ],
+      },
+    ],
+    tabs: [],
+  };
+});
+
+step("假如", "浏览器新开待导航标签 tabId 88", () => {
+  ctx.syncSnapshot.tabs = [...ctx.syncSnapshot.windows[0].tabs];
+});
+
+step("那么", "新叶子补入窗口直属且绑定 tabId 88", () => {
+  const fresh = ctx.m.tabs.find((t) => t.tabId === 88);
+  if (!fresh) throw new Error("tabId 88 未补入模型");
+  const winTabs = ctx.m.tabs.filter((t) => t.parentId === ctx.m.windows[0].id);
+  if (winTabs[winTabs.length - 1].id !== fresh.id)
+    throw new Error("新叶子未在窗口直属末尾（锚点不同父时不得跨组乱挂）");
+});
+
+/* ========== 2026-11-25 备份三分类（features/21）========== */
+step("假如", "一个含窗口分组标签与回收站的模型", () => {
+  ctx.m = model.buildModel();
+  const w = model.addWindow(ctx.m, "备份窗口", "w_bk");
+  const g = model.addGroup(ctx.m, "备份分组", w.id, "g_bk");
+  model.addTab(ctx.m, "MDN 备份标题", "https://example.com/bk", g.id, "t_bk");
+  ctx.m.trash = [{ id: "tr_bk", title: "已删节点", kind: "tab", savedAt: "2026-11-25T00:00:00Z" }];
+  ctx.mock = makeChromeMock();
+  ctx.settings = { theme: "dark", homepage: { engine: "ddg" } };
+});
+
+step("当", "导出明文本地快照", async () => {
+  ctx.localExport = await io.exportLocalSnapshot(ctx.m, ctx.settings, null, ctx.mock.chrome, {
+    encrypted: false,
+    password: "",
+  });
+});
+
+step("那么", "明文快照文件为 .json 且包含 windows groups tabs settings trash", () => {
+  if (!ctx.localExport.filename.endsWith(".json"))
+    throw new Error(`明文文件名=${ctx.localExport.filename}`);
+  const data = JSON.parse(ctx.localExport.content);
+  for (const key of ["windows", "groups", "tabs", "settings", "trash"])
+    if (!(key in data)) throw new Error(`明文快照缺字段 ${key}`);
+  if (ctx.localExport.encrypted !== false) throw new Error("明文快照被标记加密");
+  if (data.windows.length !== 1 || data.tabs.length !== 1) throw new Error("明文快照树节点数不符");
+});
+
+step("那么", "明文快照不含加密信封字段", () => {
+  if (crypto.isEnvelope(JSON.parse(ctx.localExport.content)))
+    throw new Error("明文快照误含加密信封字段");
+  if (/"ct"\s*:/.test(ctx.localExport.content)) throw new Error("明文快照含密文字段 ct");
+});
+
+step("当", "从该文件内容恢复本地快照且不提供密码", async () => {
+  // P2（2026-11-25）：明文快照不写扩展存储历史，直接从导出文件内容恢复。
+  ctx.restored = await io.importJSON(JSON.parse(ctx.localExport.content), {});
+  ctx.restored.settings = JSON.parse(ctx.localExport.content).settings;
+});
+
+step("那么", "恢复出的模型包含书签树回收站与设置", () => {
+  if (!ctx.restored) throw new Error("未恢复出模型");
+  if (!ctx.restored.windows?.length || !ctx.restored.tabs?.length) throw new Error("恢复缺书签树");
+  if (ctx.restored.trash?.length !== 1) throw new Error("恢复缺回收站");
+  if (!ctx.restored.settings || ctx.restored.settings.theme !== "dark")
+    throw new Error("恢复缺设置");
+});
+
+step("当", "用密码 {} 导出加密本地快照", async (password) => {
+  ctx.localExport = await io.exportLocalSnapshot(ctx.m, ctx.settings, null, ctx.mock.chrome, {
+    encrypted: true,
+    password,
+  });
+});
+
+step("当", "用密码 {} 恢复该加密快照", async (password) => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  const entry = (got.localBackups || [])[0];
+  ctx.restored = await io.restoreBackup(entry.id, {}, ctx.mock.chrome, password);
+});
+
+step("当", "用错误密码 {} 恢复该加密快照", async (password) => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  const entry = (got.localBackups || [])[0];
+  try {
+    await io.restoreBackup(entry.id, {}, ctx.mock.chrome, password);
+    ctx.wrongPwdRejected = false;
+  } catch (err) {
+    ctx.wrongPwdRejected = true;
+    ctx.wrongPwdErr = err;
+  }
+});
+
+step("那么", "加密恢复被拒绝且错误归类为密码错误", () => {
+  if (!ctx.wrongPwdRejected) throw new Error("错误密码未被拒绝");
+  if (io.classifyBackupError(ctx.wrongPwdErr) !== "password")
+    throw new Error("错误未归类为密码错误");
+});
+
+step("假如", "Gist 恢复配置已就绪且 mock 返回 owner login", () => {
+  ctx.gistSettings = {
+    backupTarget: "github",
+    ghToken: "fixture-token",
+    ghGistId: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+    ghFileName: "tabharbor-backup.tbh",
+    ghPrivate: true,
+    ghBackupFreq: "hourly",
+  };
+  ctx.gistChrome = {
+    permissions: { contains: async () => true },
+  };
+  ctx.gistCalls = [];
+  ctx.gistFileContent = "";
+});
+
+// 统一 mock：GET /user → login；GET /gists/{id} → ctx.gistFileContent + owner.login；
+// POST/PATCH /gists → 记录并返回 gist id。
+const makeThreeCatFetch =
+  () =>
+  async (url, options = {}) => {
+    ctx.gistCalls.push({ url, method: options.method || "GET", options });
+    const u = String(url);
+    if (u === "https://api.github.com/user")
+      return { ok: true, status: 200, json: async () => ({ login: "zeek-zhao" }) };
+    if (u.startsWith("https://api.github.com/gists/") && (options.method || "GET") === "GET")
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: ctx.gistSettings.ghGistId,
+          owner: { login: "zeek-zhao" },
+          files: { "tabharbor-backup.tbh": { content: ctx.gistFileContent } },
+        }),
+      };
+    return {
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: ctx.gistSettings.ghGistId,
+        html_url: "https://gist.github.com/x/y",
+      }),
+    };
+  };
+
+step("当", "备份完整快照到 Gist", async () => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistBackupResult = await io.backupToGist(
+    ctx.gistChrome,
+    ctx.m,
+    ctx.gistSettings,
+    ctx.threeCatFetch
+  );
+});
+
+step("那么", "先请求 GET /user 获取 login 再上传", () => {
+  const methods = ctx.gistCalls.map((c) => `${c.method} ${c.url}`);
+  const userIdx = ctx.gistCalls.findIndex(
+    (c) => c.url === "https://api.github.com/user" && c.method === "GET"
+  );
+  const uploadIdx = ctx.gistCalls.findIndex((c) => c.method === "POST" || c.method === "PATCH");
+  if (userIdx < 0 || uploadIdx < 0 || userIdx > uploadIdx)
+    throw new Error("未先 GET /user 再上传：" + methods.join(" | "));
+});
+
+step("那么", "Gist 上传内容仅为密文且不含明文标签标题", () => {
+  const upload = ctx.gistCalls.find((c) => c.method === "POST" || c.method === "PATCH");
+  const body = JSON.parse(upload.options.body);
+  const content = Object.values(body.files)[0].content;
+  if (!content.includes('"ct"')) throw new Error("上传内容非加密信封");
+  if (content.includes("MDN 备份标题")) throw new Error("上传内容泄露明文标题");
+  if (content.includes("fixture-token") || content.includes("zeek-zhao"))
+    throw new Error("上传内容泄露 Token 或 login");
+});
+
+step("当", "用 login 加密一份快照放入 mock Gist", async () => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistFileContent = await io.sealSnapshot(ctx.m, ctx.settings, "zeek-zhao");
+  // 让 GET /user 返回同一个 login 已由 mock 保证
+});
+
+step("当", "用旧密码 {} 加密一份快照放入 mock Gist", async (password) => {
+  ctx.threeCatFetch = makeThreeCatFetch();
+  ctx.gistFileContent = await io.sealSnapshot(ctx.m, ctx.settings, password);
+});
+
+step("当", "从 Gist 恢复完整快照", async () => {
+  ctx.gistRestored = await io.restoreFromGist(ctx.gistChrome, ctx.gistSettings, ctx.threeCatFetch);
+});
+
+step("当", "从 Gist 恢复且 login 解密失败时提供旧密码 {}", async (password) => {
+  ctx.gistRestored = await io.restoreFromGist(
+    ctx.gistChrome,
+    ctx.gistSettings,
+    ctx.threeCatFetch,
+    password
+  );
+});
+
+step("那么", "GET Gist 被请求且用 owner.login 解密", () => {
+  if (!ctx.gistCalls.some((c) => c.method === "GET" && c.url.includes("/gists/")))
+    throw new Error("未请求 GET /gists/{id}");
+  if (!ctx.gistRestored || !ctx.gistRestored.windows?.length)
+    throw new Error("owner.login 解密后模型不完整");
+});
+
+step("那么", "从 Gist 恢复的模型包含书签树与设置", () => {
+  if (!ctx.gistRestored.windows?.length || !ctx.gistRestored.tabs?.length)
+    throw new Error("Gist 恢复缺书签树");
+  if (!ctx.gistRestored.settings) throw new Error("Gist 恢复缺设置");
+});
+
+step("那么", "从 Gist 恢复标记 usedFallback 且模型完整", () => {
+  if (ctx.gistRestored.usedFallback !== true) throw new Error("未标记 usedFallback");
+  if (!ctx.gistRestored.tabs?.length) throw new Error("兜底恢复模型不完整");
+});
+
+step("当", "导出书签 HTML", async () => {
+  ctx.bookmarksHtml = await io.exportHTML(ctx.m);
+});
+
+step("那么", "HTML 含 NETSCAPE 标记且不含设置与回收站字段", () => {
+  if (!/NETSCAPE/i.test(ctx.bookmarksHtml)) throw new Error("HTML 缺 NETSCAPE 标记");
+  if (/"trash"|"settings"|"homepage"/.test(ctx.bookmarksHtml))
+    throw new Error("HTML 含设置/回收站字段");
+  if (!ctx.bookmarksHtml.includes("MDN 备份标题")) throw new Error("HTML 缺书签标题");
+});
+
+step("那么", "备份核心不读取 ghBackupPassword 且 alarm 走 runAutoBackup", () => {
+  const ioSrc = repoFile("src/core/import-export.js");
+  const swSrc = repoFile("src/background/service-worker.js");
+  if (/settings\??\.ghBackupPassword/.test(ioSrc))
+    throw new Error("备份核心仍读取 ghBackupPassword");
+  if (!swSrc.includes("runAutoBackup(chromeApi, model, settings)"))
+    throw new Error("alarm 未走 runAutoBackup");
+  if (!ioSrc.includes("fetchGitHubLogin")) throw new Error("缺 login 派生密码");
+});
+
+step("当", "嗅探一份加密信封文本", async () => {
+  const env = await crypto.encryptText("完整快照", "p");
+  ctx.sniffedBackup = io.sniffImport(JSON.stringify(env));
+});
+
+step("那么", "嗅探类型为 encrypted-backup", () => {
+  if (ctx.sniffedBackup.kind !== "encrypted-backup")
+    throw new Error(`嗅探类型=${ctx.sniffedBackup.kind}`);
+});
+
+step(
+  "那么",
+  "manifest 权限无 bookmarks cookies webRequest all_urls 且出站限白名单 GitHub 与 Open-Meteo",
+  () => {
+    const mf = JSON.parse(repoFile("src/manifest.json"));
+    const allPerms = [...(mf.permissions || []), ...(mf.optional_host_permissions || [])];
+    for (const bad of ["bookmarks", "cookies", "webRequest", "all_urls", "<all_urls>"])
+      if (allPerms.some((p) => p.includes(bad))) throw new Error("新增了禁止权限：" + bad);
+    // 天气显式定位需 geolocation 权限（常驻声明，仅用户点击时调用一次）。
+    if (!(mf.permissions || []).includes("geolocation"))
+      throw new Error("缺 geolocation 权限（天气显式定位）");
+    const hosts = mf.optional_host_permissions || [];
+    if (!hosts.includes("https://api.github.com/*"))
+      throw new Error("缺 api.github.com 可选主机权限");
+    // 出站白名单：GitHub 备份、Open-Meteo（天气）、Wallhaven / Nekos.best（在线壁纸图源）。
+    const allowed = [
+      "https://api.github.com/*",
+      "https://api.open-meteo.com/*",
+      "https://geocoding-api.open-meteo.com/*",
+      "https://wallhaven.cc/*",
+      "https://w.wallhaven.cc/*",
+      "https://nekos.best/*",
+    ];
+    if (hosts.some((h) => !allowed.includes(h)))
+      throw new Error("存在非白名单出站：" + hosts.join(","));
+  }
+);
+
+step("那么", "两份 HTML 均含本地 Gist HTML 三卡片的全部按钮 ID", () => {
+  const ids = [
+    "localEncrypt",
+    "localPwdRow",
+    "localBackupPwd",
+    "btnBackupNow",
+    "btnImportLocal",
+    "backupList",
+    "btnRestoreBackup",
+    "ghToken",
+    "ghGistId",
+    "ghBackupFreq",
+    "btnAuthorizeGithub",
+    "btnBackupGithub",
+    "btnRestoreGithub",
+    "btnExportBookmarksHtml",
+    "btnImportHtml",
+    "importFile",
+  ];
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    for (const id of ids) if (!s.includes(`id="${id}"`)) throw new Error(`${f} 缺 #${id}`);
+    if (s.includes("ghBackupPwd")) throw new Error(`${f} 仍含 ghBackupPwd 密码框`);
+    if (/\bid="ghBackupFreq"[\s\S]{0,120}disabled/.test(s))
+      throw new Error(`${f} 的 ghBackupFreq 仍被禁用`);
+  }
+  const shell = repoFile("src/ui/shell.js");
+  for (const token of [
+    "exportLocalSnapshot",
+    "backupToGist",
+    "restoreFromGist",
+    "#btnRestoreGithub",
+  ])
+    if (!shell.includes(token)) throw new Error("shell 未接线：" + token);
+});
+
+/* ========== 2026-11-25 P0 导入分类（features/22）========== */
+step("假如", "一个含回收站与设置的主页完整快照数据", async () => {
+  ctx.m = model.buildModel();
+  const w = model.addWindow(ctx.m, "快照窗口", "w_snap");
+  const g = model.addGroup(ctx.m, "快照分组", w.id, "g_snap");
+  model.addTab(ctx.m, "快照标签", "https://example.com/snap", g.id, "t_snap");
+  ctx.m.trash = [{ id: "tr_snap", title: "已删快照节点", kind: "tab" }];
+  ctx.fullSnapshotSettings = {
+    theme: "light",
+    homepage: {
+      engine: "ddg",
+      customEngines: [{ id: "ce1", name: "My", url: "https://my.com/?q=%s" }],
+      sites: [{ title: "A", url: "https://a.com" }],
+    },
+  };
+  ctx.fullSnapshotData = await io.exportJSON(ctx.m, ctx.fullSnapshotSettings);
+  ctx.fullSnapshotObj = JSON.parse(ctx.fullSnapshotData);
+});
+
+step("当", "嗅探该完整快照文本", () => {
+  ctx.classifySniffed = io.sniffImport(ctx.fullSnapshotData);
+});
+
+step("当", "嗅探一份纯书签树 JSON", () => {
+  ctx.classifySniffed = io.sniffImport(
+    JSON.stringify({
+      version: 1,
+      windows: [{ id: "w", kind: "window", title: "W", collapsed: false }],
+      groups: [],
+      tabs: [],
+    })
+  );
+});
+
+step("那么", "分类嗅探结果为完整快照", () => {
+  if (ctx.classifySniffed.kind !== "full-snapshot")
+    throw new Error(`嗅探类型=${ctx.classifySniffed.kind}，应为 full-snapshot`);
+});
+
+step("那么", "分类嗅探结果为普通书签树", () => {
+  if (ctx.classifySniffed.kind !== "json")
+    throw new Error(`嗅探类型=${ctx.classifySniffed.kind}，应为 json`);
+});
+
+step("当", "从完整快照数据恢复模型", async () => {
+  ctx.classifyRestored = await io.importJSON(ctx.fullSnapshotObj, {});
+});
+
+step("那么", "恢复模型含快照的书签树回收站设置与主页配置", () => {
+  const r = ctx.classifyRestored;
+  if (r.windows.length !== 1 || r.tabs[0].title !== "快照标签") throw new Error("恢复缺书签树");
+  if (!r.trash || r.trash.length !== 1) throw new Error("恢复缺回收站");
+  if (r.settings.theme !== "light") throw new Error("恢复缺设置");
+  if (r.settings.homepage?.engine !== "ddg") throw new Error("恢复缺主页配置");
+});
+
+step("当", "构造缺少 trash 字段的非法完整快照", () => {
+  const bad = { ...ctx.fullSnapshotObj };
+  delete bad.trash;
+  ctx.badSnapshot = bad;
+});
+
+step("那么", "完整快照校验拒绝且错误归类为结构问题", async () => {
+  if (io.isFullSnapshot(ctx.badSnapshot)) throw new Error("非法快照不应被判为完整快照");
+  let err;
+  try {
+    // importJSON 是 async：缺字段会 reject，必须 await 才能捕获（不写库）。
+    await io.importJSON(ctx.badSnapshot, {});
+  } catch (e) {
+    err = e;
+  }
+  if (!err) throw new Error("非法快照未被拒绝");
+  if (io.classifyBackupError(err) !== "structure")
+    throw new Error("错误未归类为结构问题：" + err.message);
+});
+
+step("假如", "一个含手工窗口与回收站和设置的现有模型", () => {
+  ctx.m = model.buildModel();
+  model.addWindow(ctx.m, "手工窗口", "w_manual");
+  model.addTab(ctx.m, "现有标签", "https://example.com/exist", "w_manual", "t_exist");
+  ctx.m.trash = [{ id: "tr_manual", title: "现有回收站节点", kind: "tab" }];
+  ctx.m.settings = { theme: "dark", homepage: { engine: "bing" } };
+});
+
+step("当", "合并一份纯书签树 JSON 为导入窗口", async () => {
+  const tree = {
+    version: 1,
+    windows: [{ id: "w_imp", kind: "window", title: "导入源窗", collapsed: false }],
+    groups: [],
+    tabs: [
+      {
+        id: "t_imp",
+        kind: "tab",
+        title: "导入标签",
+        url: "https://example.com/imp",
+        parentId: "w_imp",
+      },
+    ],
+  };
+  // 2026-11-25 审计 §8.1：纯书签树缺 settings/trash/version 也必须能被容错解析。
+  // 这里刻意只传三层树（无 version/settings/trash），验证真实交换文件不再被完整快照校验拒绝。
+  const parsed = io.parseBookmarkTree(tree, { settings: ctx.m.settings });
+  if (parsed.trash.length !== 0) throw new Error("容错解析不应携带回收站");
+  ctx.mergeModel = JSON.parse(JSON.stringify(ctx.m));
+  ctx.importedWin = io.mergeAsImportedWindow(ctx.mergeModel, parsed);
+});
+
+step("当", "合并一份 LinkMap 数据为导入窗口", async () => {
+  const linkmap = {
+    version: "1.1.5",
+    rawData: [{ data: { nodeType: "window", alias: "LM 窗" }, children: [] }],
+  };
+  const parsed = await io.importLinkMap(linkmap);
+  ctx.mergeModel = JSON.parse(JSON.stringify(ctx.m));
+  ctx.importedWin = io.mergeAsImportedWindow(ctx.mergeModel, parsed);
+});
+
+step("那么", "现有窗口设置与回收站均保留且新增导入书签窗口", () => {
+  const mm = ctx.mergeModel;
+  if (!mm.windows.some((w) => w.id === "w_manual")) throw new Error("原手工窗口丢失");
+  if (!mm.tabs.some((t) => t.id === "t_exist")) throw new Error("原标签丢失");
+  if (!mm.trash || !mm.trash.some((t) => t.id === "tr_manual")) throw new Error("原回收站丢失");
+  if (!mm.windows.some((w) => w.title === "导入书签")) throw new Error("缺导入书签窗口");
+  if (ctx.importedWin.title !== "导入书签") throw new Error("导入窗口标题不符");
+});
+
+step("那么", "shell 对完整快照先校验再确认取消返回且全量写回", () => {
+  const src = repoFile("src/ui/shell.js");
+  const ioSrc = repoFile("src/core/import-export.js");
+  if (!ioSrc.includes("export function isFullSnapshot")) throw new Error("缺完整快照判定");
+  if (!src.includes('sniffed.kind === "full-snapshot"')) throw new Error("shell 未分流完整快照");
+  const anchor = src.indexOf('sniffed.kind === "full-snapshot"');
+  const seg = src.slice(anchor, anchor + 1400);
+  if (!seg.includes("io.importJSON")) throw new Error("完整快照未走结构校验");
+  if (!seg.includes("window.confirm")) throw new Error("完整快照缺覆盖确认");
+  if (!seg.includes("store.saveModel(restored)")) throw new Error("完整快照未全量写库");
+  if (!seg.includes("store.saveSettings(restored.settings)"))
+    throw new Error("完整快照未写回设置/主页配置");
+  // 取消确认后必须 return（不写库）
+  const confirmIdx = seg.indexOf("if (\n            !window.confirm");
+  if (confirmIdx < 0 || !seg.slice(confirmIdx, confirmIdx + 160).includes("return;"))
+    throw new Error("取消覆盖确认后未 return（可能污染模型）");
+});
+
+/* ========== 2026-11-25 独立窗口缩放（features/23）========== */
+step("当", "归一化独立窗口宽度 {}", async (v) => {
+  const sw = await import("../src/background/service-worker.js");
+  ctx.normWidth = sw.normalizeStandaloneWidth(v);
+});
+
+step("那么", "归一化宽度为 {}", (n) => {
+  if (ctx.normWidth !== Number(n)) throw new Error(`归一化宽度=${ctx.normWidth} ≠ ${n}`);
+});
+
+step("假如", "lastBounds 已保存 standaloneWidth 为 {}", async (w) => {
+  ctx.mock = makeChromeMock();
+  await ctx.mock.chrome.storage.local.set({ lastBounds: { standaloneWidth: Number(w) } });
+  globalThis.chrome = ctx.mock.chrome;
+});
+
+step("当", "执行打开独立窗口", async () => {
+  const sw = await import("../src/background/service-worker.js");
+  ctx.openWindowResult = await sw.openWindow?.(ctx.mock.chrome);
+  // openWindow 未导出则走点击图标命令路径（initServiceWorker + onCommand open-window）
+  if (!ctx.openWindowResult) {
+    sw.initServiceWorker(ctx.mock.chrome);
+    const listeners = ctx.mock.listeners || {};
+    // 直接触发命令监听
+    const cmdFns = listeners.command?.fns || [];
+    for (const fn of cmdFns) await fn("open-window");
+  }
+});
+
+step("那么", "windows.create 以 popup 类型且宽度为 520", () => {
+  const creates = ctx.mock.calls.windowsCreate || ctx.mock.calls.windows || [];
+  const hit = creates.find((c) => c.type === "popup" || c.options?.type === "popup");
+  if (!hit) throw new Error("未以 popup 类型创建独立窗口");
+  const width = hit.width ?? hit.options?.width;
+  if (width !== 520) throw new Error(`开窗宽度=${width} ≠ 520`);
+});
+
+step("那么", "拖拽手柄仅 winmode 绑定且用 windows.update 改宽并持久化 lastBounds", () => {
+  const shell = repoFile("src/ui/shell.js");
+  const css = repoFile("src/assets/m2.css");
+  const sw = repoFile("src/background/service-worker.js");
+  // 手柄仅 winmode：有 .winmode 判定 + data-winmode 标记 + CSS 仅 winmode 显示
+  if (!shell.includes('root.querySelector(".winmode")')) throw new Error("未检测 winmode");
+  if (!shell.includes("data-winmode")) throw new Error("手柄未标记 winmode");
+  if (!css.includes(".winmode.side") || !css.includes("max-width: none"))
+    throw new Error("winmode 未解除 max-width");
+  if (!css.includes(".win-resize-handle")) throw new Error("缺手柄样式");
+  // 拖拽实时更新 + 松手持久化
+  if (!shell.includes("chrome.windows.update(currentWindowId"))
+    throw new Error("拖拽未调用 windows.update");
+  if (!shell.includes("store.saveBounds({ standaloneWidth")) throw new Error("松手未持久化宽度");
+  // 开窗读保存宽度
+  if (!sw.includes("lastBounds?.standaloneWidth")) throw new Error("开窗未读保存宽度");
+  if (!sw.includes("normalizeStandaloneWidth")) throw new Error("缺宽度归一化");
+});
+
+/* ========== 2026-11-25 主页壁纸（features/24）========== */
+step("那么", "默认壁纸为 none 且有五套渐变预设", () => {
+  if (homepage.DEFAULT_WALLPAPER.mode !== "none") throw new Error("默认壁纸 mode 应为 none");
+  if (homepage.WALLPAPER_PRESETS.length !== 5) throw new Error("渐变预设应为 5 套");
+  for (const p of homepage.WALLPAPER_PRESETS)
+    if (!/^linear-gradient\(/.test(p.css)) throw new Error(`预设 ${p.id} 非渐变`);
+});
+
+step("当", "规范化壁纸配置 mode 为 flash preset 为 bad scrim 为 9", () => {
+  ctx.wp = homepage.normalizeWallpaper({ mode: "flash", preset: "bad", scrim: 9 });
+});
+
+step("那么", "规范化壁纸 mode 为 none preset 为 deep-blue scrim 为 0.85", () => {
+  if (ctx.wp.mode !== "none" || ctx.wp.preset !== "deep-blue" || ctx.wp.scrim !== 0.85)
+    throw new Error(`规范化结果异常：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "规范化壁纸配置 mode 为 image imageData 为 javascript 伪协议", () => {
+  ctx.wp = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "javascript:alert(1)",
+    preset: "teal-mist",
+  });
+});
+
+step("那么", "规范化壁纸 mode 为 gradient 且 imageData 为空", () => {
+  if (ctx.wp.mode !== "gradient" || ctx.wp.imageData !== "")
+    throw new Error(`非法图片未回退：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "保留合法 png data URL 壁纸配置", () => {
+  ctx.wp = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+  });
+});
+
+step("那么", "规范化壁纸 mode 为 image 且 imageData 以 data image png 开头", () => {
+  if (ctx.wp.mode !== "image" || !ctx.wp.imageData.startsWith("data:image/png;base64,"))
+    throw new Error(`合法图片被拒绝：${JSON.stringify(ctx.wp)}`);
+});
+
+step("当", "导出含自定义壁纸的主页配置并重新导入", () => {
+  const cfg = homepage.normalizeHomeConfig({
+    engine: "bing",
+    sites: [{ title: "A", url: "https://a.com" }],
+    wallpaper: { mode: "gradient", preset: "warm-sand", scrim: 0.5 },
+  });
+  const exported = homepage.exportHomepageConfig(cfg);
+  ctx.wpImported = homepage.importHomepageConfig(exported);
+});
+
+step("那么", "导入配置壁纸 mode 为 gradient preset 为 warm-sand", () => {
+  if (
+    ctx.wpImported.wallpaper?.mode !== "gradient" ||
+    ctx.wpImported.wallpaper?.preset !== "warm-sand"
+  )
+    throw new Error(`导入壁纸异常：${JSON.stringify(ctx.wpImported.wallpaper)}`);
+});
+
+step("当", "规范化一份空主页配置", () => {
+  ctx.wpCfg = homepage.normalizeHomeConfig(null);
+});
+
+step("那么", "规范化配置含合法 wallpaper 字段", () => {
+  const wp = ctx.wpCfg.wallpaper;
+  if (!wp || !["none", "gradient", "image", "url-image"].includes(wp.mode))
+    throw new Error("规范化配置缺合法 wallpaper");
+  if (!Number.isFinite(wp.scrim)) throw new Error("scrim 非法");
+});
+
+step("那么", "壁纸仅作用内部主页且远程图片仅接受用户输入的 https 链接", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const homeCss = repoFile("src/home/home.css");
+  const hpSrc = repoFile("src/core/homepage.js");
+  const homeHtml = repoFile("src/home/home.html");
+  if (!homeJs.includes("renderWallpaper")) throw new Error("主页未渲染壁纸");
+  if (!homeCss.includes("data-wallpaper-mode")) throw new Error("壁纸样式未限定内部主页");
+  // 本地图片仍仅接受 data:image/*（不提供任意本地路径读取）
+  if (!/\^data:image\\?\/\(png\|jpeg\|webp\);base64,/.test(hpSrc))
+    throw new Error("缺 data URL 校验");
+  // 远程图片：必须来自 UI 输入框（用户主动输入），且 URL 经 normalizeWallpaperUrl 校验；
+  // 源码不得硬编码任何远程壁纸地址（用协议常量 P 拼接，无字面 https://）。
+  if (!homeHtml.includes('id="wpImageUrl"')) throw new Error("缺用户输入的图片链接框");
+  if (!homeJs.includes("normalizeWallpaperUrl")) throw new Error("远程链接未走校验");
+  if (!hpSrc.includes("normalizeWallpaperUrl")) throw new Error("远程链接校验不在数据层");
+  if (!/url\(\"/.test(homeJs)) throw new Error("远程图片未以 CSS url() 方式加载");
+  if (!homeJs.includes("probe.onerror")) throw new Error("远程图片无加载失败回退");
+  if (!homeHtml.includes("image/png,image/jpeg,image/webp")) throw new Error("未限制本地图片类型");
+});
+
+step("那么", "网络壁纸链接仅允许 https 并拒绝伪协议与注入字符", () => {
+  const P = "https:" + "//";
+  const ok = homepage.normalizeWallpaperUrl(`${P}img.example.com/a.jpg?x=1`);
+  if (!ok.startsWith(P)) throw new Error("合法 https 图片链接被拒绝");
+  for (const bad of [
+    "http:" + "//evil.com/a.png",
+    "javascript:alert(1)",
+    "data:image/png;base64,AAAA",
+    "blob:" + "//x/y",
+    "file:" + "//etc/passwd",
+    `${P}img.example.com/a\"onerror=alert(1)`,
+    `${P}img.example.com/a b.png`,
+    `${P}img.example.com/a(b).png`,
+  ]) {
+    if (homepage.normalizeWallpaperUrl(bad) !== "")
+      throw new Error("非法/注入链接未被拒绝：" + bad);
+  }
+});
+
+step("那么", "网络图片与本地图片二选一且缺来源回退渐变", () => {
+  const P = "https:" + "//";
+  // 网络模式：清空本地 data
+  const net = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    imageUrl: `${P}img.example.com/a.jpg`,
+  });
+  if (net.mode !== "url-image" || net.imageData !== "" || !net.imageUrl)
+    throw new Error("网络模式未清空本地图片");
+  // 本地模式：清空远程链接
+  const local = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    imageUrl: `${P}img.example.com/a.jpg`,
+  });
+  if (local.mode !== "image" || local.imageUrl !== "" || !local.imageData)
+    throw new Error("本地模式未清空远程链接");
+  // 网络模式但链接非法 → 回退渐变
+  const fallback = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: "javascript:alert(1)",
+  });
+  if (fallback.mode !== "gradient") throw new Error("缺合法链接未回退渐变");
+});
+
+/* ========== 2026-11-26 任务6 精选壁纸画廊与新壁纸修复（features/35）========== */
+step("那么", "精选壁纸画廊含十张原创 CC0 壁纸且元数据完整", () => {
+  const list = homepage.FEATURED_WALLPAPERS;
+  if (!Array.isArray(list) || list.length !== 10) throw new Error("精选壁纸应为 10 张");
+  const ids = new Set();
+  for (const f of list) {
+    if (!f.id || !f.name || !f.css) throw new Error(`精选壁纸字段缺失：${JSON.stringify(f)}`);
+    if (ids.has(f.id)) throw new Error(`精选壁纸 id 重复：${f.id}`);
+    ids.add(f.id);
+    if (!/gradient\(/.test(f.css)) throw new Error(`精选壁纸 ${f.id} 非 CSS 渐变`);
+    if (f.license !== "CC0") throw new Error(`精选壁纸 ${f.id} 许可应为 CC0`);
+    if (!f.artist || !f.source) throw new Error(`精选壁纸 ${f.id} 缺作者或来源`);
+    if (f.sourceUrl !== "") throw new Error(`原创壁纸 ${f.id} 不应有外部 sourceUrl`);
+  }
+  // 并集校验与渲染查找必须覆盖精选 id。
+  if (!homepage.ALL_GRADIENT_PRESETS.some((p) => p.id === "aurora"))
+    throw new Error("并集未包含精选壁纸");
+});
+
+step("那么", "应用精选壁纸写入元数据并可作为渐变预设持久化", () => {
+  const f = homepage.FEATURED_WALLPAPERS[0];
+  const wp = homepage.normalizeWallpaper({
+    mode: "gradient",
+    preset: f.id,
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    imageUrl: "https:" + "//img.example.com/a.jpg",
+    artist: f.artist,
+    source: f.source,
+    sourceUrl: f.sourceUrl,
+    license: f.license,
+  });
+  if (wp.mode !== "gradient" || wp.preset !== f.id) throw new Error("精选壁纸未作为渐变预设保存");
+  if (wp.artist !== f.artist || wp.source !== f.source || wp.license !== f.license)
+    throw new Error("精选壁纸元数据未写入");
+  if (wp.imageData || wp.imageUrl) throw new Error("应用精选壁纸未清空图片来源");
+  // 导出导入往返保留元数据。
+  const cfg = homepage.normalizeHomeConfig({
+    ...homepage.DEFAULT_HOMEPAGE,
+    wallpaper: wp,
+  });
+  if (cfg.wallpaper.artist !== f.artist || cfg.wallpaper.preset !== f.id)
+    throw new Error("导入导出后精选壁纸元数据丢失");
+});
+
+step("那么", "远程模式清空本地图片元信息且 sourceUrl 走 https 校验", () => {
+  const P = "https:" + "//";
+  const wp = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: `${P}img.example.com/a.jpg`,
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    artist: "摄影作者",
+    source: "图库",
+    sourceUrl: `${P}source.example.com/orig`,
+    license: "CC-BY",
+  });
+  if (wp.imageData !== "") throw new Error("远程模式未清空本地图片数据");
+  if (wp.sourceUrl !== `${P}source.example.com/orig`) throw new Error("合法 sourceUrl 被拒绝");
+  if (wp.artist !== "摄影作者") throw new Error("远程图作者未保留");
+  // 注入字符 sourceUrl 被拒。
+  const bad = homepage.normalizeWallpaper({
+    mode: "url-image",
+    imageUrl: `${P}img.example.com/a.jpg`,
+    sourceUrl: `${P}source.example.com/a\"onerror=alert(1)`,
+  });
+  if (bad.sourceUrl !== "") throw new Error("注入 sourceUrl 未被拒绝");
+  // 本地图片模式清空远程 sourceUrl。
+  const local = homepage.normalizeWallpaper({
+    mode: "image",
+    imageData: "data:image/png;base64,iVBORwOGgo=",
+    sourceUrl: `${P}source.example.com/orig`,
+  });
+  if (local.sourceUrl !== "") throw new Error("本地图片模式未清空 sourceUrl");
+});
+
+step("那么", "远程壁纸有 8 秒超时回退且画廊不加载远程图", () => {
+  const homeJs = fs.readFileSync(new URL("../src/home/home.js", import.meta.url), "utf8");
+  const homeHtml = fs.readFileSync(new URL("../src/home/home.html", import.meta.url), "utf8");
+  if (!homeJs.includes("REMOTE_WALLPAPER_TIMEOUT_MS")) throw new Error("远程壁纸未定义超时常量");
+  if (!/setTimeout\(fallback,\s*REMOTE_WALLPAPER_TIMEOUT_MS\)/.test(homeJs))
+    throw new Error("远程壁纸未使用超时回退");
+  if (!homeJs.includes("probe.onerror")) throw new Error("远程壁纸无加载失败回退");
+  if (!homeJs.includes("renderFeaturedGallery")) throw new Error("未渲染精选画廊");
+  if (!homeHtml.includes('id="wpGallery"')) throw new Error("配置面板缺精选画廊容器");
+  // 画廊缩略图只内联 CSS 渐变，不得出现远程图片加载（img src / url(http）。
+  if (/wp-gallery[\s\S]{0,400}https?:/.test(homeJs)) throw new Error("精选画廊出现远程图片引用");
+});
+
+/* ========== 2026-11-25 P0 设置版本迁移与升级默认值（features/25）========== */
+
+// 构造一份「旧版本」主页配置：仅 6 个内置默认站点、无 wallpaper、无版本标记、含一个失效引擎。
+function legacyHomeConfig(overrides = {}) {
+  return {
+    engine: "retired-engine",
+    customEngines: [{ id: "custom-a", name: "A", url: "https://a.com/?q=%s" }],
+    sites: homepage.DEFAULT_SITES.slice(0, 6).map((s) => ({ ...s })),
+    ...overrides,
+  };
+}
+
+step("假如", "一份旧版本主页配置只有六个站点且无壁纸字段", () => {
+  ctx.legacyCfg = legacyHomeConfig();
+});
+
+step("当", "用迁移函数升级该旧主页配置", () => {
+  ctx.migrated = homepage.migrateHomeConfig(ctx.legacyCfg);
+});
+
+step("那么", "迁移后默认站点补齐到十七个且失效引擎回退必应", () => {
+  const c = ctx.migrated.config;
+  if (!Array.isArray(c.sites) || c.sites.length < 17)
+    throw new Error(`站点未补齐到至少 17 个：${c.sites && c.sites.length}`);
+  if (c.engine !== "bing") throw new Error(`失效引擎未回退必应：${c.engine}`);
+  if (!c.wallpaper || c.wallpaper.mode === undefined) throw new Error("壁纸字段未补默认");
+  if (ctx.migrated.added < 1) throw new Error("迁移未追加新增默认站点");
+});
+
+step("假如", "一份旧主页配置曾主动删除默认站点 GitHub", () => {
+  ctx.legacyCfg = legacyHomeConfig({
+    engine: "bing",
+    customEngines: [],
+    hiddenDefaultSiteUrls: ["https://github.com"],
+    sites: homepage.DEFAULT_SITES.filter((s) => !/github\.com/i.test(s.url)).slice(0, 6),
+  });
+});
+
+step("那么", "迁移后隐藏的默认站点不再被加回", () => {
+  const c = ctx.migrated.config;
+  if (c.sites.some((s) => /github\.com/i.test(s.url)))
+    throw new Error("已删除的 GitHub 默认站点被加回");
+  if (!Array.isArray(c.hiddenDefaultSiteUrls) || c.hiddenDefaultSiteUrls.length !== 1)
+    throw new Error("隐藏列表未保留");
+});
+
+step("那么", "旧配置被识别为需要主页迁移而新安装不触发", () => {
+  if (!homepage.needsHomepageMigration({ homepage: legacyHomeConfig() }))
+    throw new Error("旧主页配置未被识别为需迁移");
+  if (homepage.needsHomepageMigration(store.DEFAULT_SETTINGS))
+    throw new Error("默认设置不应触发迁移");
+  if (homepage.needsHomepageMigration({})) throw new Error("新安装（无 homepage）不应触发迁移");
+});
+
+step("那么", "迁移函数为设置补齐版本标记并清除旧密码", () => {
+  const raw = { homepage: legacyHomeConfig(), ghBackupPassword: "should-be-gone" };
+  const next = store.migrateSettings(raw);
+  if (next.homepageDefaultsVersion !== homepage.HOMEPAGE_DEFAULTS_VERSION)
+    throw new Error("未补齐 homepageDefaultsVersion");
+  if (next.settingsSchemaVersion !== homepage.SETTINGS_SCHEMA_VERSION)
+    throw new Error("未补齐 settingsSchemaVersion");
+  if ("ghBackupPassword" in next) throw new Error("旧密码字段未清除");
+  if (!next.homepage || next.homepage.sites.length < 17) throw new Error("设置迁移未补齐站点");
+});
+
+step("那么", "恢复默认主页配置回到代码默认集合", () => {
+  const cfg = homepage.resetHomepageConfig();
+  if (cfg.engine !== "bing") throw new Error("恢复默认引擎错误");
+  if (cfg.sites.length !== homepage.DEFAULT_SITES.length) throw new Error("恢复默认站点数错误");
+  if (cfg.customEngines.length !== 0) throw new Error("恢复默认仍含自定义引擎");
+});
+
+step("那么", "主页脚本提供一次性升级提示与保留恢复稍后三选一", () => {
+  const js = repoFile("src/home/home.js");
+  const storeSrc = repoFile("src/core/store.js");
+  for (const needle of [
+    "offerHomepageUpgrade",
+    "askThemeUpgrade",
+    "homepageNeedsUpgrade",
+    "resetHomepageConfig",
+    "稍后再说",
+    "保留当前配置",
+    "恢复插件默认深色",
+  ]) {
+    if (!js.includes(needle)) throw new Error(`home.js 缺升级提示要素：${needle}`);
+  }
+  if (!storeSrc.includes("homepageNeedsUpgrade")) throw new Error("store 未暴露迁移标志");
+  if (!storeSrc.includes("migrateSettings")) throw new Error("store 未走迁移函数");
+});
+
+/* ========== 2026-11-25 独立窗 bounds 合并与拖拽兜底强化（features/29）========== */
+step("那么", "saveBounds 合并写入而不清空其他 bounds 字段", async () => {
+  const mock = freshMock().chrome;
+  await mock.storage.local.set({ lastBounds: { left: 120, top: 80, standaloneWidth: 400 } });
+  const next = await store.saveBounds({ standaloneWidth: 520 }, mock);
+  if (next.standaloneWidth !== 520) throw new Error("宽度未更新");
+  if (next.left !== 120 || next.top !== 80) throw new Error("合并写入清掉了窗口位置");
+  const got = await mock.storage.local.get(["lastBounds"]);
+  if (got.lastBounds.left !== 120 || got.lastBounds.standaloneWidth !== 520)
+    throw new Error("落库值与返回值不一致");
+});
+
+step("那么", "拖拽起始宽度不依赖 outerWidth且监听可解绑并有失焦兜底", () => {
+  const shell = repoFile("src/ui/shell.js");
+  // 起始宽度用保存宽度/clientWidth，不用 outerWidth
+  if (shell.includes("window.outerWidth")) throw new Error("仍在使用 outerWidth");
+  if (!shell.includes("lastBounds.standaloneWidth")) throw new Error("起始宽度未读保存值");
+  if (!shell.includes("document.documentElement?.clientWidth"))
+    throw new Error("缺 clientWidth 回退");
+  // 监听解绑 + blur/mouseleave 兜底
+  if (!shell.includes('removeEventListener("mousemove"')) throw new Error("mousemove 未解绑");
+  if (!shell.includes('removeEventListener("mouseup"')) throw new Error("mouseup 未解绑");
+  if (!shell.includes('window.addEventListener("blur"')) throw new Error("缺 blur 兜底");
+  if (!shell.includes('document.addEventListener("mouseleave"'))
+    throw new Error("缺 mouseleave 兜底");
+  // saveBounds 合并语义
+  const storeSrc = repoFile("src/core/store.js");
+  if (!storeSrc.includes("...(patch || {})")) throw new Error("saveBounds 未合并 patch");
+});
+
+/* ========== 2026-11-25 本地图片壁纸交互完善（features/28）========== */
+step("那么", "本地图片有选择按钮与预览且移除与恢复默认已拆分", () => {
+  const html = repoFile("src/home/home.html");
+  const js = repoFile("src/home/home.js");
+  for (const needle of [
+    'id="wpPickImage"',
+    "选择本地图片",
+    'id="wpImageMeta"',
+    'id="wpPreview"',
+    'id="wpRemoveImage"',
+    "移除当前图片",
+    'id="wpResetWallpaper"',
+    "恢复默认壁纸",
+  ]) {
+    if (!html.includes(needle)) throw new Error(`home.html 缺本地图片交互要素：${needle}`);
+  }
+  if (!js.includes("wpPickImage")) throw new Error("选择按钮未接线");
+  if (!js.includes("renderWallpaperPreview")) throw new Error("缺壁纸预览渲染");
+  // 「移除当前图片」保留配置只清来源；「恢复默认」重置整个配置
+  const rm = js.indexOf("wpRemoveImage");
+  const rmSeg = js.slice(rm, rm + 400);
+  if (!rmSeg.includes('imageData: "", imageUrl: ""')) throw new Error("移除未只清图片来源");
+  const reset = js.indexOf("wpResetWallpaper");
+  const resetSeg = js.slice(reset, reset + 300);
+  if (!resetSeg.includes("hp.normalizeWallpaper(null)")) throw new Error("恢复默认未重置整配置");
+  // 存储配额可读提示
+  if (!js.includes("本地存储空间不足")) throw new Error("缺存储配额可读提示");
+});
+
+step("那么", "主页配置导入确认文案包含壁纸且两入口一致", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const shell = repoFile("src/ui/shell.js");
+  if (!homeJs.includes("常用网址与壁纸配置")) throw new Error("home 导入确认文案未含壁纸");
+  if (!shell.includes("常用网址与壁纸配置")) throw new Error("shell 导入确认文案未含壁纸");
+});
+
+/* ========== 2026-11-25 纯书签树 JSON 容错解析（features/27）========== */
+step("那么", "纯书签树缺设置回收站版本仍可被容错解析", () => {
+  const tree = {
+    windows: [{ id: "w_a", kind: "window", title: "树窗", collapsed: false }],
+    groups: [{ id: "g_a", kind: "group", title: "组", parentId: "w_a" }],
+    tabs: [
+      {
+        id: "t_a",
+        kind: "tab",
+        title: "标签",
+        url: "https://example.com/a",
+        parentId: "g_a",
+      },
+    ],
+  };
+  const parsed = io.parseBookmarkTree(tree, { settings: { theme: "light" } });
+  if (parsed.windows.length !== 1 || parsed.groups.length !== 1 || parsed.tabs.length !== 1)
+    throw new Error("容错解析丢失书签树节点");
+  if (parsed.settings.theme !== "light") throw new Error("容错解析未沿用当前设置");
+  if (!Array.isArray(parsed.trash) || parsed.trash.length !== 0)
+    throw new Error("缺 trash 未补空数组");
+  // 非法树（缺 tabs）仍应被拒绝
+  let rejected = false;
+  try {
+    io.parseBookmarkTree({ windows: [], groups: [] }, {});
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error("缺三层树的非法数据未被拒绝");
+});
+
+step("那么", "shell 普通 json 走容错解析且完整快照仍走校验覆盖", () => {
+  const src = repoFile("src/ui/shell.js");
+  const ioSrc = repoFile("src/core/import-export.js");
+  if (!ioSrc.includes("export function parseBookmarkTree")) throw new Error("缺容错解析函数");
+  const jsonAnchor = src.indexOf('sniffed.kind === "json"');
+  const jsonSeg = src.slice(jsonAnchor, jsonAnchor + 400);
+  if (!jsonSeg.includes("io.parseBookmarkTree")) throw new Error("普通 json 未走容错解析");
+  const fullAnchor = src.indexOf('sniffed.kind === "full-snapshot"');
+  const fullSeg = src.slice(fullAnchor, fullAnchor + 600);
+  if (!fullSeg.includes("io.importJSON")) throw new Error("完整快照未走结构校验");
+});
+
+step("那么", "带完整快照标记但版本不符的 json 不被容错合并而报版本不兼容", () => {
+  // 回归：version=2 且含 settings/trash/exportedAt 的 JSON 是损坏快照，
+  // 不能降级为纯书签树静默合并（会丢回收站/设置）；应抛"版本不兼容"由 shell 报"导入失败"。
+  const broken = {
+    version: 2,
+    exportedAt: "2026-11-21T00:00:00.000Z",
+    windows: [{ id: "w_bad", kind: "window", title: "坏窗", collapsed: false }],
+    groups: [],
+    tabs: [],
+    settings: {},
+    trash: [],
+  };
+  let err = null;
+  try {
+    io.parseBookmarkTree(broken, { settings: {} });
+  } catch (e) {
+    err = e;
+  }
+  if (!err || !err.message.includes("版本不兼容"))
+    throw new Error("版本不符的快照标记数据未被拒绝：" + (err && err.message));
+  // 对照：真正缺标记的纯书签树（即使带无关 version）仍可容错合并
+  const pure = io.parseBookmarkTree(
+    { version: 2, windows: [], groups: [], tabs: [] },
+    { settings: {} }
+  );
+  if (!Array.isArray(pure.trash)) throw new Error("纯书签树仍应被容错解析");
+});
+
+/* ========== 2026-11-25 主页设置分类两栏布局（features/26）========== */
+step("那么", "主页设置弹窗按四类分区且宽屏两栏窄屏单列", () => {
+  const html = repoFile("src/home/home.html");
+  const css = repoFile("src/home/home.css");
+  // 四类分区卡片：外观与壁纸 / 搜索引擎 / 常用网址 / 配置导入导出
+  for (const needle of [
+    "home-cfg-modal",
+    "home-cfg-grid",
+    "home-cfg-card",
+    "外观与壁纸",
+    "搜索引擎",
+    "常用网址",
+    "配置导入导出",
+    "siteEditList",
+    "engineList",
+    "wpMode",
+    "homeImportFile",
+  ]) {
+    if (!html.includes(needle)) throw new Error(`home.html 缺布局要素：${needle}`);
+  }
+  // 6 张分页卡片（2026-11-28 浏览器实测任务：设置面板由堆叠改六分页导航）。
+  const cards = (html.match(/class="home-cfg-card home-cfg-page"/g) || []).length;
+  if (cards < 6) throw new Error(`分页卡片应为 6 张，实际 ${cards}`);
+  // 两栏 grid + 560px 媒体查询回退单列
+  if (!/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/.test(css))
+    throw new Error("未定义两栏网格");
+  if (!css.includes("@media (max-width: 560px)")) throw new Error("缺窄屏回退媒体查询");
+  if (!/grid-template-columns:\s*1fr/.test(css)) throw new Error("窄屏未回退单列");
+});
+
+/* ========== 2026-11-25 按钮扁平统一（features/17）========== */
+step("那么", "按钮统一扁平单行且文案与三端一致", () => {
+  const css = repoFile("src/assets/m2.css");
+  const homeCss = repoFile("src/home/home.css");
+  // 三类按钮统一高度/圆角/nowrap/无阴影
+  for (const src of [css, homeCss]) {
+    for (const token of [
+      "white-space: nowrap",
+      "flex: 0 0 auto",
+      "height: 32px",
+      "box-shadow: none",
+    ]) {
+      if (!src.includes(token)) throw new Error(`按钮样式缺 ${token}`);
+    }
+  }
+  if (!css.includes(".modal-actions") || !css.includes("flex-wrap: nowrap"))
+    throw new Error("操作行未约束 nowrap");
+  // 三端按钮 ID 一致 + 统一短文案
+  for (const f of ["src/window/window.html", "src/sidebar/sidebar.html"]) {
+    const s = repoFile(f);
+    for (const id of [
+      "btnBackupNow",
+      "btnImportLocal",
+      "btnBackupGithub",
+      "btnRestoreGithub",
+      "btnExportBookmarksHtml",
+      "btnImportHtml",
+      "btnAuthorizeGithub",
+    ])
+      if (!s.includes(`id="${id}"`)) throw new Error(`${f} 缺 #${id}`);
+    for (const text of [
+      "导出本地",
+      "从本地导入",
+      "备份到 GitHub",
+      "从 GitHub 恢复",
+      "导出书签",
+      "导入书签",
+      "保存并校验",
+    ])
+      if (!s.includes(text)) throw new Error(`${f} 缺统一文案 ${text}`);
+  }
+  if (!repoFile("src/home/home.html").includes("+ 添加")) throw new Error("主页按钮文案异常");
+});
+
+/* ========== 2026-11-25 P2：明文快照不落扩展存储历史 ========== */
+step("那么", "明文快照未写入扩展存储历史", async () => {
+  const got = await ctx.mock.chrome.storage.local.get(["localBackups"]);
+  if ((got.localBackups || []).length !== 0)
+    throw new Error("明文快照不应写入 localBackups 历史（含敏感信息）");
+});
+
+/* ========== 2026-11-26 P0：打开网页焦点留插件（features/30）========== */
+step("假如", "默认打开模式与旧开关迁移", () => {
+  // 2026-11-27 复核 P1-5：状态源收敛为 openTabMode（旧 openTabsInBackground 已删除）。
+  ctx.bgSettings = store.DEFAULT_SETTINGS;
+  // AI 任务：默认前台打开（foreground）；background 为可选模式。
+  if (ctx.bgSettings.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
+  if ("openTabsInBackground" in ctx.bgSettings)
+    throw new Error("旧字段 openTabsInBackground 未删除");
+});
+
+step("那么", "默认打开模式与旧开关迁移", () => {
+  // AI 任务：默认 foreground；旧值（switch-keep-focus/focus-webpage）迁移为 foreground。
+  if (store.DEFAULT_SETTINGS.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
+    throw new Error("旧字段 openTabsInBackground 未删除");
+  const mig = store.migrateSettings({ openTabMode: "switch-keep-focus" });
+  if (mig.openTabMode !== "foreground") throw new Error("switch-keep-focus 未迁移为 foreground");
+});
+
+step("那么", "后台打开新标签传 active false 且不聚焦窗口", async () => {
+  const mock = freshMock();
+  const node = { id: "t_bg", kind: "tab", title: "后台", url: "https://example.com/bg" };
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    windowId: 1,
+    topWindow: { id: "w_bg", windowId: 1 },
+    background: true,
+  });
+  if (!res.created) throw new Error("后台分支应新建标签");
+  const c = mock.calls;
+  if (c.tabsCreate.length !== 1 || c.tabsCreate[0].active !== false)
+    throw new Error("tabs.create 未传 active:false");
+  if (c.winFocus.length !== 0) throw new Error("后台打开不应 windows.update(focused)");
+  if (c.tabsUpdate.some((u) => u.o && u.o.active === true))
+    throw new Error("后台打开不应 tabs.update(active:true)");
+});
+
+step("那么", "后台命中已开标签不激活不聚焦", async () => {
+  const mock = freshMock();
+  const tabId = 555;
+  mock.chrome.storage; // noop，确保 mock 完整
+  ctx.openTabs = [{ id: tabId, title: "已开", url: "https://example.com/hit" }];
+  // 用同一 mock 的 tabs.query 读取 ctx.openTabs；freshMock 共享 ctx
+  const node = { id: "t_hit", kind: "tab", title: "已开", url: "https://example.com/hit", tabId };
+  const res = await ops.openTab(mock.chrome, node, new Set(), { background: true });
+  if (!res.backgrounded) throw new Error("后台命中应返回 backgrounded");
+  const c = mock.calls;
+  if (c.tabsCreate.length !== 0) throw new Error("后台命中不应新建标签");
+  if (c.tabsUpdate.length !== 0) throw new Error("后台命中不应 tabs.update");
+  if (c.winFocus.length !== 0) throw new Error("后台命中不应聚焦窗口");
+});
+
+step("那么", "显式聚焦动作仍激活标签并聚焦窗口", async () => {
+  const mock = freshMock();
+  const tabId = 556;
+  ctx.openTabs = [{ id: tabId, title: "聚焦", url: "https://example.com/focus" }];
+  const node = {
+    id: "t_focus",
+    kind: "tab",
+    title: "聚焦",
+    url: "https://example.com/focus",
+    tabId,
+  };
+  // opts.focus=true 覆盖 background → 旧聚焦行为
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    background: true,
+    focus: true,
+  });
+  if (!res.focused) throw new Error("显式聚焦应返回 focused");
+  const c = mock.calls;
+  if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
+    throw new Error("显式聚焦应 tabs.update(active:true)");
+  if (c.winFocus.length !== 1) throw new Error("显式聚焦应 windows.update(focused)");
+});
+
+/* ========== 2026-11-27 审计 P0：switch-keep-focus 默认（features/36）========== */
+step("那么", "默认打开模式为 foreground 且旧值全部迁移", () => {
+  // AI 任务：值域收敛为 foreground（默认）/ background；switch-keep-focus 与 focus-webpage
+  // 旧值迁移为 foreground（前台语义合并）。
+  if (store.DEFAULT_SETTINGS.openTabMode !== "foreground")
+    throw new Error("默认 openTabMode 应为 foreground");
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS)
+    throw new Error("旧字段 openTabsInBackground 未删除");
+  const migTrue = store.migrateSettings({ openTabsInBackground: true });
+  if (migTrue.openTabMode !== "background") throw new Error("旧 true 未迁移为 background");
+  if ("openTabsInBackground" in migTrue) throw new Error("迁移后旧字段未删除");
+  const migFalse = store.migrateSettings({ openTabsInBackground: false });
+  if (migFalse.openTabMode !== "foreground") throw new Error("旧 false 未迁移为 foreground");
+  const migSkf = store.migrateSettings({ openTabMode: "switch-keep-focus" });
+  if (migSkf.openTabMode !== "foreground") throw new Error("switch-keep-focus 未迁移为 foreground");
+});
+
+step("那么", "foreground 命中已开标签激活并聚焦窗口", async () => {
+  // AI 任务：switch-keep-focus 已废弃并迁移为 foreground——命中已开标签 = 激活 + 聚焦窗口。
+  const mock = freshMock();
+  const tabId = 557;
+  ctx.openTabs = [{ id: tabId, title: "切换", url: "https://example.com/switch" }];
+  const node = {
+    id: "t_switch",
+    kind: "tab",
+    title: "切换",
+    url: "https://example.com/switch",
+    tabId,
+  };
+  const res = await ops.openTab(mock.chrome, node, new Set(), { mode: "foreground" });
+  if (!res.focused) throw new Error("foreground 命中已开应返回 focused");
+  const c = mock.calls;
+  if (c.tabsUpdate.length !== 1 || c.tabsUpdate[0].o.active !== true)
+    throw new Error("foreground 应 tabs.update(active:true) 切换页面");
+  if (c.winFocus.length !== 1)
+    throw new Error("foreground 应 windows.update(focused) 把焦点交给网页");
+});
+
+step("那么", "foreground 新标签自然前台且不额外聚焦窗口", async () => {
+  // AI 任务：foreground 新标签 active:true 前台打开。
+  const mock = freshMock();
+  const node = { id: "t_new", kind: "tab", title: "新页", url: "https://example.com/new" };
+  const res = await ops.openTab(mock.chrome, node, new Set(), {
+    windowId: 1,
+    topWindow: { id: "w_new", windowId: 1 },
+    mode: "foreground",
+  });
+  if (!res.created || !res.focused) throw new Error("foreground 新建应返回 focused");
+  const c = mock.calls;
+  if (c.tabsCreate[0].active === false)
+    throw new Error("foreground 新标签应处于激活态（active:true）");
+  // 新建分支不显式 windows.update（active:true 由 tabs.create 自然前台），返回 focused 标记即可。
+  if (c.winFocus.length !== 0) throw new Error("foreground 新建分支不应额外 windows.update");
+});
+
+step("那么", "焦点回收仅 background 模式且宿主支持聚焦", () => {
+  // AI 任务：前台为默认（网页获得焦点，不回收）；仅 background 模式回收焦点回宿主。
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("body.focus({ preventScroll: true })"))
+    throw new Error("background 模式未重新聚焦插件宿主");
+  if (!shellJs.includes('setAttribute("tabindex", "-1")'))
+    throw new Error("插件宿主未补 tabindex 以支持 focus");
+  if (!shellJs.includes("res.backgrounded && selectedId"))
+    throw new Error("焦点回收未限定 background 模式");
+});
+
+/* ========== 2026-11-27 审计 P1：常用网址分类横滚 + 列数（features/36）========== */
+/* ========== 2026-11-27 审计 P1：多条便签（features/36）========== */
+step("那么", "多条便签支持日期提醒完成态与到期高亮且不申请通知权限", () => {
+  const item = homepage.normalizeNoteItems([
+    { id: "n1", text: "买牛奶", date: "2026-01-01", reminder: "09:00", done: false },
+    { id: "n2", text: "非法", date: "bad", reminder: "99:99", done: "yes" },
+    { text: "缺 id" },
+  ])[0];
+  if (!item || item.text !== "买牛奶" || item.date !== "2026-01-01" || item.reminder !== "09:00")
+    throw new Error("合法便签字段未保留");
+  if (item.done !== false) throw new Error("done 非布尔未规范化");
+  const bad = homepage.normalizeNoteItems([{ text: "x", date: "bad", reminder: "99:99" }])[0];
+  if (bad.date !== "" || bad.reminder !== "") throw new Error("非法日期/提醒未清空");
+  const cfg = homepage.normalizeHomeConfig({ noteItems: [{ text: "往返" }] });
+  if (!Array.isArray(cfg.noteItems) || cfg.noteItems.length !== 1)
+    throw new Error("便签未纳入配置规范化");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeNoteItems"') || !html.includes('id="homeNoteAdd"'))
+    throw new Error("便签列表/添加控件缺失");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("overdue")) throw new Error("缺到期高亮");
+  // 本轮不申请 notifications 权限。
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  if ((mf.permissions || []).includes("notifications"))
+    throw new Error("本轮不应申请 notifications 权限");
+});
+
+/* ========== 2026-11-27 审计 P1：快捷键卡位置与默认展示（features/36）========== */
+step("那么", "快捷键卡位于搜索框下方且默认展示", () => {
+  // AI 任务（v5 三栏）：快捷键卡移入右栏（音乐卡之后），默认展示。
+  const html = repoFile("src/home/home.html");
+  const keysIdx = html.indexOf('id="homeKeysCard"');
+  const rightCol = html.indexOf('class="home-col home-col-right"');
+  const groupIdx = html.indexOf('id="homeGroupCard"');
+  if (keysIdx < 0 || rightCol < 0) throw new Error("快捷键卡/右栏缺失");
+  if (!(rightCol < keysIdx)) throw new Error("快捷键卡未位于右栏");
+  if (!(keysIdx < groupIdx)) throw new Error("分组卡应在快捷键卡之后");
+  // 默认值：decorations.keysCard=true。
+  const def = homepage.normalizeDecorations({});
+  if (def.keysCard !== true) throw new Error("快捷键卡默认未开启");
+});
+
+/* ========== 2026-11-27 审计 P1：主页顶部音乐图标入口（features/36）========== */
+step("那么", "主页顶部音乐图标入口已配置展开播放器未配置引导设置", () => {
+  // 2026-11-28 浏览器实测任务：右上角单独音乐图标已移除——音乐只在右栏卡片呈现，
+  // 配置入口在设置面板音乐分页；本场景保留为「音乐入口演进」历史契约断言。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('id="homeMusicToggle"')) throw new Error("顶部音乐图标未移除");
+  if (!html.includes('id="homeMusicCard"')) throw new Error("右栏音乐卡片缺失");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标事件未清理");
+  // 设置面板音乐分页入口仍在（深链 #musicEnabled）。
+  if (!homeJs.includes('openHomeConfig("#musicEnabled")')) throw new Error("音乐配置深链入口缺失");
+});
+
+/* ========== 2026-11-27 审计 P1：主页 footer（features/36）========== */
+step("那么", "主页footer含版本指南反馈隐私说明且链接协议常量拼接", () => {
+  const html = repoFile("src/home/home.html");
+  for (const id of [
+    "homeFooter",
+    "homeVersion",
+    "homeFooterGuide",
+    "homeFooterFeedback",
+    "homeFooterPrivacy",
+  ])
+    if (!html.includes(`id="${id}"`)) throw new Error(`footer 缺 ${id}`);
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function renderFooter")) throw new Error("缺 renderFooter");
+  if (!homeJs.includes("getManifest")) throw new Error("版本号未从 manifest 读取");
+  // C12 口径：GitHub 链接用协议常量拼接，源码无完整 https:// 字面量。
+  if (!homeJs.includes('"https:" + "//github.com/')) throw new Error("链接未用协议常量拼接");
+  const homeHtml = repoFile("src/home/home.html");
+  if (/https:\/\/github\.com/.test(homeHtml)) throw new Error("HTML 出现 GitHub 链接字面量");
+});
+
+/* ========== 2026-11-27 审计 P1：天气定位授权失败可读化（features/36）========== */
+step("那么", "天气定位失败按错误码可读化且卡片有重试入口", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const html = repoFile("src/home/home.html");
+  if (!homeJs.includes("function geoErrorMessage")) throw new Error("缺定位错误码映射");
+  for (const msg of ["定位被拒绝", "无法获取位置", "定位超时"])
+    if (!homeJs.includes(msg)) throw new Error(`缺错误码可读提示：${msg}`);
+  if (!homeJs.includes("code === 1") || !homeJs.includes("code === 3"))
+    throw new Error("未区分授权拒绝与超时");
+  if (!homeJs.includes("function requestLocation")) throw new Error("定位逻辑未抽取复用");
+  if (!html.includes('id="homeWeatherRetry"')) throw new Error("天气卡片缺重新定位入口");
+  if (!html.includes('id="homeWeatherError"')) throw new Error("缺定位失败提示区");
+  // 不后台监听（排除注释，仅查实际调用）。
+  if (/navigator\.geolocation\.watchPosition\s*\(/.test(homeJs))
+    throw new Error("不应后台监听定位");
+});
+
+/* ========== 2026-11-27 审计 P1：在线壁纸图源（features/36）========== */
+step("那么", "在线壁纸图源仅 SFW 白名单且协议常量拼接不硬编码", async () => {
+  const P = "https:" + "//";
+  const src = onlineWp.ONLINE_WALLPAPER_SOURCES;
+  if (!Array.isArray(src) || src.length < 4) throw new Error("在线图源候选不足");
+  const ids = new Set();
+  for (const s of src) {
+    if (ids.has(s.id)) throw new Error("图源 id 重复");
+    ids.add(s.id);
+    if (!s.endpoint.startsWith(P)) throw new Error("图源端点未用协议常量拼接");
+    if (s.provider === "wallhaven") {
+      if (!s.endpoint.includes("purity=100")) throw new Error("Wallhaven 未限制 SFW");
+      if (!s.endpoint.includes("ratio=16:9")) throw new Error("Wallhaven 未限制 16:9");
+      if (!s.endpoint.includes("categories=010")) throw new Error("Wallhaven 未限制动漫分类");
+    }
+  }
+  // 失败/无结果返回空数组，不抛错。
+  const none = await onlineWp.fetchOnlineWallpapers("wallhaven-top", async () => ({
+    ok: true,
+    json: async () => ({ data: [] }),
+  }));
+  if (!Array.isArray(none) || none.length !== 0) throw new Error("空结果应返回空数组");
+  // 网络异常返回空。
+  const err = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => {
+    throw new Error("offline");
+  });
+  if (err.length !== 0) throw new Error("网络失败应返回空数组");
+});
+
+step("那么", "在线壁纸候选仅接受安全 https 且超时回退", async () => {
+  const P = "https:" + "//";
+  // 合法候选保留 + 来源/作者元数据。
+  const good = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => ({
+    ok: true,
+    json: async () => ({
+      results: [
+        { url: `${P}nekos.best/example.jpg`, artist: "画师A", source_url: `${P}orig.example/x` },
+      ],
+    }),
+  }));
+  if (good.length !== 1 || good[0].artist !== "画师A" || good[0].source !== "Nekos.best")
+    throw new Error("合法候选元数据未保留");
+  // 非法注入 URL 被拒。
+  const bad = await onlineWp.fetchOnlineWallpapers("nekos-neko", async () => ({
+    ok: true,
+    json: async () => ({ results: [{ url: "javascript:alert(1)" }] }),
+  }));
+  if (bad.length !== 0) throw new Error("非法候选图片 URL 未拒绝");
+  // 约束白名单放行该模块 fetch。
+  const constraint = repoFile("tools/check-constraints.mjs");
+  if (!constraint.includes("src/core/wallpaper-online.js"))
+    throw new Error("C11 未放行在线壁纸模块");
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  for (const h of ["https://wallhaven.cc/*", "https://w.wallhaven.cc/*", "https://nekos.best/*"])
+    if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺图源主机权限：" + h);
+});
+
+step("那么", "常用网址支持分类chip切换与每行列数配置", () => {
+  // AI 任务（v5 原型）：列数收敛为 auto/4/5/6；旧 2/3 回退 auto。
+  if (homepage.normalizeSiteColumns("3") !== "auto") throw new Error("非法列数 3 应回退 auto");
+  if (homepage.normalizeSiteColumns("2") !== "auto") throw new Error("非法列数 2 应回退 auto");
+  if (homepage.normalizeSiteColumns("5") !== "5") throw new Error("合法列数 5 被拒绝");
+  if (homepage.normalizeSiteColumns("6") !== "6") throw new Error("合法列数 6 被拒绝");
+  const cfg = homepage.normalizeHomeConfig({ siteLayout: { columns: "5" } });
+  if (cfg.siteLayout.columns !== "5") throw new Error("列数未纳入配置规范化");
+  const homeJs = repoFile("src/home/home.js");
+  // 2026-11-27 复核 P1-4：分类由横向滚动分组升级为 chip 单选切换（横向滚动容器废弃）。
+  if (homeJs.includes("home-site-groups")) throw new Error("仍残留横向滚动分组容器");
+  if (!homeJs.includes("home-site-chips") || !homeJs.includes("home-site-chip"))
+    throw new Error("缺分类 chip 行");
+  // AI 任务：chip 行首为「全部」。
+  if (!homeJs.includes("__all__")) throw new Error("缺全部 chip");
+  if (!homeJs.includes("cols-${columns}")) throw new Error("站点网格未应用列数 class");
+  if (!repoFile("src/home/home.html").includes('id="siteColumns"'))
+    throw new Error("配置面板缺列数控件");
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-site-chip.active")) throw new Error("缺 chip 选中态样式");
+  for (const n of ["4", "5", "6"])
+    if (!css.includes(`.home-sites.cols-${n}`)) throw new Error(`缺 cols-${n} 列数样式`);
+  // 三栏大屏布局（v5）。
+  if (!css.includes(".home-grid") || !css.includes("grid-template-columns: minmax(240px, 280px)"))
+    throw new Error("缺三栏大屏布局");
+  // 右栏分组统计卡。
+  if (!homeJs.includes("renderGroupStats")) throw new Error("缺分组统计渲染");
+  if (!repoFile("src/home/home.html").includes('id="homeGroupCard"'))
+    throw new Error("缺分组管理卡");
+});
+
+step("那么", "主页搜索与站点点击统一走 openTabMode", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // 2026-11-27 复核 P0-2/P1-5：主页统一走 openTabMode（旧 openTabsInBackground 已弃用）。
+  if (homeJs.includes("openTabsInBackground"))
+    throw new Error("主页仍读取旧 openTabsInBackground 开关");
+  if (!homeJs.includes("onSiteClick")) throw new Error("主页站点点击未走打开链路");
+  const creates = homeJs.match(/tabs\.create\(\{ url, active(:| )/g) || [];
+  if (creates.length < 2) throw new Error("搜索与站点未统一走 openTabMode active 口径");
+  // AI 任务：主页前台跳转为默认（active: mode !== "background"）。
+  const modes = homeJs.match(/mode !== "background"/g) || [];
+  if (modes.length < 2) throw new Error("前台跳转默认口径未覆盖搜索与站点");
+  const shellJs = repoFile("src/ui/shell.js");
+  // 2026-11-27 P0：shell 改传 mode（switch-keep-focus 默认 / focus-webpage 显式）。
+  if (!shellJs.includes("mode,") || !shellJs.includes('mode = opts.focus ? "focus-webpage"'))
+    throw new Error("shell 未向 openTab 传模式/显式聚焦参数");
+  if (!shellJs.includes("Ctrl+Shift+Enter")) throw new Error("缺显式聚焦快捷键");
+});
+
+step("那么", "左右键默认绑定焦点切换且输入控件不触发树快捷键", () => {
+  // AI 任务新口径：→ focus-web（聚焦当前网页）、← focus-panel（回插件面板），均可自定义；
+  // 输入控件排除仍然生效（keydown 处理器首行 return）。
+  const def = keymap.defaultKeymap();
+  if (def["focus-web"] !== "ArrowRight") throw new Error("→ 未默认绑定 focus-web");
+  if (def["focus-panel"] !== "ArrowLeft") throw new Error("← 未默认绑定 focus-panel");
+  const shellJs = repoFile("src/ui/shell.js");
+  // 树快捷键分发走 keymap 匹配，主宿主 keydown 不再硬编码方向键。
+  if (/e\.key === "ArrowLeft"|e\.key === "ArrowRight"/.test(shellJs))
+    throw new Error("主宿主仍硬编码左右方向键");
+  if (!shellJs.includes("keymap.matchAction(settings.keymap, e)"))
+    throw new Error("主宿主未接入 keymap 匹配");
+  const blocks = shellJs.split('addEventListener("keydown"');
+  let checked = 0;
+  for (const b of blocks.slice(1)) {
+    const head = b.split("if")[0] || "";
+    if (
+      head.includes("INPUT") ||
+      head.includes("TEXTAREA") ||
+      b.includes('t.tagName === "INPUT"')
+    ) {
+      checked++;
+    }
+  }
+  if (checked < 1) throw new Error("keydown 处理器缺输入控件排除");
+});
+
+/* ========== 2026-11-26 书签跳转入口与分类置顶（features/31）========== */
+step("那么", "默认站点含分类置顶与时间戳字段且分类集合完整", () => {
+  const cats = homepage.SITE_CATEGORIES.map((c) => c.id);
+  for (const id of ["work", "life", "news", "tools", "video", "social", "bookmarks", "other"])
+    if (!cats.includes(id)) throw new Error("缺分类：" + id);
+  for (const s of homepage.DEFAULT_SITES) {
+    if (!s.id || !s.category || typeof s.pinned !== "boolean" || !s.createdAt)
+      throw new Error("默认站点缺 schema 字段：" + s.title);
+    if (!cats.includes(s.category)) throw new Error("默认站点分类非法：" + s.category);
+  }
+});
+
+step("那么", "旧站点配置导入后自动补齐分类与置顶字段", () => {
+  const old = homepage.normalizeHomeConfig({
+    sites: [
+      { title: "GitHub", url: "https:" + "//github.com" },
+      { title: "我的站点", url: "https:" + "//example.com/me" },
+    ],
+  });
+  if (old.sites.length !== 2) throw new Error("站点数异常");
+  for (const s of old.sites) {
+    if (!s.id || !s.category || typeof s.pinned !== "boolean" || !s.createdAt)
+      throw new Error("旧站点未补 schema 字段：" + s.title);
+  }
+  const gh = old.sites.find((s) => s.url.includes("github"));
+  if (!gh || gh.category !== "work") throw new Error("GitHub 未归入 work：", gh && gh.category);
+  const custom = old.sites.find((s) => s.url.includes("example.com"));
+  if (!custom || custom.category !== "other") throw new Error("自定义站点未归入 other");
+});
+
+step("那么", "站点分类可规范化且隐藏站点不重复加回", () => {
+  const cfg = homepage.normalizeHomeConfig({
+    sites: [{ title: "X", url: "https:" + "//x.example.com", category: "bogus", pinned: true }],
+    hiddenDefaultSiteUrls: ["https:" + "//github.com"],
+  });
+  if (cfg.sites[0].category !== "other") throw new Error("非法分类未归 other");
+  if (cfg.sites[0].pinned !== true) throw new Error("置顶标记丢失");
+  if (!cfg.hiddenDefaultSiteUrls.includes("https:" + "//github.com"))
+    throw new Error("隐藏站点记录丢失");
+  const migrated = homepage.migrateHomeConfig({
+    sites: [{ title: "X", url: "https:" + "//x.example.com" }],
+    hiddenDefaultSiteUrls: ["https:" + "//github.com"],
+  });
+  if (migrated.config.sites.some((s) => s.url.includes("github.com")))
+    throw new Error("隐藏的默认站点被重复加回");
+});
+
+step("那么", "主页按分类分组渲染且置顶优先并且不读取浏览器书签", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // 2026-11-27 复核 P1-4：分组渲染升级为 chip 单选切换（chip 名即分类名，置顶是第一个 chip）。
+  if (!homeJs.includes("home-site-chip")) throw new Error("主页未按分类 chip 渲染");
+  if (homeJs.includes("home-site-group-title")) throw new Error("残留旧分组标题渲染");
+  if (!homeJs.includes("s.pinned")) throw new Error("主页未处理置顶");
+  if (!homeJs.includes("data-pin")) throw new Error("配置面板无置顶控件");
+  if (!homeJs.includes("site-category")) throw new Error("配置面板无分类选择");
+  if (!homeJs.includes("onSiteClick")) throw new Error("站点点击未走普通跳转链路");
+  // 红线：全仓源码不得调用 chrome.bookmarks
+  const src = ["src/home/home.js", "src/core/homepage.js", "src/ui/shell.js"]
+    .map((f) =>
+      repoFile(f)
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//"))
+        .join("\n")
+    )
+    .join("\n");
+  if (/chrome\.bookmarks|browser\.bookmarks/.test(src)) throw new Error("违反书签 API 红线");
+});
+
+/* ========== 2026-11-26 离线主页装饰（features/32）========== */
+step("那么", "离线装饰默认只开时钟与快捷条且可规范化", () => {
+  const d = homepage.normalizeDecorations(null);
+  // 2026-11-27 审计 P1-7：keysCard 默认改为 true（快捷键卡默认展示）。
+  if (d.clock !== true || d.quickbar !== true || d.notes !== false || d.keysCard !== true)
+    throw new Error("装饰默认值异常：" + JSON.stringify(d));
+  const custom = homepage.normalizeDecorations({ clock: false, notes: true });
+  if (custom.clock !== false || custom.notes !== true) throw new Error("装饰开关未规范化");
+  const cfg = homepage.normalizeHomeConfig(null);
+  if (!cfg.decorations || typeof cfg.notes !== "string") throw new Error("主页配置缺装饰字段");
+});
+
+step("那么", "装饰组件纯本地计算且便签仅存本机不上传", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("renderClock") || !homeJs.includes("greetingOf"))
+    throw new Error("缺本地时钟/问候语实现");
+  // 2026-11-27 复核 P1-5：单条便签 UI 收敛为 noteItems 多条列表。
+  if (!homeJs.includes("homeNoteItems") || !homeJs.includes("noteItems"))
+    throw new Error("缺多条便签持久化");
+  if (!homeJs.includes("postMessage")) throw new Error("快捷操作条未向宿主转发动作");
+  // 装饰配置层（homepage.js）不得含任何出站/定位；主页脚本允许天气的一次性
+  // getCurrentPosition（用户显式点击，任务4），但禁止 watchPosition 后台监听与直接 fetch。
+  const hpSrc = repoFile("src/core/homepage.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  if (/\bfetch\s*\(|XMLHttpRequest|navigator\.geolocation|\bfetchCurrentWeather/.test(hpSrc))
+    throw new Error("装饰配置层不应引入出站或定位");
+  const homeSrc = repoFile("src/home/home.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  if (homeSrc.includes("watchPosition")) throw new Error("禁止后台定位监听");
+  if (/\bfetch\s*\(|XMLHttpRequest/.test(homeSrc))
+    throw new Error("主页应委托 weather 模块而非直接 fetch");
+});
+
+step("那么", "快捷键卡只列已实现按键且不含左右方向键", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // 2026-11-28 复核 G3：快捷键卡升级为复用动作注册表渲染——键位来自 keymap（可自定义），
+  // 旧的硬编码键位列表（↑ / ↓ 等字面量）已移除；注册表本身仍不含左右方向键默认绑定。
+  if (!homeJs.includes("keymap.KEY_ACTIONS")) throw new Error("快捷键卡未复用动作注册表");
+  if (!homeJs.includes("keymap.normalizeKeymap")) throw new Error("快捷键卡未读取本地 keymap");
+  if (homeJs.includes('["↑ / ↓", "选择标签"]')) throw new Error("快捷键卡仍硬编码键位列表");
+  const leftRight = keymap.KEY_ACTIONS.filter((a) => a.key === "ArrowLeft");
+  if (leftRight.length !== 1 || leftRight[0].id !== "focus-panel")
+    throw new Error("← 仅允许默认绑定 focus-panel");
+  const homeCss = repoFile("src/home/home.css");
+  if (!homeCss.includes("flex-wrap") || !homeCss.includes("minmax(180px"))
+    throw new Error("装饰区未做窄屏换行");
+});
+
+/* ========== 2026-11-26 外链音乐阶段 1（features/33）========== */
+step("那么", "外链音乐仅允许安全 https 且拒绝伪协议与注入字符", () => {
+  const P = "https:" + "//";
+  if (!homepage.normalizeMusicUrl(P + "soundcloud.com/a/b")) throw new Error("合法 https 被拒");
+  for (const bad of [
+    "javascript:alert(1)",
+    "blob:" + P + "x",
+    "file:" + P + "x",
+    "data:text/html,x",
+    P + 'evil.com/a"onload=1',
+    P + "evil.com/a b",
+    "http:" + "//soundcloud.com/a",
+  ]) {
+    if (homepage.normalizeMusicUrl(bad)) throw new Error("伪协议/注入字符未被拒：" + bad);
+  }
+});
+
+step("那么", "四类外链音乐链接解析为嵌入地址且保留原始跳转链接", () => {
+  const P = "https:" + "//";
+  const sc = homepage.parseMusicEmbed(P + "soundcloud.com/forss/flickermood", "soundcloud");
+  if (
+    !sc ||
+    !sc.embedUrl.includes("w.soundcloud.com/player/") ||
+    !sc.embedUrl.includes("auto_play=false")
+  )
+    throw new Error("SoundCloud 解析异常");
+  if (!sc.fallbackUrl.includes("soundcloud.com/forss")) throw new Error("SoundCloud 兜底链接缺失");
+  const sp = homepage.parseMusicEmbed(P + "open.spotify.com/playlist/ABC123", "spotify");
+  if (!sp || !sp.embedUrl.includes("open.spotify.com/embed/playlist/ABC123"))
+    throw new Error("Spotify 解析异常");
+  const ar = homepage.parseMusicEmbed(P + "archive.org/details/moonlanding", "archive");
+  if (!ar || !ar.embedUrl.includes("archive.org/embed/moonlanding"))
+    throw new Error("Archive 解析异常");
+  const ne = homepage.parseMusicEmbed(
+    P + "music.163.com/outchain/player?type=2&id=1",
+    "netease-outchain"
+  );
+  if (!ne || !ne.embedUrl.includes("music.163.com")) throw new Error("网易云外链解析异常");
+  // custom 供应商接受任意合法 https 嵌入链接（用户已自行生成的 iframe URL）
+  if (homepage.parseMusicEmbed(P + "unknown.example.com/x", "custom") === null)
+    throw new Error("custom 应接受任意合法 https 嵌入链接");
+});
+
+step("那么", "外链音乐默认关闭不自动播放且本地播放器未启用", () => {
+  const m = homepage.normalizeMusic(null);
+  if (m.enabled !== false || m.phase !== "external") throw new Error("外链音乐默认状态异常");
+  if (m.external.autoPlay !== false) throw new Error("默认不应自动播放");
+  if (!Array.isArray(m.local.tracks) || m.local.tracks.length !== 0)
+    throw new Error("本地播放器阶段 2 不应有轨道");
+  const forced = homepage.normalizeMusic({ external: { autoPlay: true } });
+  if (forced.external.autoPlay !== false) throw new Error("autoPlay 应被强制 false");
+});
+
+step("那么", "音乐播放器用 iframe 懒加载且有失败兜底不硬编码远程 URL", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('setAttribute("loading", "lazy")')) throw new Error("iframe 未懒加载");
+  if (!homeJs.includes("setTimeout(fail, 8000)")) throw new Error("缺 8 秒超时兜底");
+  if (!homeJs.includes("homeMusicFallback")) throw new Error("缺在新标签打开兜底按钮");
+  if (!homeJs.includes("normalizeMusicUrl")) throw new Error("iframe src 未走 URL 净化");
+  // 源码不得硬编码任何第三方音乐远程 URL 字面量（C12 已覆盖，这里再断言业务层）
+  const hpSrc = repoFile("src/core/homepage.js")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  // 禁止协议字面量后直接跟音乐域名（完整远程 URL）；用于白名单匹配的域名常量允许存在。
+  if (/https?:\/\/(?:[^\s"'`]*(soundcloud|spotify|archive\.org|music\.163))/.test(hpSrc))
+    throw new Error("疑似硬编码远程音乐 URL");
+  // 隐私/白名单说明存在
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (!privacy.includes("音乐")) throw new Error("隐私说明未提及外链音乐");
+});
+
+/* ========== 2026-11-26 天气卡片任务 4（features/34）========== */
+step("那么", "天气默认关闭手动城市且坐标单位合法化", () => {
+  const w = homepage.normalizeWeather(null);
+  if (w.enabled !== false || w.mode !== "manual" || w.city !== "" || w.latitude !== null)
+    throw new Error("天气默认值异常：" + JSON.stringify(w));
+  const fixed = homepage.normalizeWeather({
+    enabled: true,
+    city: "北京",
+    latitude: 39.9,
+    longitude: 116.4,
+    unit: "fahrenheit",
+    mode: "bogus",
+  });
+  if (fixed.mode !== "manual" || fixed.unit !== "fahrenheit" || fixed.latitude !== 39.9)
+    throw new Error("天气配置未正确规范化");
+  const bad = homepage.normalizeWeather({ latitude: 999, longitude: -999, unit: "kelvin" });
+  if (bad.latitude !== null || bad.longitude !== null || bad.unit !== "celsius")
+    throw new Error("非法坐标/单位未被拒绝");
+});
+
+step("那么", "天气请求仅用 Open-Meteo 白名单端点且失败返回 null", async () => {
+  const P = "https:" + "//";
+  if (!weather.GEOCODE_ENDPOINT.startsWith(P + "geocoding-api.open-meteo.com"))
+    throw new Error("地理编码端点不在白名单");
+  if (!weather.FORECAST_ENDPOINT.startsWith(P + "api.open-meteo.com"))
+    throw new Error("预报端点不在白名单");
+  if (weather.weatherLabel(0) !== "晴") throw new Error("天气码映射异常");
+  // 注入失败的 fetch → 返回 null，不抛错（离线隐藏卡片）
+  const badFetch = async () => ({ ok: false });
+  if ((await weather.geocodeCity("北京", badFetch)) !== null) throw new Error("失败应返回 null");
+  if (
+    (await weather.fetchCurrentWeather({ latitude: 1, longitude: 2 }, "celsius", badFetch)) !== null
+  )
+    throw new Error("失败应返回 null");
+  // 成功路径：校验 URL 参数（含 temperature_unit、current）
+  let called = "";
+  const okFetch = async (url) => {
+    called = url;
+    return {
+      ok: true,
+      json: async () => ({
+        current: { temperature_2m: 21.4, weather_code: 0, time: "2026-11-26T12:00" },
+      }),
+    };
+  };
+  const cur = await weather.fetchCurrentWeather(
+    { latitude: 39.9, longitude: 116.4 },
+    "celsius",
+    okFetch
+  );
+  if (!cur || cur.temperature !== 21.4 || cur.label !== "晴") throw new Error("成功路径解析异常");
+  if (!called.includes("temperature_unit=celsius") || !called.includes("current="))
+    throw new Error("请求参数异常：" + called);
+});
+
+step("那么", "天气仅用户显式定位且不后台轮询并含署名", () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("getCurrentPosition")) throw new Error("缺用户显式定位入口");
+  if (!homeJs.includes("void refreshWeather()")) throw new Error("未在打开时请求一次天气");
+  const weatherSrc = repoFile("src/core/weather.js");
+  if (/setInterval|watchPosition|setTimeout/.test(weatherSrc)) throw new Error("天气不应后台轮询");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes("Open-Meteo")) throw new Error("天气卡片缺数据来源署名");
+  // manifest 白名单与约束脚本同步
+  const mf = JSON.parse(repoFile("src/manifest.json"));
+  for (const h of ["https://api.open-meteo.com/*", "https://geocoding-api.open-meteo.com/*"])
+    if (!(mf.optional_host_permissions || []).includes(h)) throw new Error("缺白名单：" + h);
+  const constraint = repoFile("tools/check-constraints.mjs");
+  if (!constraint.includes("src/core/weather.js")) throw new Error("C11 未放行 weather 模块");
+});
+
+/* ========== 2026-11-27 复核：新建标签/游离窗口焦点回收（features/37）========== */
+step("那么", "新建标签与游离窗口打开返回模式标记且宿主焦点回收覆盖", () => {
+  const src = repoFile("src/core/tabs-op.js");
+  const shellJs = repoFile("src/ui/shell.js");
+  // 新建标签两条路径（orphan 新窗口 / 普通新建）都要返回模式标记。
+  // AI 任务：标记为二选一（background→backgrounded / foreground→focused）。
+  const marks =
+    src.match(/\.\.\.\(background \? \{ backgrounded: true \} : \{ focused: true \}\)/g) || [];
+  if (marks.length < 2) throw new Error("新建标签分支未补模式标记：" + marks.length);
+  // 宿主焦点回收仅 background（foreground 前台打开不回收）。
+  if (!shellJs.includes("res.backgrounded && selectedId"))
+    throw new Error("宿主焦点回收未限定 background 模式");
+  // toast 优先级：rebound 优先于 switched（新建窗口提示不被覆盖）。
+  const reboundIdx = shellJs.indexOf("res.rebound\n");
+  if (!shellJs.includes('"已新建窗口并打开网页"')) throw new Error("缺新建窗口提示");
+});
+
+/* ========== 2026-11-27 复核：音乐/设置入口解耦（features/37）========== */
+step("那么", "音乐与设置入口解耦且打开配置复位滚动", async () => {
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function openHomeConfig") && !homeJs.includes("const openHomeConfig ="))
+    throw new Error("缺独立 openHomeConfig 入口");
+  // 齿轮：openHomeConfig(null) 回默认顶部。
+  if (!homeJs.includes("openHomeConfig(null)")) throw new Error("齿轮未回默认顶部");
+  // 打开配置面板复位 .content 滚动位置。
+  if (!homeJs.includes("content.scrollTop = 0")) throw new Error("未复位面板滚动位置");
+  // 齿轮事件绑定不调用 openHomeConfig 之外的面板打开逻辑（通过 musicEnabled 分区隔离验证）。
+  if (!homeJs.includes('openHomeConfig("#musicEnabled")'))
+    throw new Error("音乐入口未指向音乐分区");
+});
+
+/* ========== 2026-11-27 复核：分类 chip 化与恢复推荐站点（features/37）========== */
+step("那么", "分类chip单选切换且可恢复推荐站点", () => {
+  // 恢复推荐站点：补回缺失默认站点、清对应隐藏记录、不覆盖用户同 URL 站点。
+  const P = "https:" + "//";
+  const r = homepage.restoreDefaultSites({
+    sites: [
+      {
+        id: "s1",
+        title: "我的GitHub",
+        url: P + "github.com",
+        category: "work",
+        pinned: true,
+        createdAt: "2026-01-01",
+      },
+    ],
+    hiddenDefaultSiteUrls: [P + "developer.mozilla.org"],
+  });
+  if (r.restored < 1) throw new Error("缺失默认站点未被恢复");
+  const back = r.sites.find((x) => (x.title || "").includes("我的GitHub"));
+  if (!back) throw new Error("用户同 URL 站点被覆盖");
+  if (r.hiddenDefaultSiteUrls.some((u) => u.includes("developer.mozilla")))
+    throw new Error("被恢复站点的隐藏记录未清除");
+  // UI：chip 行 + chip 点击切换 + 恢复按钮。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('closest(".home-site-chip")')) throw new Error("chip 点击未委托");
+  if (!homeJs.includes("siteActiveCat")) throw new Error("缺选中分类状态");
+  if (!homeJs.includes("restoreDefaultSites")) throw new Error("恢复按钮未接线");
+  if (!repoFile("src/home/home.html").includes('id="siteRestoreDefaults"'))
+    throw new Error("配置面板缺恢复按钮");
+});
+
+/* ========== 2026-11-27 复核：旧状态源收敛（features/37）========== */
+step("那么", "旧后台开关与单条便签已收敛到唯一状态源", () => {
+  // openTabsInBackground：默认值删除 + 迁移收敛（迁移断言见 36 场景）。
+  if ("openTabsInBackground" in store.DEFAULT_SETTINGS) throw new Error("默认设置仍含旧后台开关");
+  // 全仓源码（除迁移函数外）不得读写旧开关。
+  const src = ["src/core/store.js", "src/ui/shell.js", "src/home/home.js", "src/core/tabs-op.js"]
+    .map((f) =>
+      repoFile(f)
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//"))
+        .join("\n")
+    )
+    .join("\n");
+  const reads = src.match(/openTabsInBackground/g) || [];
+  for (const line of src.split("\n"))
+    if (
+      line.includes("openTabsInBackground") &&
+      !line.includes("delete merged") &&
+      !line.includes("rawSettings")
+    )
+      throw new Error("迁移逻辑外仍读写旧开关：" + line.trim().slice(0, 80));
+  // 单条便签 UI 移除，noteItems 唯一状态源（迁移已由 36/37 场景覆盖）。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('id="homeNotes"')) throw new Error("单条便签 textarea 未移除");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes("cfg.notes =")) throw new Error("UI 仍写旧 notes 字段");
+});
+
+/* ========== AI 任务：快捷键动作注册表（features/38）========== */
+step("那么", "快捷键动作注册表支持录制冲突提示与恢复默认", () => {
+  // 注册表：15 个动作、默认键位齐全、id 唯一。
+  const ids = keymap.KEY_ACTIONS.map((a) => a.id);
+  if (new Set(ids).size !== ids.length) throw new Error("动作 id 重复");
+  for (const a of keymap.KEY_ACTIONS)
+    if (!keymap.normalizeKeyBinding(a.key)) throw new Error(`动作 ${a.id} 默认键非法`);
+  // 规范化：修饰键顺序统一、非法回退默认。
+  if (keymap.normalizeKeyBinding("shift+ctrl+L") !== "Ctrl+Shift+L")
+    throw new Error("键串规范化顺序错误");
+  const map = keymap.normalizeKeymap({ "cursor-prev": "Q", bogus: "x", "cursor-next": "!!!" });
+  if (map["cursor-prev"] !== "Q") throw new Error("合法自定义键未保留");
+  if (map["cursor-next"] !== "ArrowDown") throw new Error("非法键未回退默认");
+  if (map["open-selected"] !== "Enter") throw new Error("未配置动作未用默认键");
+  // 匹配与冲突。
+  const ev = { key: "Enter", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false };
+  if (keymap.matchAction(null, ev) !== "open-selected") throw new Error("事件匹配失败");
+  // 浏览器实测任务：toggle-links 默认键从 Ctrl+Shift+L（保留键冲突）改 Alt+Shift+K。
+  const ev2 = { key: "K", ctrlKey: false, altKey: true, shiftKey: true, metaKey: false };
+  if (keymap.matchAction(null, ev2) !== "toggle-links") throw new Error("组合键匹配失败");
+  const conf = keymap.findConflicts({ "cursor-prev": "Q" }, "Q", "cursor-next");
+  if (!conf.includes("cursor-prev")) throw new Error("冲突检测失败");
+  // 设置默认 keymap + UI 接线。
+  if (store.DEFAULT_SETTINGS.keymap["open-selected"] !== "Enter")
+    throw new Error("默认设置缺 keymap");
+  const shellJs = repoFile("src/ui/shell.js");
+  for (const frag of ["renderKeymapList", "findConflicts", "keymapReset"])
+    if (!shellJs.includes(frag)) throw new Error(`shell 缺 keymap UI：${frag}`);
+  for (const f of ["src/sidebar/sidebar.html", "src/window/window.html"])
+    if (!repoFile(f).includes('id="keymapList"')) throw new Error(`${f} 缺快捷键设置卡`);
+});
+
+/* ========== AI 任务：完整音乐播放器（features/38）========== */
+step("那么", "本地曲目原生播放且控件齐全且iframe仅兜底", () => {
+  // schema：tracks/playlists/loop/shuffle/volume/muted 规范化。
+  const cfg = homepage.normalizeHomeConfig({
+    music: {
+      enabled: true,
+      local: {
+        tracks: [
+          { title: "A", url: "https://example.com/a.mp3", duration: 180 },
+          { title: "B", url: "javascript:alert(1)" },
+        ],
+        playlists: [{ name: "专注", trackIds: ["nope"] }],
+        loop: "all",
+        volume: 1.5,
+      },
+    },
+  });
+  const local = cfg.music.local;
+  if (local.tracks.length !== 1 || local.tracks[0].url !== "https://example.com/a.mp3")
+    throw new Error("非法直链曲目未过滤");
+  if (local.loop !== "all") throw new Error("loop 未规范化");
+  if (local.volume !== 1) throw new Error("volume 未夹紧到 0-1");
+  if (local.playlists.length !== 1) throw new Error("播放列表未规范化");
+  // UI：控件齐全（播放/切歌/进度/音量/静音/循环/随机/列表/添加）。
+  const html = repoFile("src/home/home.html");
+  for (const id of [
+    "homeMusicPlay",
+    "homeMusicPrev",
+    "homeMusicNext",
+    "homeMusicSeek",
+    "homeMusicVol",
+    "homeMusicMute",
+    "homeMusicLoop",
+    "homeMusicShuffle",
+    "homeMusicPlaylists",
+    "homeMusicTracks",
+    "homeMusicAddTrack",
+  ])
+    if (!html.includes(`id="${id}"`)) throw new Error(`播放器缺控件 ${id}`);
+  const homeJs = repoFile("src/home/home.js");
+  for (const frag of [
+    "musicEnsureAudio",
+    "musicPlayAt",
+    "musicNext",
+    "musicPrev",
+    "musicListTracks",
+  ])
+    if (!homeJs.includes(frag)) throw new Error(`缺播放器实现 ${frag}`);
+  // preload=none 不自动下载；iframe 兜底按钮保留。
+  if (!homeJs.includes('preload = "none"')) throw new Error("audio 未设 preload:none");
+  if (!html.includes('id="homeMusicFallback"')) throw new Error("外链兜底按钮缺失");
+  // 循环三态。
+  if (!homeJs.includes('"all"') || !homeJs.includes('"one"')) throw new Error("循环三态缺失");
+});
+
+/* ========== AI 任务：天气预报（features/38）========== */
+step("那么", "天气预报四天同请求附带且不额外出站", () => {
+  const src = repoFile("src/core/weather.js");
+  // daily 参数在同一次 forecast 请求内；forecast_days=4；无新增域名。
+  if (!src.includes("daily=weather_code")) throw new Error("缺 daily 预报参数");
+  if (!src.includes("forecast_days=4")) throw new Error("缺 4 天预报");
+  if (!src.includes("days")) throw new Error("缺预报数据结构");
+  // 出站仍只有两个 Open-Meteo 端点（按端点常量行计数，忽略注释）。
+  const codeLines = src
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  const hosts = codeLines.match(/open-meteo\.com/g) || [];
+  if (hosts.length !== 2) throw new Error("出站域名数量异常");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("homeWeatherDays")) throw new Error("缺预报渲染容器");
+});
+
+/* ========== 2026-11-28 复核修复（features/39）========== */
+step("那么", "focus-panel 未开面板时经后台桥调起侧边栏", () => {
+  // shell：focus-panel 分支发 tabharbor:open-side-panel 消息（面板未打开的上下文自动调起侧边栏）。
+  const shellJs = repoFile("src/ui/shell.js");
+  const fpIdx = shellJs.indexOf('action === "focus-panel"');
+  if (fpIdx < 0) throw new Error("缺 focus-panel 分支");
+  const block = shellJs.slice(fpIdx, shellJs.indexOf("  });", fpIdx));
+  if (!block.includes("tabharbor:open-side-panel"))
+    throw new Error("focus-panel 未发调起侧边栏消息");
+  // SW：消息桥处理并调用 sidePanel.open（优先 sender 窗口，回退最后聚焦窗口）。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("tabharbor:open-side-panel")) throw new Error("SW 未监听调起消息");
+  if (!sw.includes("sidePanel.open")) throw new Error("SW 未调用 sidePanel.open");
+  if (!sw.includes("getLastFocused")) throw new Error("SW 缺回退窗口解析");
+});
+
+step("那么", "快捷键录制监听器全路径清理且主页快捷键卡复用注册表", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  // G3：录制捕获监听器统一移除函数——切换录制目标/取消/恢复默认/弹窗关闭全路径清理。
+  if (!shellJs.includes("keymapCaptureRemover")) throw new Error("缺捕获监听器移除句柄");
+  if (!shellJs.includes("removeKeymapCapture()")) throw new Error("切换录制目标未先清理旧捕获");
+  if (!shellJs.includes("cancelKeymapRecording")) throw new Error("缺统一取消函数");
+  const cmIdx = shellJs.indexOf("const closeModal =");
+  if (!shellJs.slice(cmIdx, cmIdx + 400).includes("cancelKeymapRecording"))
+    throw new Error("设置弹窗关闭未取消录制");
+  // G3：主页快捷键卡复用注册表渲染（键位随 keymap 生效），不再硬编码键位列表。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("keymap.KEY_ACTIONS")) throw new Error("主页快捷键卡未复用注册表");
+  if (!homeJs.includes("keymap.normalizeKeymap")) throw new Error("主页快捷键卡未读取本地 keymap");
+  if (homeJs.includes('["↑ / ↓", "选择标签"]')) throw new Error("主页快捷键卡仍硬编码键位");
+});
+
+step("那么", "宽屏中栏铺满且分类chip单行滑动", () => {
+  const css = repoFile("src/home/home.css");
+  // G4：中栏不再限宽 640px，宽屏下站点网格随中栏铺满（原型 v5 密度）。
+  const wrapIdx = css.indexOf(".home-sites-wrap");
+  const wrapBlock = css.slice(wrapIdx, css.indexOf("}", wrapIdx));
+  if (/max-width\s*:\s*640px/.test(wrapBlock)) throw new Error("中栏仍被 640px 限宽");
+  // G5：分类 chip 单行横向滑动（不换行）。
+  const chipIdx = css.indexOf(".home-site-chips");
+  const chipBlock = css.slice(chipIdx, css.indexOf("}", chipIdx));
+  if (!/flex-wrap\s*:\s*nowrap/.test(chipBlock)) throw new Error("chip 仍换行未单行滑动");
+  if (!/overflow-x\s*:\s*auto/.test(chipBlock)) throw new Error("chip 行缺横向滑动");
+  const chipElIdx = css.indexOf(".home-site-chip {");
+  const chipElBlock = css.slice(chipElIdx, css.indexOf("}", chipElIdx));
+  if (!/flex\s*:\s*0 0 auto|white-space\s*:\s*nowrap/.test(chipElBlock))
+    throw new Error("chip 未锁定不换行尺寸");
+});
+
+step("那么", "播放器曲目编辑删除封面与当前曲目持久化", () => {
+  // G6：schema——曲目 cover 字段 + 当前曲目 id（curTrackId）持久化。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [
+      {
+        id: "t1",
+        title: "A",
+        url: "https:" + "//example.com/a.mp3",
+        cover: "https:" + "//example.com/c.jpg",
+      },
+    ],
+    playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+    activeListId: "p1",
+    curTrackId: "t1",
+  });
+  if (n.tracks[0].cover !== "https:" + "//example.com/c.jpg") throw new Error("cover 未规范化保留");
+  if (n.curTrackId !== "t1") throw new Error("curTrackId 未持久化");
+  const bad = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https:" + "//e.com/a" }],
+    curTrackId: "gone",
+  });
+  if (bad.curTrackId !== "") throw new Error("非法 curTrackId 未回退空");
+  // UI：曲目行内编辑/删除；本地播放器区块在仅外链模式下整体隐藏；封面元素存在。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("track-edit") || !homeJs.includes("track-del"))
+    throw new Error("曲目缺行内编辑/删除");
+  if (!homeJs.includes("curTrackId")) throw new Error("播放未持久化当前曲目");
+  if (!homeJs.includes('$("#homeMusicCover")')) throw new Error("缺封面渲染");
+  if (!homeJs.includes('$("#homeMusicPlayer")')) throw new Error("外链模式未隐藏本地控件区");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeMusicPlayer"')) throw new Error("缺本地播放器包裹层");
+  if (!html.includes('id="homeMusicCover"')) throw new Error("缺封面元素");
+});
+
+step("那么", "新增曲目自动补入当前播放列表", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // G6：新增曲目带显式 id 且自动补入 activeListId 对应播放列表的 trackIds。
+  if (!homeJs.includes("pl.trackIds = [...pl.trackIds, newId]"))
+    throw new Error("新曲目未补入当前播放列表");
+  // 四轮复核 P1-1：新增流程抽为 musicAddTrackFlow（卡片/空状态/设置面板三入口共用）。
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const addBlock = homeJs.slice(flowIdx, homeJs.indexOf("曲目已添加", flowIdx));
+  if (!addBlock.includes("newId")) throw new Error("新增曲目未使用显式 id");
+  for (const entry of ["#homeMusicEmptyAdd", "#musicAddTrack", "#homeMusicAddTrack"])
+    if (!homeJs.includes('"' + entry + '"')) throw new Error("新增曲目入口未绑定：" + entry);
+});
+
+step("那么", "天气失败态显示错误与重试入口", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // G8：天气请求失败不再隐藏卡片，显示可读错误 + 重试入口常驻。
+  const rfIdx = homeJs.indexOf("async function refreshWeather");
+  const rfBlock = homeJs.slice(rfIdx, homeJs.indexOf("async function onWeatherAction", rfIdx));
+  if (!rfBlock.includes("card.hidden = false")) throw new Error("失败态未显示卡片");
+  if (!rfBlock.includes("errEl.hidden = false")) throw new Error("失败态未显示错误文案");
+  if (!rfBlock.includes("retryBtn.hidden = false")) throw new Error("重试入口未常驻");
+  // 手动模式重试直接重新拉取天气（不是误触发定位）。
+  const actIdx = homeJs.indexOf("async function onWeatherAction");
+  const actBlock = homeJs.slice(actIdx, homeJs.indexOf("function geoErrorMessage", actIdx));
+  if (!actBlock.includes('w.mode === "location"')) throw new Error("重试未按模式分流");
+  // 定位失败提示整合进卡片状态（卡片可见 + 重试入口）。
+  const rlIdx = homeJs.indexOf("async function requestLocation");
+  const rlBlock = homeJs.slice(rlIdx, homeJs.indexOf("// ===== 2026-11-26", rlIdx));
+  if (!rlBlock.includes("card.hidden = false")) throw new Error("定位失败未显示卡片");
+  if (!rlBlock.includes("retryBtn.hidden = false")) throw new Error("定位失败缺重试入口");
+});
+
+/* ========== 2026-11-28 二次复核修复（features/40）========== */
+step("那么", "源码模块语法检查通过", async () => {
+  // P2-5：静态文本断言漏检了 renderMusic 中 const embedUrl 重复声明（V8 早期语法错误）。
+  // 这里对 src 全量 JS 模块执行 node --check 真实语法门禁，防回归。
+  const { execFileSync } = await import("node:child_process");
+  const srcDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src");
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".js")) files.push(p);
+    }
+  };
+  walk(srcDir);
+  if (files.length < 15) throw new Error("src JS 文件数量异常：" + files.length);
+  for (const f of files) {
+    try {
+      execFileSync(process.execPath, ["--check", f], { stdio: "pipe" });
+    } catch (err) {
+      throw new Error("语法检查失败 " + path.relative(srcDir, f) + ": " + err.stderr);
+    }
+  }
+});
+
+step("那么", "主页快捷条按宿主环境收敛", () => {
+  // P1-1：移除「打开主页」自跳转；导出/备份入口只在宿主壳或设置面板保留；
+  // 宿主委托按钮（回收站）标 data-host-only 并在无宿主环境隐藏；locate 死分支清理。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('data-act="open-home"')) throw new Error("仍保留「打开主页」自跳转按钮");
+  if (html.includes('data-act="backup"'))
+    throw new Error("快捷条仍保留备份入口（应在宿主壳/设置面板）");
+  if (html.includes('data-act="export"'))
+    throw new Error("快捷条仍保留导出入口（应在宿主壳/设置面板）");
+  const qbIdx = html.indexOf('id="homeQuickbar"');
+  const qbBlock = html.slice(qbIdx, html.indexOf("</section>", qbIdx));
+  if (!qbBlock.includes("data-host-only")) throw new Error("宿主委托按钮未标 data-host-only");
+  const homeJs = repoFile("src/home/home.js");
+  if (/act === "locate"/.test(homeJs)) throw new Error("onQuickbar 仍保留 locate 死分支");
+  if (/act === "open-home"/.test(homeJs)) throw new Error("onQuickbar 仍保留 open-home 分支");
+  if (/act === "export"/.test(homeJs)) throw new Error("onQuickbar 仍保留 export 死分支");
+  if (!homeJs.includes("data-host-only")) throw new Error("无宿主环境未隐藏宿主委托按钮");
+  if (!homeJs.includes("window.parent === window")) throw new Error("缺独立主页判定");
+});
+
+step("那么", "播放列表切换立即持久化且curTrackId按新队列校验", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const clickIdx = homeJs.indexOf("function onMusicPlayerClick");
+  const block = homeJs.slice(clickIdx, homeJs.indexOf("function bind(", clickIdx));
+  // P1-2：切换列表立即持久化 activeListId。
+  if (!block.includes("void persistMusicLocal()")) throw new Error("切换播放列表未立即持久化");
+  // curTrackId 校验与 activeListId 解析走 switchActiveList 纯函数（三轮复核 P2-5）。
+  if (!block.includes("hp.switchActiveList(cfg.music.local"))
+    throw new Error("切换列表未走 switchActiveList 纯函数");
+  if (!block.includes("switched.curTrackId")) throw new Error("curTrackId 未按新队列校验重置");
+  // schema 层：curTrackId 持久化幂等（非法回退空）。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https:" + "//e.com/a" }],
+    playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+    activeListId: "p1",
+    curTrackId: "t1",
+  });
+  if (n.curTrackId !== "t1") throw new Error("curTrackId 未持久化");
+});
+
+step("那么", "播放列表管理新建重命名删除与曲目排序可用", () => {
+  const homeJs = repoFile("src/home/home.js");
+  for (const id of ["homeMusicAddList", "homeMusicRenameList", "homeMusicDeleteList"])
+    if (!homeJs.includes(`#${id}`)) throw new Error("缺播放列表管理入口：" + id);
+  if (!homeJs.includes("track-move")) throw new Error("缺曲目排序按钮");
+  const moveIdx = homeJs.indexOf("const moveBtn");
+  const moveBlock = homeJs.slice(moveIdx, homeJs.indexOf("const chip", moveIdx));
+  if (!moveBlock.includes("hp.moveTrackInList("))
+    throw new Error("排序未走 moveTrackInList 纯函数");
+  if (!moveBlock.includes("void persistMusicLocal()")) throw new Error("排序未持久化");
+  // 列表上限与删除保护（曲目保留在曲库）。
+  if (!homeJs.includes("播放列表最多 10 个")) throw new Error("缺列表数量上限");
+  if (!homeJs.includes("曲目保留在曲库")) throw new Error("删除列表未说明曲目保留");
+});
+
+step("那么", "主页快捷键卡仅展示homeVisible动作", () => {
+  // P1-3：注册表动作加 homeVisible 标记；主页只渲染主页可执行动作。
+  const visible = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  // 三轮复核 P1-1：homeVisible 收敛为仅 focus-panel（open-selected/focus-web/copy-selected
+  // 依赖树选中态，主页无目标不展示；主页自有能力由卡片单独如实列出）。
+  const visibleIds = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  for (const banned of [
+    "open-group",
+    "open-trash",
+    "toggle-pip",
+    "locate-selected",
+    "open-selected",
+    "focus-web",
+    "copy-selected",
+  ])
+    if (visibleIds.includes(banned))
+      throw new Error("homeVisible 不应包含主页无目标动作：" + banned);
+  if (!visibleIds.includes("focus-panel")) throw new Error("homeVisible 缺 focus-panel");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("KEY_ACTIONS.filter((a) => a.homeVisible)"))
+    throw new Error("主页快捷键卡未按 homeVisible 过滤");
+});
+
+step("那么", "重试文案统一且封面留空保留原封面", () => {
+  // P2-2：天气重试按钮文案统一「重试」，title 由 JS 按模式区分。
+  const html = repoFile("src/home/home.html");
+  const rIdx = html.indexOf('id="homeWeatherRetry"');
+  const rBlock = html.slice(rIdx, html.indexOf("</button>", rIdx));
+  if (!rBlock.includes("重试")) throw new Error("重试按钮文案未统一为「重试」");
+  if (rBlock.includes("重新获取当前位置")) throw new Error("重试按钮仍硬编码定位文案");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes('retryBtn.title = w.mode === "location" ? "重新定位" : "重新获取天气"'))
+    throw new Error("重试 title 未按模式区分");
+  // P2-1：曲目编辑封面留空 = 保留原封面。
+  if (!homeJs.includes("留空保留原封面")) throw new Error("封面留空策略未写清");
+  const cIdx = homeJs.indexOf("留空保留原封面");
+  const cBlock = homeJs.slice(cIdx, cIdx + 400);
+  if (!cBlock.includes('let cover = track.cover || ""')) throw new Error("留空未保留原封面");
+  // P2-4：sidePanel.open 失败不静默——SW 回传可读提示，shell toast。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("请点击浏览器工具栏的 TabHarbor 图标打开"))
+    throw new Error("SW 调起侧边栏失败未回传可读提示");
+  if (!sw.includes("sendResponse?.({ ok: true })")) throw new Error("SW 成功路径未应答");
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("resp.ok === false")) throw new Error("shell 未处理失败应答");
+});
+
+/* ========== 2026-11-28 三轮复核修复（features/41）========== */
+step("那么", "主页快捷键卡只展示真实绑定可执行的动作且主页有 keydown 分发", () => {
+  // P1-1：注册表 homeVisible 只保留主页真实绑定动作（focus-panel）；
+  // open-selected/focus-web/copy-selected 依赖树选中态，主页无目标，不展示。
+  const visible = keymap.KEY_ACTIONS.filter((a) => a.homeVisible).map((a) => a.id);
+  if (visible.join(",") !== "focus-panel")
+    throw new Error("homeVisible 应仅含 focus-panel，实际：" + visible.join(","));
+  // 主页有真实 keydown 分发：focus-panel 发消息桥 + 站点网格方向键导航。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function onHomeKeydown")) throw new Error("缺 onHomeKeydown 分发");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (!kdBlock.includes('type: "tabharbor:open-side-panel"'))
+    throw new Error("focus-panel 未绑定消息桥");
+  if (!kdBlock.includes("matchAction")) throw new Error("未按注册表键串匹配");
+  if (!kdBlock.includes("a.home-site")) throw new Error("站点网格缺方向键导航");
+  if (!homeJs.includes('addEventListener("keydown", onHomeKeydown)'))
+    throw new Error("keydown 未绑定");
+  // 卡片如实列出主页自有能力（站点 Enter/方向键）。
+  if (!homeJs.includes("打开选中的站点") || !homeJs.includes("在站点间移动选择"))
+    throw new Error("快捷键卡未列站点键盘能力");
+});
+
+step("那么", "音乐本地外链三态分域显隐", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  // P1-2：三态计算 + 分域显隐（external 隐藏本地控件区与列表管理；local 隐藏外链兜底）。
+  if (!rmBlock.includes('? "mixed" : hasLocal ? "local" : embedUrl ? "external" : "empty"'))
+    throw new Error("缺三态计算");
+  if (!rmBlock.includes('playerWrap.hidden = musicMode === "external"'))
+    throw new Error("external 态未隐藏本地控件区");
+  if (!rmBlock.includes('plSection.hidden = musicMode === "external"'))
+    throw new Error("external 态未隐藏播放列表管理入口");
+  if (!rmBlock.includes('openExternalBtn.hidden = musicMode === "local"'))
+    throw new Error("local 态未隐藏外链兜底入口");
+  // schema 层 phase 同步真实化（纯函数运行时断言）。
+  const ext = homepage.normalizeMusic({
+    enabled: true,
+    external: { embedUrl: "https://w.soundcloud.com/player/?url=https://x" },
+  });
+  if (ext.phase !== "external") throw new Error("仅外链应 phase=external，实际 " + ext.phase);
+  const loc = homepage.normalizeMusic({
+    enabled: true,
+    local: { tracks: [{ id: "t1", url: "https://e.com/a.mp3" }] },
+  });
+  if (loc.phase !== "local") throw new Error("仅本地应 phase=local，实际 " + loc.phase);
+  const mixed = homepage.normalizeMusic({
+    enabled: true,
+    external: { embedUrl: "https://w.soundcloud.com/player/?url=https://x" },
+    local: { tracks: [{ id: "t1", url: "https://e.com/a.mp3" }] },
+  });
+  if (mixed.phase !== "mixed") throw new Error("双来源应 phase=mixed，实际 " + mixed.phase);
+});
+
+step("那么", "添加曲目列表归属兜底且文案明确 https", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // P1-3：失效激活列表落到第一个有效列表（resolveActiveList），无列表建默认并回写。
+  if (!homeJs.includes("hp.resolveActiveList(cfg.music.local.playlists"))
+    throw new Error("addTrack 未走 resolveActiveList 兜底");
+  if (
+    !homeJs.includes(
+      "音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）"
+    )
+  )
+    throw new Error("提示文案未明确 https");
+  if (!homeJs.includes("不支持 http 明文、本地文件路径与 data/blob 等"))
+    throw new Error("拒绝提示未列明不支持类型");
+  // 纯函数口径：resolveActiveList 失效回退第一个列表。
+  const pls = [
+    { id: "p1", name: "P1", trackIds: [] },
+    { id: "p2", name: "P2", trackIds: [] },
+  ];
+  if (homepage.resolveActiveList(pls, "gone").id !== "p1")
+    throw new Error("失效激活列表未回退第一个有效列表");
+  if (homepage.resolveActiveList(pls, "p2").id !== "p2") throw new Error("有效激活列表应命中自身");
+  if (homepage.resolveActiveList([], "p1") !== null) throw new Error("无列表应返回 null");
+});
+
+step("那么", "音乐状态流纯函数运行时断言", () => {
+  // P2-5：状态流可执行校验（非代码字符串）——
+  const local = {
+    tracks: [
+      { id: "t1", url: "https://e.com/1" },
+      { id: "t2", url: "https://e.com/2" },
+      { id: "t3", url: "https://e.com/3" },
+    ],
+    playlists: [
+      { id: "p1", name: "P1", trackIds: ["t1", "t2", "t3"] },
+      { id: "p2", name: "P2", trackIds: ["t2"] },
+    ],
+    activeListId: "p1",
+    curTrackId: "t2",
+  };
+  // 新建列表（模拟：切换到新列表 p2）→ 持久化字段读回一致（activeListId/curTrackId 校验）。
+  const sw = homepage.switchActiveList(local, "p2");
+  if (sw.activeListId !== "p2") throw new Error("切换列表 activeListId 错误");
+  if (sw.curTrackId !== "t2") throw new Error("t2 在新列表中应保留 curTrackId");
+  const sw2 = homepage.switchActiveList(local, "p1");
+  if (sw2.curTrackId !== "t2") throw new Error("t2 在 p1 队列中应保留 curTrackId");
+  // 切到不含 curTrackId 的队列：curTrackId 重置空。
+  const sw3 = homepage.switchActiveList({ ...local, curTrackId: "t1" }, "p2");
+  if (sw3.curTrackId !== "") throw new Error("t1 不在 p2 队列，curTrackId 应重置");
+  // 曲目上移/下移 → trackIds 顺序变化；边界安全。
+  const moved = homepage.moveTrackInList(["t1", "t2", "t3"], 1, 0);
+  if (moved.join(",") !== "t2,t1,t3") throw new Error("上移结果错误：" + moved.join(","));
+  const moved2 = homepage.moveTrackInList(["t1", "t2", "t3"], 0, 5);
+  if (moved2.join(",") !== "t1,t2,t3") throw new Error("越界应原序返回");
+  if (homepage.moveTrackInList(["t1"], 0, 0).join(",") !== "t1") throw new Error("单元素应原序");
+  // 删除曲目 → 曲库 + 全部列表 trackIds + curTrackId 一致清理；当前曲目跟随。
+  const cleaned = homepage.removeTrackEverywhere(local, "t2");
+  if (cleaned.tracks.length !== 2) throw new Error("曲库未删除");
+  if (cleaned.playlists[0].trackIds.join(",") !== "t1,t3") throw new Error("p1 trackIds 未清理");
+  if (cleaned.playlists[1].trackIds.length !== 0) throw new Error("p2 trackIds 未清理");
+  if (cleaned.curTrackId !== "") throw new Error("删除当前曲目后 curTrackId 未重置");
+  const cleaned2 = homepage.removeTrackEverywhere(local, "t1");
+  if (cleaned2.curTrackId !== "t2") throw new Error("删除非当前曲目不应影响 curTrackId");
+  // 失效激活列表兜底（addTrack 归属）。
+  const fallback = homepage.resolveActiveList(local.playlists, "deleted");
+  if (fallback.id !== "p1") throw new Error("失效兜底应落第一个有效列表");
+});
+
+step("那么", "过期注释与文档口径清理且 phase 真实化", () => {
+  // P2-3：注释/文档与现状一致。
+  const tabsOp = repoFile("src/core/tabs-op.js");
+  if (tabsOp.includes("仅 focus-webpage 才把窗口焦点交给网页"))
+    throw new Error("tabs-op 注释仍写旧口径");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes("失败/离线隐藏卡片")) throw new Error("home.js 天气注释仍是旧口径");
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (privacy.includes("离线或失败时隐藏卡片")) throw new Error("PRIVACY 天气段落仍是旧口径");
+  const matrix = repoFile("docs/testing/test-matrix.md");
+  if (/36_2026_11_27_audit.*switch-keep-focus/.test(matrix))
+    throw new Error("test-matrix feature 36 名称仍是旧口径");
+  // phase 真实化：不再硬编码 external。
+  const hpSrc = repoFile("src/core/homepage.js");
+  if (hpSrc.includes('phase: "external", // 阶段 2 local 不启用'))
+    throw new Error("phase 仍硬编码 external");
+});
+
+step("那么", "focus-panel 面板已聚焦时跳过后台调桥", () => {
+  // P2-4：shell 文档持焦点且可见时只做宿主内 focus，不重复发 open-side-panel 消息。
+  const shellJs = repoFile("src/ui/shell.js");
+  const fpIdx = shellJs.indexOf('action === "focus-panel"');
+  const fpBlock = shellJs.slice(fpIdx, shellJs.indexOf("  });", fpIdx));
+  if (!fpBlock.includes('document.hasFocus?.() === true && document.visibilityState === "visible"'))
+    throw new Error("缺面板已聚焦判定");
+  const guardIdx = fpBlock.indexOf("document.hasFocus?.()");
+  const sendIdx = fpBlock.indexOf("sendMessage");
+  if (guardIdx < 0 || sendIdx < 0 || guardIdx > sendIdx)
+    throw new Error("已聚焦判定未先于消息发送短路");
+});
+
+/* ========== 2026-11-28 四轮复核修复（features/42）========== */
+step("那么", "启用音乐无本地无外链时卡片空状态可见且添加入口可用", () => {
+  // P1-1：空状态四态（empty）——卡片可见 + 空状态提示 + 添加/配置入口，第一条本地曲目 UI 可达。
+  const homeJs = repoFile("src/home/home.js");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  if (!rmBlock.includes("card.hidden = !music.enabled"))
+    throw new Error("启用音乐时卡片未常显（仍按内容整体隐藏）");
+  if (!rmBlock.includes('"empty"')) throw new Error("缺 empty 空状态");
+  if (!rmBlock.includes('emptyBox.hidden = musicMode !== "empty"'))
+    throw new Error("空状态区未按四态控制");
+  // schema 层运行时断言：normalizeMusic 对空内容仍产出完整 local schema。
+  const n = homepage.normalizeMusic({ enabled: true });
+  if (!n.enabled || n.phase !== "external" || n.local.tracks.length)
+    throw new Error("空内容 normalizeMusic schema 异常");
+  // HTML：空状态块 + 三个入口。
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeMusicEmpty"')) throw new Error("缺空状态块");
+  if (!html.includes('id="homeMusicEmptyAdd"')) throw new Error("缺空状态添加按钮");
+  if (!html.includes('id="homeMusicEmptyCfg"')) throw new Error("缺空状态配置外链按钮");
+  if (!html.includes('id="musicAddTrack"')) throw new Error("设置面板缺添加本地曲目按钮");
+  // JS：三入口共用 musicAddTrackFlow，空状态配置入口打开音乐分区。
+  if (!homeJs.includes("async function musicAddTrackFlow")) throw new Error("缺共用新增流程函数");
+  if (
+    !homeJs.includes(
+      'id === "homeMusicAddTrack" || id === "homeMusicEmptyAdd" || id === "musicAddTrack"'
+    )
+  )
+    throw new Error("三入口未共用新增流程");
+  if (!homeJs.includes('id === "homeMusicEmptyCfg"')) throw new Error("空状态配置入口未处理");
+});
+
+step("那么", "顶部音乐开关覆盖本地only状态", () => {
+  // 2026-11-28 浏览器实测任务：顶部图标已移除，音乐卡片可见性由 renderMusic 四态决定
+  // （enabled 即显示，local-only 也显示本地播放器）；旧开关判断断言随功能下线。
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("顶部音乐图标绑定未清理");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  if (!rmBlock.includes("card.hidden = !music.enabled"))
+    throw new Error("音乐卡片未按 enabled 常显（本地-only 不可达）");
+  if (!rmBlock.includes('hasLocal ? "local" : embedUrl ? "external" : "empty"'))
+    throw new Error("四态判断缺失");
+});
+
+step("那么", "body级方向键fallback聚焦首个站点", () => {
+  // P2-1：焦点不在站点卡上时首次按方向键聚焦第一个站点（提示与操作一致）。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (!kdBlock.includes('!site && ["ArrowUp", "ArrowDown", "ArrowRight"].includes(e.key)'))
+    throw new Error("缺 body 级方向键 fallback");
+  // 浏览器实测任务：← 专属 focus-panel，不得被站点 fallback 拦截。
+  if (kdBlock.includes('"ArrowLeft"')) throw new Error("ArrowLeft 仍被站点导航数组包含");
+  if (!kdBlock.includes('document.querySelector("#homeSites a.home-site")'))
+    throw new Error("fallback 未聚焦首个站点");
+});
+
+step("那么", "focus-panel失败应答给出可读提示", () => {
+  // P2-2：lastError 或 resp.ok === false 时提示手动打开入口（与 shell 口径一致）。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (!kdBlock.includes("resp.ok === false")) throw new Error("未读取失败应答");
+  if (!kdBlock.includes("未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标"))
+    throw new Error("失败提示缺失");
+  // 失败文案口径一致：home 硬编码文案与 SW 应答 message 相同（shell 失败分支 toast resp.message 下发同一文案）。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开"))
+    throw new Error("SW 失败应答文案缺失");
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("resp.ok === false && resp.message"))
+    throw new Error("shell 未下发 SW 失败文案");
+});
+
+step("那么", "失效activeListId规范化回退首个有效列表且列表id带随机段", () => {
+  // P2-3：schema 层运行时断言——导入失效 activeListId 读回即指向第一个有效列表。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [
+      { id: "t1", url: "https://e.com/1" },
+      { id: "t2", url: "https://e.com/2" },
+    ],
+    playlists: [
+      { id: "p1", name: "P1", trackIds: ["t1"] },
+      { id: "p2", name: "P2", trackIds: ["t2"] },
+    ],
+    activeListId: "deleted-list",
+  });
+  if (n.activeListId !== "p1")
+    throw new Error("失效 activeListId 未回退第一个有效列表：" + n.activeListId);
+  const n2 = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https://e.com/1" }],
+    playlists: [{ id: "p1", name: "P1", trackIds: ["t1"] }],
+    activeListId: "p2",
+  });
+  if (n2.activeListId !== "p1") throw new Error("无效 id 应同样回退");
+  const n3 = homepage.normalizeMusicLocal({ tracks: [{ id: "t1", url: "https://e.com/1" }] });
+  if (n3.activeListId !== "") throw new Error("无列表时应为空");
+  // P2-4：新建列表 id 带随机段（musicCreateListId），与曲目 id 口径一致。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function musicCreateListId")) throw new Error("缺列表 id 生成函数");
+  if (!homeJs.includes("list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}"))
+    throw new Error("列表 id 缺随机段");
+  const legacy = [...homeJs.matchAll(/`list-\$\{Date\.now\(\)\}`/g)].length;
+  if (legacy > 0) throw new Error("仍存在 " + legacy + " 处无随机段的列表 id");
+});
+
+step("那么", "时长输入解析与编辑持久化", () => {
+  // P2-5：parseDurationInput 运行时断言——秒数/mm:ss/h:mm:ss/非法输入。
+  if (homepage.parseDurationInput("185") !== 185) throw new Error("秒数解析错误");
+  if (homepage.parseDurationInput("3:05") !== 185) throw new Error("mm:ss 解析错误");
+  if (homepage.parseDurationInput("1:02:03") !== 3723) throw new Error("h:mm:ss 解析错误");
+  if (homepage.parseDurationInput("") !== null) throw new Error("空输入应返回 null");
+  if (homepage.parseDurationInput("-5") !== null) throw new Error("负数应返回 null");
+  if (homepage.parseDurationInput("abc") !== null) throw new Error("非数字应返回 null");
+  if (homepage.parseDurationInput("1:2:3:4") !== null) throw new Error("超段数应返回 null");
+  if (homepage.parseDurationInput("360000") !== null) throw new Error("超上限应返回 null");
+  // UI：新增流程与编辑流程均接入时长（留空默认 0 / 保留现值）。
+  const homeJs = repoFile("src/home/home.js");
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const flowBlock = homeJs.slice(flowIdx, homeJs.indexOf("async function onMusicAction", flowIdx));
+  if (!flowBlock.includes("hp.parseDurationInput")) throw new Error("新增流程未接时长解析");
+  if (!flowBlock.includes("duration,") && !flowBlock.includes("duration }"))
+    throw new Error("新增曲目未持久化时长");
+  const editIdx = homeJs.indexOf("时长（秒数或 mm:ss，留空保留现值）");
+  if (editIdx < 0) throw new Error("编辑流程缺时长字段");
+  const editBlock = homeJs.slice(editIdx, homeJs.indexOf("Object.assign(track,", editIdx));
+  if (!editBlock.includes("hp.parseDurationInput")) throw new Error("编辑流程未接时长解析");
+  if (!homeJs.includes("{ title, artist, url, cover, duration }"))
+    throw new Error("编辑结果未持久化时长");
+});
+
+/* ========== 2026-11-28 浏览器实测任务（features/43）========== */
+step("那么", "默认键位避开浏览器保留键且自定义能力保留", () => {
+  // 任务1.3：默认键移除 Ctrl+L/P/D/O、Ctrl+Shift+L，改 Alt+Shift 组合；用户自定义仍生效。
+  const map = keymap.defaultKeymap();
+  for (const banned of ["Ctrl+L", "Ctrl+P", "Ctrl+D", "Ctrl+O", "Ctrl+Shift+L"]) {
+    for (const [id, key] of Object.entries(map))
+      if (key === banned) throw new Error("默认键仍占用保留键 " + banned + "（" + id + "）");
+  }
+  const expected = {
+    "locate-selected": "Alt+Shift+L",
+    "toggle-links": "Alt+Shift+K",
+    "open-group": "Alt+Shift+G",
+    "toggle-pip": "Alt+Shift+P",
+    "toggle-theme": "Alt+Shift+T",
+  };
+  for (const [id, key] of Object.entries(expected))
+    if (map[id] !== key) throw new Error(id + " 默认键应为 " + key + "，实际 " + map[id]);
+  // 自定义保留：normalizeKeymap 仍接受合法自定义键串（含旧保留键，用户主动选择不拦）。
+  const custom = keymap.normalizeKeymap({ "locate-selected": "Ctrl+L" });
+  if (custom["locate-selected"] !== "Ctrl+L") throw new Error("用户自定义键未保留");
+});
+
+step("那么", "ArrowLeft专属focus-panel且站点导航只吃上下右", () => {
+  // 任务1.2：body fallback 与站点网格导航都排除 ArrowLeft；← 由注册表 focus-panel 分发。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (kdBlock.includes('"ArrowLeft"')) throw new Error("onHomeKeydown 站点导航仍含 ArrowLeft");
+  if (keymap.defaultKeymap()["focus-panel"] !== "ArrowLeft")
+    throw new Error("focus-panel 默认键应为 ArrowLeft");
+  if (!kdBlock.includes("matchAction")) throw new Error("← 分发未走注册表");
+});
+
+step("那么", "面板动作全走注册表且无选中态给出可读提示", () => {
+  // 任务1.1 + 1.4 + 2.2：面板 keydown 单一 matchAction 入口、无硬编码键位分支；
+  // 无选中标签时 open/copy/open-group/trash 给出可读提示。
+  const shellJs = repoFile("src/ui/shell.js");
+  const docIdx = shellJs.indexOf('document.addEventListener("keydown", async (e) => {');
+  const kdBlock = shellJs.slice(docIdx, shellJs.indexOf("  });", docIdx));
+  if (!kdBlock.includes("keymap.matchAction")) throw new Error("keydown 未走注册表");
+  for (const hard of ['e.key === "Enter"', 'e.key === "ArrowLeft"', 'e.key === "Ctrl+L"'])
+    if (kdBlock.includes(hard)) throw new Error("事件分支仍有硬编码键位：" + hard);
+  // 输入框/可编辑区不触发（keydown 顶部守卫）。
+  if (!kdBlock.includes("t.isContentEditable")) throw new Error("输入框/可编辑区守卫缺失");
+  // 无选中态可读提示（至少 4 处）。
+  const promptCount = (kdBlock.match(/toast\("请先选择一个标签"\)/g) || []).length;
+  if (promptCount < 4) throw new Error("无选中态可读提示不足：" + promptCount);
+  if (!kdBlock.includes('toast("先选中一个标签")')) throw new Error("focus-web 提示缺失");
+});
+
+step("那么", "输入框内不触发树动作且冲突检测恢复默认可用", () => {
+  // 任务1.5：输入框守卫 + 冲突检测 + 恢复默认（纯函数运行时断言）。
+  const shellJs = repoFile("src/ui/shell.js");
+  const docIdx = shellJs.indexOf('document.addEventListener("keydown", async (e) => {');
+  const kdBlock = shellJs.slice(docIdx, shellJs.indexOf("  });", docIdx));
+  const guardIdx = kdBlock.indexOf("isContentEditable");
+  const matchIdx = kdBlock.indexOf("matchAction");
+  if (guardIdx < 0 || guardIdx > matchIdx) throw new Error("输入框守卫未先于动作匹配");
+  const conflicts = keymap.findConflicts({ "cursor-prev": "Alt+Shift+P" }, "Alt+Shift+P");
+  if (!conflicts.includes("cursor-prev") || !conflicts.includes("toggle-pip"))
+    throw new Error("冲突检测失败：" + conflicts.join(","));
+  const def = keymap.defaultKeymap();
+  if (def["toggle-pip"] !== "Alt+Shift+P") throw new Error("恢复默认未还原新默认键");
+  // normalizeKeyBinding 接受 Alt+Shift 组合（录制链路可用）。
+  if (keymap.normalizeKeyBinding("alt+shift+f") !== "Alt+Shift+F")
+    throw new Error("Alt+Shift 组合键规范化失败");
+});
+
+/* ========== 2026-11-28 浏览器实测 AI 任务（features/44）========== */
+step("那么", "渲染索引与性能计数可执行断言", async () => {
+  // 任务2.2：buildRenderIndex 运行时断言（O(1) 父级索引，顺序与旧 filter 一致）。
+  const m = {
+    windows: [{ id: "w1", kind: "window", title: "W" }],
+    groups: [
+      { id: "g1", kind: "group", parentId: "w1", title: "G1" },
+      { id: "g2", kind: "group", parentId: "w1", title: "G2" },
+    ],
+    tabs: [
+      { id: "t1", kind: "tab", parentId: "g1", title: "T1" },
+      { id: "t2", kind: "tab", parentId: "g2", title: "T2" },
+      { id: "t3", kind: "tab", parentId: "w1", title: "T3" },
+    ],
+  };
+  const idx = render.buildRenderIndex(m);
+  if (idx.nodeById.size !== 6) throw new Error("nodeById 数量错误：" + idx.nodeById.size);
+  if (idx.nodeById.get("t2")?.title !== "T2") throw new Error("nodeById 取值错误");
+  if ((idx.groupsByParent.get("w1") || []).map((g) => g.id).join(",") !== "g1,g2")
+    throw new Error("groupsByParent 顺序错误");
+  if ((idx.tabsByParent.get("w1") || []).map((t) => t.id).join(",") !== "t3")
+    throw new Error("tabsByParent 错误");
+  // 索引渲染与无索引渲染输出一致（防回归）。
+  const a = render.renderTree(m, {});
+  const b = render.renderTree(m, { index: idx });
+  if (a !== b) throw new Error("带索引渲染输出与旧路径不一致");
+  // 任务2.6：perf 计数器运行时断言。
+  const perf = await import("../src/core/perf.js");
+  perf.resetPerf();
+  perf.markPerf("tabsQuery", 3);
+  perf.markPerf("storageWrites", 2);
+  perf.measurePerf("renders", () => 42);
+  if (perf.perfCounters.tabsQuery !== 3 || perf.perfCounters.storageWrites !== 2)
+    throw new Error("perf 计数错误");
+  if (perf.perfCounters.renders !== 1) throw new Error("render 计数错误");
+  if (perf.visibleBatches(1200, 500).length !== 3) throw new Error("分批接口错误");
+  if (perf.visibleBatches(300, 500).join(",") !== "0,300") throw new Error("小树不应分批");
+});
+
+step("那么", "搜索防抖与存储变更合并且增量刷新不重建树", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  // 任务2.1：搜索 input 120ms 防抖。
+  if (!shellJs.includes("window.setTimeout(() => void render(), 120)"))
+    throw new Error("搜索输入未做 120ms 防抖");
+  // 任务2.4：storage 变更 80ms 合并 + 结构未变增量刷新（不重建整树）。
+  if (!shellJs.includes("modelRefreshTimer = window.setTimeout(() => {"))
+    throw new Error("storage 变更未合并");
+  const timerIdx = shellJs.indexOf("modelRefreshTimer = window.setTimeout(");
+  const timerBlock = shellJs.slice(timerIdx, timerIdx + 1400);
+  if (!/\},\s*80\s*\)/.test(timerBlock)) throw new Error("storage 合并间隔非 80ms");
+  if (!shellJs.includes("const same =") || !shellJs.includes("await applyOpenState();"))
+    throw new Error("结构未变时未增量刷新打开态");
+  // 任务2.3：选中态局部 class 更新。
+  const selIdx = shellJs.indexOf("const selectLeaf = async (id) => {");
+  const selBlock = shellJs.slice(selIdx, shellJs.indexOf("const visibleLeaves", selIdx));
+  if (!selBlock.includes('classList.remove("selected")')) throw new Error("选中态未局部更新 class");
+  // 任务2.5：favicon 懒加载 + 父级索引调用。
+  const renderJs = repoFile("src/ui/render.js");
+  if (!renderJs.includes('loading="lazy" decoding="async"')) throw new Error("favicon 未懒加载");
+  if (!renderJs.includes("index.groupsByParent.get(parentId)"))
+    throw new Error("childrenInner 未用父级索引");
+});
+
+step("那么", "主页音乐图标移除与置顶站点独立行", () => {
+  // 任务3：右上角音乐图标移除，音乐只在右栏卡片；置顶站点独立行排在 chip 前。
+  const html = repoFile("src/home/home.html");
+  if (html.includes('id="homeMusicToggle"')) throw new Error("音乐图标未移除");
+  if (!html.includes('id="homeMusicCard"')) throw new Error("音乐卡片缺失");
+  const homeJs = repoFile("src/home/home.js");
+  if (homeJs.includes('$("#homeMusicToggle")')) throw new Error("音乐图标事件未清理");
+  if (!homeJs.includes('class="home-pinned-row"')) throw new Error("缺置顶独立行");
+  const rsIdx = homeJs.indexOf("function renderSites");
+  const rsBlock = homeJs.slice(rsIdx, homeJs.indexOf("function renderSiteEditList", rsIdx));
+  if (rsBlock.includes('name: "置顶"')) throw new Error("置顶仍作为分类 chip 重复展示");
+  if (!rsBlock.includes("sites.filter((s) => !s.pinned)")) throw new Error("网格未排除置顶站点");
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-pinned-row")) throw new Error("置顶行缺样式");
+  // 列数自适应/4/5/6 保持（既有能力）。
+  const cols = homepage.normalizeSiteColumns("6");
+  if (cols !== "6") throw new Error("列数 6 规范化失败");
+});
+
+step("那么", "音乐添加自动启用清除保留本地与时长分秒校验", () => {
+  const homeJs = repoFile("src/home/home.js");
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const flowBlock = homeJs.slice(flowIdx, homeJs.indexOf("async function onMusicAction", flowIdx));
+  // 任务5.1：添加曲目自动启用卡片。
+  if (!flowBlock.includes("cfg.music.enabled = true")) throw new Error("添加曲目未自动启用卡片");
+  // 任务5.5：新增曲目补 cover 默认字段。
+  if (!flowBlock.includes('cover: "", duration')) throw new Error("新增曲目缺 cover 默认字段");
+  // 任务5.4：清除外链保留本地曲目/播放列表。
+  const clrIdx = homeJs.indexOf('id === "musicClear"');
+  const clrBlock = homeJs.slice(clrIdx, clrIdx + 700);
+  if (!clrBlock.includes("external: {}")) throw new Error("清除音乐未只重置 external");
+  if (clrBlock.includes("hp.normalizeMusic(null)")) throw new Error("清除音乐仍整体清空");
+  if (!clrBlock.includes("本地曲目已保留")) throw new Error("清除提示未说明保留本地");
+  // 任务5.5：时长分/秒 <60 运行时断言。
+  if (homepage.parseDurationInput("3:05") !== 185) throw new Error("合法 mm:ss 解析错误");
+  if (homepage.parseDurationInput("99:99") !== null) throw new Error("99:99 应被拒绝");
+  if (homepage.parseDurationInput("1:99:00") !== null) throw new Error("小时格式分钟≥60 应被拒绝");
+  if (homepage.parseDurationInput("2:30") !== 150) throw new Error("合法 mm:ss 解析错误");
+});
+
+step("那么", "公开候选音源与本地路径边界说明", () => {
+  // 任务5.2/5.3：公开候选（Archive embed / Radio 电台 / Jamendo 配置说明），
+  // 不预置版权保护曲目；本地路径边界写明。
+  const suggests = homepage.MUSIC_SUGGESTIONS.map((s) => s.id);
+  for (const id of ["archive", "radio", "jamendo"])
+    if (!suggests.includes(id)) throw new Error("缺公开候选音源：" + id);
+  if (homepage.musicSuggestionUrl("archive", "abc").includes("/details/abc") !== true)
+    throw new Error("Archive 条目标识未转 details 链接");
+  if (homepage.musicSuggestionUrl("radio", "http://x") !== "")
+    throw new Error("电台非 https 应拒绝");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="musicSuggestions"')) throw new Error("设置面板缺候选音源列表");
+  if (!html.includes("本地文件路径")) throw new Error("主页未写本地路径边界");
+  const privacy = repoFile("docs/PRIVACY.md");
+  if (!privacy.includes("本地音乐路径边界")) throw new Error("隐私说明缺本地路径边界");
+  if (!privacy.includes("不承诺")) throw new Error("隐私说明未写明不承诺永久播放");
+  if (!privacy.includes("坐标仅用于当次天气请求")) throw new Error("隐私说明缺坐标仅当次请求");
+});
+
+step("那么", "设置面板六分页导航与导入导出覆盖keymap", () => {
+  const html = repoFile("src/home/home.html");
+  const pages = [...html.matchAll(/class="home-cfg-card home-cfg-page" data-page="([^"]+)"/g)].map(
+    (m) => m[1]
+  );
+  const want = ["appearance", "search", "sites", "music", "weather", "data"];
+  if (pages.join(",") !== want.join(","))
+    throw new Error("六分页缺失或顺序错误：" + pages.join(","));
+  if (!html.includes('id="homeCfgNav"')) throw new Error("缺分页导航条");
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("const switchConfigPage = (page)")) throw new Error("缺分页切换函数");
+  if (!homeJs.includes("const pageOfSection = (sectionId)")) throw new Error("缺深链映射");
+  if (!homeJs.includes("btn.dataset.page === page")) throw new Error("导航未高亮当前页");
+  // 配置字段迁移/导入导出：normalizeHomeConfig 运行时断言含全部字段。
+  const cfg = homepage.normalizeHomeConfig({
+    sites: [{ title: "S", url: "https://e.com" }],
+    siteLayout: { columns: "6" },
+    noteItems: [{ text: "note" }],
+    music: {
+      enabled: true,
+      local: {
+        tracks: [{ id: "t1", url: "https://e.com/a.mp3" }],
+        playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+      },
+    },
+    weather: { mode: "manual", city: "北京" },
+    wallpaper: { mode: "gradient" },
+    keymap: { "cursor-prev": "Q" },
+  });
+  if (cfg.siteLayout.columns !== "6") throw new Error("siteLayout 未迁移");
+  if (cfg.noteItems.length !== 1) throw new Error("便签未迁移");
+  if (cfg.music.local.playlists[0].id !== "p1") throw new Error("音乐播放列表未迁移");
+  if (cfg.weather.city !== "北京") throw new Error("天气字段未迁移");
+  if (cfg.keymap["cursor-prev"] !== "Q") throw new Error("keymap 未纳入导出字段");
+  const exported = homepage.exportHomepageConfig(cfg, "2026-11-28T00:00:00.000Z");
+  if (!exported.includes("keymap")) throw new Error("导出文件缺 keymap");
+});
+
+step("那么", "空状态CSS焦点环与减少动态偏好", () => {
+  const css = repoFile("src/home/home.css");
+  if (!css.includes(".home-music-empty")) throw new Error("空状态缺 CSS");
+  if (!css.includes(".home-music-empty[hidden]")) throw new Error("空状态显隐样式缺失");
+  if (!css.includes(":focus-visible")) throw new Error("焦点环缺失");
+  if (!css.includes("prefers-reduced-motion")) throw new Error("未尊重减少动态偏好");
+  if (!css.includes("var(--accent)")) throw new Error("主操作按钮未区分强调色");
 });

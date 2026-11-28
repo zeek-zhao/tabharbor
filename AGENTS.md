@@ -12,7 +12,7 @@ Chrome MV3 标签管理扩展：把「真实浏览器窗口 → 分组（可嵌�
 
 1. **TDD**：每条需求 ↔ feature 场景 ↔ 实现一一对应。先写 `features/*.feature`（RED），实现后 `npm test` 全绿（GREEN）才可 PR。
 2. **流程**：GitHub 开发流 branch → PR → review → merge → CI。issue 是唯一卡片（gh-project-flow 七状态）。一个 milestone = 一个版本 = 一个 tag = 一个 Release。
-3. **红线**（`tools/check-constraints.mjs` 门禁）：不删浏览历史、不监听书签变更、不申请多余权限、零出站（唯一例外 `api.github.com` 仅限 backup 模块）、敏感信息不入库。
+3. **红线**（`tools/check-constraints.mjs` 门禁）：不删浏览历史、不监听书签变更、不申请多余权限、代码主动出站仅限白名单（`api.github.com` 仅 backup 模块 + 天气模块 Open-Meteo 两域名 + 在线壁纸图源 wallhaven.cc/w.wallhaven.cc/nekos.best 仅 wallpaper-online 模块，见 C11/C12）、敏感信息不入库。壁纸远程图片与外链音乐 iframe 为用户运行时输入/平台资源，非代码出站；精选壁纸画廊为随包原创 CC0 渐变（零出站）。
 4. **提交人唯一**：GIT_NAME=zeek.zhao / GIT_EMAIL=zeek.zhao@foxmail.com（check-committer 门禁）。
 5. **文档先于代码**：需求变更先更新台账与文档，经用户确认后才动代码。
 6. **证据留痕**：门禁输出按需存 `evidence/`（UTF-8 无 BOM）；文档中的测试结论必须与真实证据一致，不得夸大。

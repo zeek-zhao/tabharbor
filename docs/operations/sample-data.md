@@ -10,9 +10,9 @@
 | --- | --- | --- |
 | `samples/datasets/tabharbor-sample.json` | 2 窗口 / 5 分组（含嵌套）/ 10 标签，含备注、主题、空回收站 | 日常全功能演练（拖拽 / 键盘 / 回收站 / 统计） |
 | `samples/datasets/tabharbor-sample.html` | 标准 Netscape Bookmark HTML | 书签文件导入演练 |
-| `samples/datasets/tabharbor-m3-import.json` | 1 窗口 / 2 分组 / 每组 2 标签 + 1 条回收站条目 | 合法导入与恢复演练 |
-| `samples/datasets/tabharbor-m3-invalid.json` | `version: 2` | 非法文件拒绝演练 |
-| `samples/datasets/tabharbor-m3-bookmarks.html` | 2 顶层文件夹 + 1 嵌套文件夹共 6 链接，含实体转义 | Netscape 导入演练 |
+| `samples/datasets/tabharbor-import.json` | 1 窗口 / 2 分组 / 每组 2 标签 + 1 条回收站条目 | 合法导入与恢复演练 |
+| `samples/datasets/tabharbor-invalid.json` | `version: 2` | 非法文件拒绝演练 |
+| `samples/datasets/tabharbor-bookmarks.html` | 2 顶层文件夹 + 1 嵌套文件夹共 6 链接，含实体转义 | Netscape 导入演练 |
 
 JSON / HTML 均至少一个窗口、多分组、每组多个标签。HTML 书签格式不保存窗口语义，导入器会把文件夹 / 标签整理进导入窗口——这是格式限制，不是数据丢失；HTML 也不含 note / settings / trash 字段。
 
@@ -37,7 +37,7 @@ JSON / HTML 均至少一个窗口、多分组、每组多个标签。HTML 书签
 1. 分别执行「导出 JSON」「导出 HTML」。
 2. 检查下载文件：JSON 应含 `version/windows/groups/tabs/settings/trash`；HTML 以标准 Netscape Bookmark 声明开头。
 3. 在干净测试 Profile 导入导出的 JSON，检查窗口 / 分组 / 标签 / 备注；再导入 HTML，检查文件夹层级。
-4. 导入 `tabharbor-m3-invalid.json` → 应提示版本不兼容且原树不变。
+4. 导入 `tabharbor-invalid.json` → 应提示版本不兼容且原树不变。
 
 ### C. 加密备份与恢复
 

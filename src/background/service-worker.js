@@ -13,7 +13,16 @@ function toolPageMatches(url) {
   return s === TOOL_PAGE || s.endsWith("/" + TOOL_PAGE);
 }
 
+// 独立窗口宽度记忆（2026-11-25）：默认 380，允许 300–720，越界 clamp。
+export function normalizeStandaloneWidth(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 380;
+  return Math.max(300, Math.min(720, Math.round(n)));
+}
+
 async function openWindow(chromeApi = chrome) {
+  const saved = await loadAll(chromeApi).catch(() => ({}));
+  const width = normalizeStandaloneWidth(saved.lastBounds?.standaloneWidth);
   try {
     const wins =
       typeof chromeApi.windows?.getAll === "function"
@@ -22,8 +31,9 @@ async function openWindow(chromeApi = chrome) {
     for (const w of wins || []) {
       const toolTab = (w.tabs || []).find((t) => toolPageMatches(t && t.url));
       if (toolTab && w.id != null) {
-        // 已弹出实例：聚焦窗口 + 激活工具标签，只置前不新建
+        // 已弹出实例：聚焦窗口 + 激活工具标签，并按保存宽度更新一次（popup 类型若被浏览器限制则忽略）。
         await chromeApi.windows.update(w.id, { focused: true });
+        await chromeApi.windows.update(w.id, { width }).catch(() => {});
         if (toolTab.id != null && typeof chromeApi.tabs?.update === "function") {
           await chromeApi.tabs.update(toolTab.id, { active: true });
         }
@@ -36,7 +46,7 @@ async function openWindow(chromeApi = chrome) {
   return chromeApi.windows.create({
     url: TOOL_PAGE,
     type: "popup",
-    width: 380,
+    width,
     height: 720,
     focused: true,
   });
@@ -94,14 +104,23 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   });
   void syncAutoBackupAlarm(chromeApi);
 
-  // M8/Q2：GitHub Gist 加密定时备份；配置前/关闭时不触发网络请求。
-  // Q2 密码不落盘：alarm 无用户交互无法取得密码时，runAutoBackup 抛"需要密码"，
-  // 由下方 catch 写成 credential-free 结果提示用户手动备份（不保存密码、不写日志）。
+  // 2026-11-25 备份重构：无人值守定时备份恢复可用——加密密码由 Token 对应的 GitHub login
+  // 在 alarm 触发时实时派生，不读取、不持久化任何 ghBackupPassword（密码不落盘红线保持）。
+  // 仅请求已授权的 api.github.com；Token 缺失时不发网络请求并写入可读结果。
   chromeApi.alarms.onAlarm.addListener(async (alarm) => {
     if (alarm.name !== "auto-backup") return;
     const all = await loadAll(chromeApi);
     const settings = all.settings || {};
-    if (settings.backupTarget !== "github" || !settings.ghToken) return;
+    if (settings.backupTarget !== "github" || !settings.ghToken) {
+      await chromeApi.storage.local.set({
+        backupLastResult: {
+          ok: false,
+          message: "定时备份未配置 GitHub Token，已跳过",
+          at: new Date().toISOString(),
+        },
+      });
+      return;
+    }
     const model = {
       windows: all.windows,
       groups: all.groups,
@@ -110,20 +129,20 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
       settings,
     };
     try {
-      await runAutoBackup(chromeApi, model, settings);
+      const result = await runAutoBackup(chromeApi, model, settings);
       await chromeApi.storage.local.set({
         backupLastResult: {
           ok: true,
-          message: "加密快照已备份到私有 Gist",
+          message: `加密快照已定时备份到私有 Gist：${result.gistId}`,
           at: new Date().toISOString(),
         },
       });
     } catch (error) {
-      // Do not log settings/token. Persist a bounded, credential-free outcome for the UI.
+      // 不记录 settings/token/login/密码；只写有界、去凭证的结果供 UI 展示。
       await chromeApi.storage.local.set({
         backupLastResult: {
           ok: false,
-          message: String(error.message || "备份失败").slice(0, 180),
+          message: String(error?.message || "定时备份失败").slice(0, 180),
           at: new Date().toISOString(),
         },
       });
@@ -153,14 +172,29 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
             .map((w) => ({
               id: w.id,
               focused: !!w.focused,
-              tabs: w.tabs.map((t) => ({ id: t.id, url: t.url, title: t.title })),
+              tabs: w.tabs.map((t) => ({
+                id: t.id,
+                url: t.url,
+                pendingUrl: t.pendingUrl,
+                index: t.index,
+                active: !!t.active,
+                title: t.title || t.url || t.pendingUrl || "",
+              })),
             }));
           // L2（2026-11-24 UI 审计）：旧实现在无真实窗口时早退，导致浏览器标签全关后
           // 模型的失效 open/tabId 永远不清。改为空窗口列表也照常跑反向校验
           // （pairWindows 对空列表安全返回；syncBrowserSnapshot 的反向校验仍执行），
           // 仅当模型确有变更时才落盘，避免空转写盘。
           const allTabs = await chromeApi.tabs.query({});
-          const tabs = (allTabs || []).map((t) => ({ id: t.id, url: t.url, title: t.title }));
+          const tabs = (allTabs || []).map((t) => ({
+            id: t.id,
+            url: t.url,
+            pendingUrl: t.pendingUrl,
+            index: t.index,
+            active: !!t.active,
+            windowId: t.windowId,
+            title: t.title || t.url || t.pendingUrl || "",
+          }));
           const { windows, groups, tabs: modelTabs, trash, settings } = await loadAll(chromeApi);
           const model = {
             version: 1,
@@ -197,8 +231,31 @@ export function initServiceWorker(chromeApi = globalThis.chrome) {
   chromeApi.windows?.onCreated?.addListener?.(resyncFromBrowser);
   chromeApi.windows?.onRemoved?.addListener?.(resyncFromBrowser);
   // D13a：面板激活/聚焦时由 UI 请求的一次性快照兜底（事件漏发/SW 未唤醒时使用）。
-  chromeApi.runtime?.onMessage?.addListener?.((msg) => {
+  chromeApi.runtime?.onMessage?.addListener?.((msg, sender, sendResponse) => {
     if (msg?.type === "tabharbor:resync") resyncFromBrowser();
+    // 2026-11-28 复核 G2：focus-panel 在面板未打开的上下文（独立窗口/主页等）按 ← 时，
+    // 通过消息桥调起侧边栏：SW 侧执行 sidePanel.open（keydown 属用户手势，满足调用前提）。
+    // 2026-11-28 二次复核 P2-4：失败不再静默——回传可读提示，UI 侧 toast 告知手动入口。
+    if (msg?.type === "tabharbor:open-side-panel") {
+      void (async () => {
+        try {
+          const winId = sender?.tab?.windowId;
+          if (winId != null) {
+            await chromeApi.sidePanel.open({ windowId: winId });
+          } else if (typeof chromeApi.windows?.getLastFocused === "function") {
+            const w = await chromeApi.windows.getLastFocused();
+            if (w?.id != null) await chromeApi.sidePanel.open({ windowId: w.id });
+          }
+          sendResponse?.({ ok: true });
+        } catch {
+          sendResponse?.({
+            ok: false,
+            message: "未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开",
+          });
+        }
+      })();
+      return true; // 异步 sendResponse
+    }
   });
 }
 

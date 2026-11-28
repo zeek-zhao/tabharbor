@@ -6,7 +6,15 @@
 // 与模型窗口配对（windowId 精确匹配 → 「当前浏览器窗口」优先绑聚焦窗口 → tabId 重叠度 → 新建），
 // 未配对模型窗口视为离线（清掉失效 windowId，节点保留）。
 // L2/D25（2026-11-24 UI 审计）：重叠度只按 tabId，不按 URL（同 URL 多开会串窗）。
-import { addWindow, addTab, childrenOf, descendantsOf, DEFAULT_WINDOW_TITLE } from "./model.js";
+import {
+  addWindow,
+  addTab,
+  insertTabAfter,
+  leafByTabId,
+  childrenOf,
+  descendantsOf,
+  DEFAULT_WINDOW_TITLE,
+} from "./model.js";
 import { validateTree } from "./invariants.js";
 
 // D14（2026-11-23）：系统自动建立、未命名的模型窗口标题统一为英文 Window，
@@ -31,15 +39,18 @@ export function migrateDefaultWindowTitles(model) {
 // D11（2026-11-23）：采集范围全部纳入——http(s) / chrome://（含历史记录页）/ about: /
 // file:// / chrome-extension:// 等一律视为可采集页面；不再用 http(s) 白名单过滤。
 // L3（2026-11-24 UI 审计）：排除 TabHarbor 自身扩展页（工具窗口 / 主页 / 侧边栏），
-// 否则用户打开插件工具页时会被同步成模型树里的游离标签。仍排除空 URL。
+// 否则用户打开插件工具页时会被同步成模型树里的游离标签。
+// P0-2（2026-11-25 审计）：url 为空时回退 pendingUrl（导航提交前新标签仍有有效 tabId）。
 const OWN_EXT_PAGES = [
   /\/window\/window\.html$/i,
   /\/home\/home\.html$/i,
   /\/sidebar\/sidebar\.html$/i,
 ];
 const isOwnExtPage = (s) => OWN_EXT_PAGES.some((re) => re.test(s));
-const isWebUrl = (u) => {
-  const s = String(u || "").trim();
+export const pageAddressOf = (t) =>
+  t && typeof t === "object" ? String(t.url || t.pendingUrl || "") : String(t || "");
+const isWebUrl = (t) => {
+  const s = pageAddressOf(t).trim();
   return s.length > 0 && !isOwnExtPage(s);
 };
 
@@ -97,7 +108,21 @@ function syncWindowTabs(model, win, openTabs) {
     }
     // 配对中的窗口可能刚从别的 bucket 转来，id 不变但 kind 需按数组归属重新确认
     if (win.kind !== "window" || !model.windows.includes(win)) continue;
-    const leaf = addTab(model, t.title || t.url, t.url, win.id);
+    // P0-1（2026-11-25）：新补入叶子插到当前激活标签对应模型叶子之后；锚点不同父/不存在则末尾。
+    const activeTab = (openTabs || []).find(
+      (x) =>
+        x.active === true &&
+        x.id != null &&
+        (x.windowId == null || win.windowId == null || x.windowId === win.windowId)
+    );
+    const anchor = activeTab ? leafByTabId(model, activeTab.id) : null;
+    const leaf = insertTabAfter(
+      model,
+      t.title || pageAddressOf(t),
+      t.url || "",
+      win.id,
+      anchor ? anchor.id : null
+    );
     if (t.id != null) leaf.tabId = t.id;
     leaf.open = true;
   }
@@ -119,7 +144,7 @@ export function bootAlign(model, openTabs) {
 // 只对「至少含一个 http(s) 网页」的真实窗口建/配模型窗口——纯扩展页、新标签页窗口不入树。
 export function pairWindows(model, realWindows, focusedWindowId) {
   const list = (realWindows || []).filter(
-    (w) => w && w.id != null && Array.isArray(w.tabs) && w.tabs.some((t) => isWebUrl(t.url))
+    (w) => w && w.id != null && Array.isArray(w.tabs) && w.tabs.some((t) => isWebUrl(t))
   );
   if (list.length === 0) return { paired: 0, created: 0 };
   const used = new Set();
@@ -182,7 +207,7 @@ export function pairWindows(model, realWindows, focusedWindowId) {
     syncWindowTabs(
       model,
       win,
-      (rw.tabs || []).filter((t) => isWebUrl(t.url))
+      (rw.tabs || []).filter((t) => isWebUrl(t))
     );
     paired += 1;
   }
@@ -237,7 +262,7 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
   // 2) 游离标签挂靠（N3）：严格按 tabId → 所属真实窗口 windowId → 模型窗口精确定位。
   //    不再用网页标题匹配模型窗口，也不再默认挂到 model.windows[0]——
   //    多真实窗口场景下那会把所有标签混挂到首个窗口。
-  const flat = allTabs.filter((t) => isWebUrl(t.url));
+  const flat = allTabs.filter((t) => isWebUrl(t));
   const usedTabIds = new Set();
   for (const win of model.windows) {
     for (const leaf of descendantsOf(model, win.id)) {
@@ -261,9 +286,18 @@ export function syncBrowserSnapshot(model, snapshot, opts = {}) {
       continue;
     }
     // D17：不再按 URL 兜底命中既有叶子——同 URL 多开无法区分，一律作为新标签补入。
-    // 挂到该窗口下首个分组（与 9 格矩阵「标签→窗口」一致），无分组时直挂窗口
-    const firstGroup = (model.groups || []).find((g) => g.parentId === ownerWin.id);
-    const leaf = addTab(model, t.title || t.url, t.url, firstGroup ? firstGroup.id : ownerWin.id);
+    // 挂到该窗口下首个分组（与 9 格矩阵「标签→窗口」一致），无分组时直挂窗口。
+    // P0-1（2026-11-25）：新叶子按激活锚点插到其后；既有已绑定叶子不因浏览器 index 重排。
+    const activeTab = allTabs.find((x) => x.active === true && x.id != null);
+    const anchor = activeTab ? leafByTabId(model, activeTab.id) : null;
+    const parentId = firstGroup ? firstGroup.id : ownerWin.id;
+    const leaf = insertTabAfter(
+      model,
+      t.title || pageAddressOf(t),
+      t.url || "",
+      parentId,
+      anchor && anchor.parentId === parentId ? anchor.id : null
+    );
     leaf.tabId = t.id;
     leaf.open = true;
     usedTabIds.add(t.id);

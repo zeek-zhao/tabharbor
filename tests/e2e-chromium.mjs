@@ -162,7 +162,7 @@ try {
     undefined,
     { timeout: 5000 }
   );
-  // M8/B5/Q3：Gist 配置字段（去 repo/branch/path，加 gistId/desc/fileName/private）
+  // 2026-11-25 备份三分类：Gist 配置字段 + login 派生密码（无密码框）+ GET Gist 恢复入口
   const ghFields = await win.evaluate(() =>
     [
       "#ghToken",
@@ -171,12 +171,16 @@ try {
       "#ghFileName",
       "#ghPrivate",
       "#ghBackupFreq",
-      "#ghBackupPwd",
       "#btnAuthorizeGithub",
       "#btnBackupGithub",
+      "#btnRestoreGithub",
     ].every((s) => !!document.querySelector(s))
   );
-  assert.ok(ghFields, "Gist 配置字段/两步按钮缺失（Q3）");
+  assert.ok(ghFields, "Gist 配置字段/恢复入口缺失（三分类）");
+  const noPwdField = await win.evaluate(() => !document.querySelector("#ghBackupPwd"));
+  assert.ok(noPwdField, "GitHub 卡片仍存在 ghBackupPwd 密码框（应改用 login 派生密码）");
+  const freqEnabled = await win.evaluate(() => !document.querySelector("#ghBackupFreq").disabled);
+  assert.ok(freqEnabled, "定时频率选项仍被禁用（login 派生密码后应恢复可用）");
   const noOldFields = await win.evaluate(
     () => !document.querySelector("#ghRepo") && !document.querySelector("#ghBranch")
   );
@@ -201,16 +205,28 @@ try {
     await win.evaluate(() => document.querySelector("#ghBackupSub").classList.contains("hidden")),
     "展开本地卡片后 GitHub 配置区应折叠"
   );
+  // 2026-11-25：本地加密开关默认关闭（明文），密码框默认隐藏；三分类按钮齐全
+  const localThreeCat = await win.evaluate(() => {
+    const sw = document.querySelector("#localEncrypt");
+    return (
+      !!sw &&
+      !sw.classList.contains("on") &&
+      document.querySelector("#localPwdRow").classList.contains("hidden") &&
+      !!document.querySelector("#btnImportLocal") &&
+      !!document.querySelector("#btnImportHtml")
+    );
+  });
+  assert.ok(localThreeCat, "本地加密开关默认应关闭、密码框隐藏，且三分类导入按钮齐全");
   await win.click('[data-modal-close="modalSetting"]');
   const closed = await win.evaluate(() => document.querySelector("#modalSetting").hidden);
   assert.ok(closed, "设置弹窗未关闭");
-  console.log("E2E 4/7 设置弹窗三分类 / 主页入口 / 备份两步卡片切换通过");
+  console.log("E2E 4/7 设置弹窗三分类 / 主页入口 / 备份三卡片切换通过");
 
   const kvCount = await win.evaluate(() => {
     document.querySelector("#btnKeys").click();
     return document.querySelectorAll("#keysList .kv").length;
   });
-  assert.equal(kvCount, 14, `快捷键表条目数异常: ${kvCount}`);
+  assert.equal(kvCount, 15, `快捷键表条目数异常: ${kvCount}`);
   await win.evaluate(() => {
     document.querySelector('[data-modal-close="modalKeys"]').click();
     document.querySelector("#btnGuide").click();
@@ -222,7 +238,7 @@ try {
   await win.waitForFunction(() => document.querySelector("#modalGuide").hidden, undefined, {
     timeout: 5000,
   });
-  console.log("E2E 5/7 快捷键表（14 项）与上手指南弹窗通过");
+  console.log("E2E 5/7 快捷键表（15 项）与上手指南弹窗通过");
 
   // 回收站角标：追加一条 trash 记录 → onChanged 实时更新角标；弹窗渲染空态/条目
   await win.evaluate(() =>
@@ -288,22 +304,39 @@ try {
     copyCheck.rows + copyCheck.leaves,
     `行内复制按钮数异常: ${JSON.stringify(copyCheck)}`
   );
+  // 2026-11-27 P0：每个叶子行尾有垃圾桶按钮（删除到回收站唯一行内入口）。
+  const trashCount = await win.evaluate(
+    () => document.querySelectorAll("#spBody .leaf .trash-x[data-act='trash']").length
+  );
+  assert.equal(trashCount, copyCheck.leaves, "叶子行尾垃圾桶按钮数异常");
+  console.log("E2E 2026-11-27 叶子行尾垃圾桶按钮通过");
   const tabNode = win.locator('.leaf[data-id="t_project_1"]');
   await tabNode.click();
   const selected = await tabNode.evaluate((el) => el.classList.contains("selected"));
   assert.ok(selected, "单击标签未出现 leaf.selected");
   const groupRow = win.locator('.node[data-id="g_project"] .node-row');
   await groupRow.click();
+  await win.waitForFunction(
+    () => {
+      const g = document.querySelector('.node[data-id="g_project"]');
+      return (
+        !!g && g.classList.contains("collapsed") && !g.querySelector('.leaf[data-id="t_project_1"]')
+      );
+    },
+    undefined,
+    { timeout: 5000 }
+  );
   const collapsedNow = await win.evaluate(() => {
     const g = document.querySelector('.node[data-id="g_project"]');
     return g.classList.contains("collapsed") && !g.querySelector('.leaf[data-id="t_project_1"]');
   });
   assert.ok(collapsedNow, "单击分组未折叠子树（FR-013）");
   await groupRow.click();
-  const expandedAgain = await win.evaluate(
-    () => !!document.querySelector('.leaf[data-id="t_project_1"]')
+  await win.waitForFunction(
+    () => !!document.querySelector('.leaf[data-id="t_project_1"]'),
+    undefined,
+    { timeout: 5000 }
   );
-  assert.ok(expandedAgain, "再次单击未展开子树");
   console.log("E2E 8/7 原型树标记 + 单击选中/折叠（FR-036/013）通过");
 
   // —— 缺陷修复轮：D3 双击打开 / D2 行内打开 / D4 显示链接 / D8 单关 / D9 折叠自动展开 ——
@@ -357,11 +390,33 @@ try {
       const created = ts[ts.length - 1];
       return {
         ok: created.index === exp.anchorIndex + 1 && created.openerTabId === exp.anchorId,
+        createdId: created.id,
         why: `new.index=${created.index} opener=${created.openerTabId} anchor=${exp.anchorId}@${exp.anchorIndex}`,
       };
     }, pre);
     assert.ok(adj.ok, `容器加号相邻插入断言失败：${adj.why}`);
-    console.log(`E2E P0-1 容器加号相邻插入（${adj.why}）通过`);
+    // 2026-11-25 审计 P0-1：浏览器物理位次之外，还要断言模型树内位次。
+    // 锚点叶子与点击容器同父 → 紧跟锚点；不同父 → 保留当前容器父级并追加末尾。
+    const tree = await win.evaluate(
+      async (exp) => {
+        const { tabs } = await chrome.storage.local.get("tabs");
+        const leaf = (tabs || []).find((t) => t.tabId === exp.createdId);
+        if (!leaf) return { ok: false, why: `新建标签 tabId=${exp.createdId} 未写入模型` };
+        const anchorLeaf = (tabs || []).find((t) => t.tabId === exp.anchorId);
+        const siblings = (tabs || []).filter((t) => t.parentId === leaf.parentId);
+        const at = siblings.findIndex((t) => t.id === leaf.id);
+        const sameParent = anchorLeaf && anchorLeaf.parentId === leaf.parentId;
+        const anchorAt = sameParent ? siblings.findIndex((t) => t.id === anchorLeaf.id) : -1;
+        const ok = sameParent ? at === anchorAt + 1 : at === siblings.length - 1;
+        return {
+          ok,
+          why: `leaf@${at}/${siblings.length} anchor@${anchorAt} parent=${leaf.parentId}`,
+        };
+      },
+      { ...pre, createdId: adj.createdId }
+    );
+    assert.ok(tree.ok, `容器加号模型树位次断言失败：${tree.why}`);
+    console.log(`E2E P0-1 容器加号相邻插入（浏览器 ${adj.why}；模型树 ${tree.why}）通过`);
   }
   // 2026-11-24 行内按钮审计：叶子已无「打开」按钮，双击叶子打开网页
   assert.equal(
@@ -596,27 +651,21 @@ try {
 
   console.log("E2E 9/7 侧边栏页同源渲染通过（双模式同一数据源）");
 
-  // —— #32/R2 M3 演练：真实文件导入（R2 合并为「导入书签」窗口，不再全量替换）——
-  win.on("dialog", (dialog) => void dialog.accept()); // 恢复备份等场景的确认弹窗兜底
-  const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-import.json");
-  const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-m3-invalid.json");
-  const windowsBefore = await win.evaluate(
-    () => document.querySelectorAll('.node[data-kind="window"]').length
-  );
+  // —— 2026-11-25 P0：真实文件导入分类——
+  // 完整快照 JSON（含 settings/trash/exportedAt）走二次确认 → 全量覆盖（不再合并）。
+  win.on("dialog", (dialog) => void dialog.accept()); // 覆盖确认弹窗兜底
+  const m3ImportPath = path.join(repoRoot, "samples/datasets/tabharbor-import.json");
+  const m3InvalidPath = path.join(repoRoot, "samples/datasets/tabharbor-invalid.json");
   await win.setInputFiles("#importFile", m3ImportPath);
   await win.waitForFunction(
-    (n) => document.querySelectorAll('.node[data-kind="window"]').length === n + 1,
-    windowsBefore,
+    () => document.querySelector("#dataStatus").textContent.includes("完整快照已恢复"),
+    undefined,
     { timeout: 5000 }
   );
-  const winNames = await win.evaluate(() =>
-    [...document.querySelectorAll(".win-name")].map((x) => x.textContent.trim())
-  );
-  assert.ok(winNames.includes("导入书签"), `导入书签窗口未新增: ${winNames.join(",")}`);
   const statusOk = await win.textContent("#dataStatus");
   assert.ok(
-    statusOk.includes("导入完成") && statusOk.includes("导入书签"),
-    `R2 合并导入提示缺失: ${statusOk}`
+    statusOk.includes("全量覆盖") && statusOk.includes("回收站"),
+    `完整快照覆盖恢复提示缺失: ${statusOk}`
   );
 
   await win.setInputFiles("#importFile", m3InvalidPath);
@@ -627,13 +676,24 @@ try {
   );
   const statusFail = await win.textContent("#dataStatus");
   assert.ok(statusFail.includes("版本不兼容"), `非法版本拒绝提示缺失: ${statusFail}`);
+  // 完整快照覆盖演练改写了模型（样例无 open/tabId 叶子）；重播种样例供后续 PiP/互转段使用。
+  await win.evaluate(async (sample) => {
+    await chrome.storage.local.clear();
+    await chrome.storage.local.set(sample);
+  }, SAMPLE);
+  await win.reload();
+  await win.waitForFunction(
+    () => !!document.querySelector('.node[data-id="w_work"] > .node-row'),
+    undefined,
+    { timeout: 10000 }
+  );
   // R8：行内图标放大（SVG width=14）
   const triW = await win.evaluate(() => {
     const svg = document.querySelector(".tri svg") || document.querySelector(".leaf svg");
     return svg ? svg.getAttribute("width") : null;
   });
   assert.equal(triW, "14", `R8 图标宽度异常: ${triW}`);
-  console.log("E2E 13/7 M3 导入演练（R2 合并导入 + 非法版本拒绝 + R8 图标）通过");
+  console.log("E2E 13/7 导入分类演练（完整快照覆盖恢复 + 非法版本拒绝 + R8 图标）通过");
 
   // —— D5：历史跳转 + 置顶真实实现（修复前：仅 toast 待实现）——
   await win.click("#btnHistory");
@@ -1141,7 +1201,7 @@ try {
 
   // Node 侧 fetch 不支持 chrome-extension:// scheme；直接用 fs 读取真实样例作为导入文本
   const bookmarkHtml = fs.readFileSync(
-    path.join(repoRoot, "samples/datasets/tabharbor-m3-bookmarks.html"),
+    path.join(repoRoot, "samples/datasets/tabharbor-bookmarks.html"),
     "utf8"
   );
   const imported = await win.evaluate(async (html) => {
@@ -1435,6 +1495,95 @@ try {
     assert.equal(after, 0, "删除叶子到回收站后对应浏览器标签未被关闭");
     console.log("E2E 回收站口径反转：删除已开叶子同步关闭浏览器标签通过");
   }
+
+  // —— 主页 DOM 契约（浏览器实测任务）：真实扩展主页 + 配置注入 + 显隐/分页断言 ——
+  const homePage = await context.newPage();
+  await homePage.goto(`chrome-extension://${extId}/home/home.html`, {
+    waitUntil: "domcontentloaded",
+  });
+  await homePage.waitForFunction(() => !!document.querySelector("#homeMusicCard"), undefined, {
+    timeout: 10000,
+  });
+  // 注入：启用音乐但无本地曲目/无外链；一个置顶站点；验证空状态与置顶独立行。
+  await homePage.evaluate(async () => {
+    const { settings } = await chrome.storage.local.get("settings");
+    await chrome.storage.local.set({
+      settings: {
+        ...(settings || {}),
+        homepage: {
+          engine: "bing",
+          sites: [
+            { id: "pinned-1", title: "置顶站", url: "https://example.com/pinned", pinned: true },
+            { id: "site-1", title: "普通站", url: "https://example.com/normal" },
+          ],
+          music: {
+            enabled: true,
+            local: { tracks: [], playlists: [] },
+            external: { embedUrl: "" },
+          },
+        },
+      },
+    });
+  });
+  await homePage.reload({ waitUntil: "domcontentloaded" });
+  await homePage.waitForFunction(
+    () =>
+      document.querySelector("#homeMusicEmpty") &&
+      !document.querySelector("#homeMusicEmpty").hidden,
+    undefined,
+    { timeout: 10000 }
+  );
+  const domState = await homePage.evaluate(() => ({
+    cardVisible: !document.querySelector("#homeMusicCard").hidden,
+    emptyVisible: !document.querySelector("#homeMusicEmpty").hidden,
+    addBtn: !!document.querySelector("#homeMusicEmptyAdd"),
+    musicIcon: !!document.querySelector("#homeMusicToggle"),
+    pinnedRow: !!document.querySelector("#home-pinned-row, .home-pinned-row"),
+    pinnedChip: [...document.querySelectorAll(".home-site-chip")].some((b) =>
+      b.textContent.includes("置顶")
+    ),
+  }));
+  assert.ok(
+    domState.cardVisible && domState.emptyVisible && domState.addBtn,
+    "音乐空状态 DOM 契约失败"
+  );
+  assert.ok(!domState.musicIcon, "右上角音乐图标未移除");
+  assert.ok(domState.pinnedRow && !domState.pinnedChip, "置顶站点独立行 DOM 契约失败");
+  console.log("E2E 主页空状态/音乐图标移除/置顶独立行 DOM 契约通过");
+
+  // 设置面板六分页：打开后默认 appearance，仅当前页可见；切 music 页后其它页隐藏。
+  await homePage.click("#homeSettings");
+  await homePage.waitForFunction(() => !document.querySelector("#homeCfgMask").hidden, undefined, {
+    timeout: 5000,
+  });
+  const tabs = await homePage.$$eval(".home-cfg-tab", (els) => els.length);
+  assert.equal(tabs, 6, "设置面板分页数量应为 6");
+  await homePage.click('.home-cfg-tab[data-page="music"]');
+  const pageState = await homePage.evaluate(() => ({
+    musicVisible: !document.querySelector('.home-cfg-page[data-page="music"]').hidden,
+    othersHidden: [...document.querySelectorAll(".home-cfg-page")]
+      .filter((el) => el.dataset.page !== "music")
+      .every((el) => el.hidden),
+  }));
+  assert.ok(pageState.musicVisible && pageState.othersHidden, "设置分页 DOM 契约失败");
+  await homePage.evaluate(() => (document.querySelector("#homeCfgMask").hidden = true));
+  console.log("E2E 设置面板六分页深链/显隐 DOM 契约通过");
+
+  // 方向键归属：→ 从 body 聚焦首个站点；← 专属 focus-panel，不把焦点留在站点。
+  await homePage.evaluate(() => document.body.focus());
+  await homePage.keyboard.press("ArrowRight");
+  const focusedAfterRight = await homePage.evaluate(
+    () => !!document.activeElement?.matches("#homeSites a.home-site")
+  );
+  assert.ok(focusedAfterRight, "body 级 → 未聚焦首个站点");
+  await homePage.evaluate(() => document.activeElement?.blur?.());
+  await homePage.keyboard.press("ArrowLeft");
+  const focusedAfterLeft = await homePage.evaluate(
+    () => !!document.activeElement?.matches("#homeSites a.home-site")
+  );
+  assert.ok(!focusedAfterLeft, "← 被站点导航拦截（应留给 focus-panel）");
+  console.log("E2E 方向键归属（← focus-panel / → 站点网格）DOM 契约通过");
+  await homePage.close();
 
   console.log("E2E PASS — TabHarbor 真实 Chromium 冒烟全部通过");
 } finally {

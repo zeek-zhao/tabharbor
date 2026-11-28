@@ -108,9 +108,28 @@ export async function removeSeedTab(chromeApi, seedId, keepTabId) {
 // D17：只信 tabId，无 URL 兜底；导入/未绑定叶子无 tabId 时一律新建独立标签页（D18）。
 // D16：未打开时按「所属顶层模型窗口」归属，离线/未绑定窗口新建真实窗口并回填 windowId。
 export async function openTab(chromeApi, node, openUrls, opts = {}) {
+  // 打开模式（2026-11-27 AI 任务）：foreground（默认）| background；focus-webpage 作为
+  // 显式聚焦网页动作的兼容别名（行为同 foreground）。
+  // - foreground：激活目标标签 + windows.update(focused)，网页获得浏览器焦点，返回 focused:true。
+  // - background：纯后台打开（active:false，不激活不聚焦），返回 backgrounded:true。
+  // 兼容旧参数：opts.focus=true 等价 focus-webpage；opts.background=true 等价 background。
+  const mode = opts.mode
+    ? opts.mode
+    : opts.focus === true
+      ? "focus-webpage"
+      : opts.background === true
+        ? "background"
+        : "foreground";
+  const background = mode === "background";
   const tabs = await chromeApi.tabs.query({});
   const hit = node.tabId != null ? tabs.find((t) => t.id === node.tabId) : undefined;
   if (hit) {
+    if (background) {
+      // 后台模式：已开标签仅确保存在，不抢焦点、不切换浏览器激活标签与窗口。
+      return { backgrounded: true, tabId: hit.id };
+    }
+    // 切换页面：激活标签并把窗口焦点交给网页（foreground 命中已开标签即聚焦窗口；
+    // 「焦点留插件」仅指打开后 UI 层的宿主内焦点回收，见 shell openTabMode 处理）。
     await chromeApi.tabs.update(hit.id, { active: true });
     await chromeApi.windows.update(hit.windowId, { focused: true });
     return { focused: true };
@@ -130,16 +149,21 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
       host.seedId =
         made && made.tabs && made.tabs[0] && made.tabs[0].id != null ? made.tabs[0].id : null;
     }
+    // background 显式 active:false；foreground / focus-webpage 兼容别名用默认 active:true 前台打开。
+    const activeOpt = background ? { active: false } : {};
     const created =
       host.windowId != null
-        ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId })
-        : await chromeApi.tabs.create({ url: node.url });
+        ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId, ...activeOpt })
+        : await chromeApi.tabs.create({ url: node.url, ...activeOpt });
     const tabId = created && created.id != null ? created.id : undefined;
     if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
+    // 2026-11-27 复核 P0-2：新建标签也要带模式标记——foreground 时 active:true 自然前台切换
+    // （旧 switch-keep-focus 口径已迁移为 foreground），UI 层按模式决定是否回收焦点。
     return {
       created: true,
       tabId,
       orphan: true,
+      ...(background ? { backgrounded: true } : { focused: true }),
       ...(host.windowId != null ? { rebound: true, windowId: host.windowId } : {}),
     };
   }
@@ -147,16 +171,24 @@ export async function openTab(chromeApi, node, openUrls, opts = {}) {
   // P0-1：复用已有真实窗口（非 rebound）时，查该窗口激活标签作为锚点插到右侧；
   // 新建窗口（rebound）只有 seed 空白页，不指定索引，保持自然追加后清理 seed。
   const insert = host.rebound ? {} : await queryInsertAnchor(chromeApi, host.windowId);
+  const activeOpt = background ? { active: false } : {};
   const created =
     host.windowId != null
-      ? await chromeApi.tabs.create({ url: node.url, windowId: host.windowId, ...insert })
-      : await chromeApi.tabs.create({ url: node.url, ...insert });
+      ? await chromeApi.tabs.create({
+          url: node.url,
+          windowId: host.windowId,
+          ...insert,
+          ...activeOpt,
+        })
+      : await chromeApi.tabs.create({ url: node.url, ...insert, ...activeOpt });
   const tabId = created && created.id != null ? created.id : undefined;
   // O3/D24：目标标签建好后再清理新窗口自带的空白 seed，避免误关窗口/误删目标标签
   if (host.seedId != null) await removeSeedTab(chromeApi, host.seedId, tabId);
   return {
     created: true,
     tabId,
+    // 2026-11-27 复核 P0-2：同分支 1——新建标签补模式标记，保证焦点回收覆盖新建路径。
+    ...(background ? { backgrounded: true } : { focused: true }),
     ...(host.rebound ? { rebound: true, windowId: host.windowId, topWindowId: host.topWinId } : {}),
   };
 }

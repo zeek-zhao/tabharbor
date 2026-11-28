@@ -4,7 +4,17 @@
 
 // H3（2026-11-24 主页审计）：主页配置存于 settings.homepage，settings 已在 ALL_KEYS 中，
 // 无需新增顶层键；此处引入默认值供全新安装与迁移合并。
+// P0（2026-11-25）：迁移时需按当前默认集合补齐字段/引擎回退，故引入规范化工具。
+import { markPerf } from "./perf.js";
 import { DEFAULT_HOMEPAGE } from "./homepage.js";
+import { defaultKeymap, normalizeKeymap } from "./keymap.js";
+import {
+  HOMEPAGE_DEFAULTS_VERSION,
+  SETTINGS_SCHEMA_VERSION,
+  normalizeHomeConfig,
+  migrateHomeConfig,
+  needsHomepageMigration,
+} from "./homepage.js";
 
 export const MODEL_KEYS = ["windows", "groups", "tabs"];
 export const ALL_KEYS = [
@@ -17,6 +27,9 @@ export const ALL_KEYS = [
 ];
 
 export const DEFAULT_SETTINGS = {
+  // P0（2026-11-25）：设置结构版本 + 主页默认配置版本，供旧配置自动迁移识别（不弹破坏性覆盖）。
+  settingsSchemaVersion: SETTINGS_SCHEMA_VERSION,
+  homepageDefaultsVersion: HOMEPAGE_DEFAULTS_VERSION,
   theme: "dark",
   openMode: "sidebar",
   restoreLast: true,
@@ -24,6 +37,13 @@ export const DEFAULT_SETTINGS = {
   copyFormat: "md",
   linkShow: false,
   backupTarget: "local",
+  // 2026-11-27 AI 任务：唯一状态源 = openTabMode，值域收敛为两种——
+  // foreground（默认）：Enter/双击前台跳转，网页获得浏览器焦点，不承诺插件保留键盘焦点；
+  // background：新标签 active:false、已开标签不激活，焦点留在插件。
+  // 旧值迁移（migrateSettings）：switch-keep-focus / focus-webpage → foreground。
+  openTabMode: "foreground",
+  // AI 任务：面板快捷键映射（动作注册表见 keymap.js）；可录制/冲突提示/恢复默认。
+  keymap: defaultKeymap(),
   // M8/B5/Q3（2026-11-24 菜单审计）：GitHub 备份改私有 Gist（去 repo/branch/path）
   ghToken: "", // B10：明文存本机扩展存储，UI 已明确提示
   ghGistId: "", // 已有 Gist ID（20+ hex）→ PATCH 更新；空 → POST 新建
@@ -37,22 +57,69 @@ export const DEFAULT_SETTINGS = {
     ...DEFAULT_HOMEPAGE,
     customEngines: [],
     sites: DEFAULT_HOMEPAGE.sites.map((s) => ({ ...s })),
+    wallpaper: { ...DEFAULT_HOMEPAGE.wallpaper },
+    noteItems: [],
   },
 };
 
+/**
+ * 设置层迁移（P0，2026-11-25）：non-destructive，loadAll 纯读不写库。
+ * - 旧持久化 homepage（版本落后）走 migrateHomeConfig：保留用户站点/自定义引擎/壁纸，
+ *   追加缺失的内置默认站点，失效引擎回退必应，隐藏站点不重复加回；
+ * - 迁移结果即时生效于内存（下次 saveSettings 自然落库），无需用户弹窗即可看到新增站点；
+ * - 补齐 settingsSchemaVersion / homepageDefaultsVersion 版本标记；
+ * - 清除旧 ghBackupPassword（密码不落盘红线）。
+ * 「恢复插件默认」属破坏性操作，不在此自动执行，由 home.js 一次性升级弹窗显式确认。
+ */
+export function migrateSettings(rawSettings) {
+  const merged = { ...DEFAULT_SETTINGS, ...(rawSettings || {}) };
+  delete merged.ghBackupPassword;
+  // 2026-11-27 复核 P1-5：旧 openTabsInBackground 开关一次性迁移到 openTabMode 并删除旧字段——
+  // true（后台）→ background；false（前台）→ foreground；未显式设置则保持默认。
+  if (rawSettings && typeof rawSettings.openTabsInBackground === "boolean") {
+    if (
+      typeof merged.openTabMode !== "string" ||
+      !["foreground", "background", "focus-webpage"].includes(merged.openTabMode) ||
+      merged.openTabMode === DEFAULT_SETTINGS.openTabMode
+    ) {
+      merged.openTabMode = rawSettings.openTabsInBackground ? "background" : "foreground";
+    }
+  }
+  delete merged.openTabsInBackground;
+  // 2026-11-27 AI 任务：switch-keep-focus / focus-webpage 旧值迁移为 foreground（前台语义合并）。
+  if (merged.openTabMode === "switch-keep-focus" || merged.openTabMode === "focus-webpage")
+    merged.openTabMode = "foreground";
+  // AI 任务：键位映射规范化（非法条目回退默认键）。
+  merged.keymap = normalizeKeymap(merged.keymap);
+  if (rawSettings && rawSettings.homepage && typeof rawSettings.homepage === "object") {
+    merged.homepage =
+      rawSettings.homepageDefaultsVersion !== HOMEPAGE_DEFAULTS_VERSION
+        ? migrateHomeConfig(rawSettings.homepage).config
+        : normalizeHomeConfig(rawSettings.homepage);
+  }
+  merged.settingsSchemaVersion = SETTINGS_SCHEMA_VERSION;
+  merged.homepageDefaultsVersion = HOMEPAGE_DEFAULTS_VERSION;
+  return merged;
+}
+
 export async function loadAll(chromeApi = globalThis.chrome) {
   const got = await chromeApi.storage.local.get(ALL_KEYS);
+  // 记录迁移前的版本落后状态（内存标志，不写库），供 UI 一次性升级弹窗判断。
+  const needsUpgrade = needsHomepageMigration(got.settings);
+  const settings = migrateSettings(got.settings);
   return {
     windows: got.windows || [],
     groups: got.groups || [],
     tabs: got.tabs || [],
     trash: got.trash || [],
-    settings: { ...DEFAULT_SETTINGS, ...(got.settings || {}) },
+    settings,
     lastBounds: got.lastBounds || {},
+    homepageNeedsUpgrade: needsUpgrade,
   };
 }
 
 export async function saveModel(m, chromeApi = globalThis.chrome) {
+  markPerf("storageWrites");
   await chromeApi.storage.local.set({
     windows: m.windows || [],
     groups: m.groups || [],
@@ -65,6 +132,7 @@ export async function saveModel(m, chromeApi = globalThis.chrome) {
 export async function saveSettings(patch, chromeApi = globalThis.chrome) {
   const { settings } = await loadAll(chromeApi);
   const next = { ...settings, ...patch };
+  markPerf("storageWrites");
   await chromeApi.storage.local.set({ settings: next });
   return next;
 }
@@ -72,12 +140,18 @@ export async function saveSettings(patch, chromeApi = globalThis.chrome) {
 export async function appendTrash(entry) {
   const { trash } = await loadAll();
   const next = [{ ...entry, savedAt: entry.savedAt || new Date().toISOString() }, ...trash];
+  markPerf("storageWrites");
   await chrome.storage.local.set({ trash: next });
   return next;
 }
 
-export async function saveBounds(b) {
-  await chrome.storage.local.set({ lastBounds: b });
+// 合并写入（2026-11-25 审计 §8.2）：只更新传入的 patch 字段，不清空窗口位置/高度等其他 bounds。
+export async function saveBounds(patch, chromeApi = globalThis.chrome) {
+  const got = await chromeApi.storage.local.get(["lastBounds"]);
+  const next = { ...(got.lastBounds || {}), ...(patch || {}) };
+  markPerf("storageWrites");
+  await chromeApi.storage.local.set({ lastBounds: next });
+  return next;
 }
 
 // 模型键（含 trash/settings 视需要）变更广播：双模式实时同步的数据通道（FR-001/FR-012）

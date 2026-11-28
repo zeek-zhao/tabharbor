@@ -1,71 +1,87 @@
-# 导入导出与加密备份指南（backup-guide）
+# 导入导出与备份指南（backup-guide）
 
 > 面向使用 / 验收人员。以当前源码 `src/core/import-export.js`、`src/core/crypto.js` 为准；
-> 功能状态见 `docs/requirements/requirements-status.md`（F-41/F-42/F-43）。
+> 功能状态见 `docs/requirements/requirements-status.md`。
+> 2026-11-25 备份三分类重构：**本地文件 / GitHub Gist / 书签 HTML** 三类入口，各有导出与导入/恢复。
 
-## 1. 能力总览
+## 1. 三分类总览
 
-| 能力 | 支持范围 | 关键约束 |
-| --- | --- | --- |
-| 导出 JSON | 全量 payload：`version/exportedAt/windows/groups/tabs/settings/trash` | `version === 1`（EXPORT_VERSION） |
-| 导出 HTML | 标准 Netscape Bookmark 格式；仅表达书签 / 文件夹层级 | 窗口语义不导出，顶层节点并列输出 |
-| 导出 LinkMap | 三层模型的文本链接清单 | — |
-| 导入数据（单按钮 · 自动嗅探） | JSON 快照 / Netscape HTML 书签 / 主页配置 / 加密备份信封 | 按内容识别，不看后缀、不弹格式选项 |
-| 本地加密快照 | `sealSnapshot` → 加密信封，存 `localBackups` + 可选下载 `.tbh` | 上限 20 条滚动淘汰 |
-| GitHub Gist 备份 | 加密完整快照写入私有 Gist：首次 POST 新建、后续 PATCH 更新 | 需可选主机权限 `https://api.github.com/*` |
-| 恢复 | 解密校验通过后整体原子还原（树 + 回收站 + 设置 + 主页配置） | 失败不写库，按四类提示 |
-| 下载 | `chrome.downloads` data: URL，`saveAs: true` | downloads 只负责保存导出文件 |
+| 分类 | 数据范围 | 格式 | 加密 | 导入语义 |
+| --- | --- | --- | --- | --- |
+| **本地文件** | 完整快照：书签树 + 回收站 + 设置 + 主页配置 | 明文 `.json` 或加密 `.tbh` | 可选（默认关闭） | 解密/解析 + 结构校验通过后，二次确认全量覆盖 |
+| **GitHub Gist** | 完整快照（同上） | 加密信封字符串写入私有 Gist | 默认加密，密码 = 当前 Token 的 GitHub login | GET Gist → login 解密 → 校验 → 二次确认全量覆盖 |
+| **书签 HTML** | 仅书签/文件夹层级，不含设置/回收站/主页配置 | Netscape Bookmark HTML | 不加密 | 合并为「导入书签」新窗口，不覆盖当前树 |
 
-## 2. 导入（自动嗅探）
+加密矩阵：
 
-1. 打开「设置 → 备份」面板，点「导入数据」，选择文件。
-2. 扩展按内容自动识别格式：
-   - **JSON 快照 / Netscape HTML**：合并导入为一个新窗口（不覆盖现有树），导入结果为离线窗口；
-   - **主页配置** / **加密备份**：先弹一次破坏性覆盖确认再执行（加密备份还需输入密码）。
-3. 非法文件（版本不兼容 / 缺字段 / 结构非法）被拒绝并提示，现有树不变。
+| 来源 | 加密 | 密码来源 | 密码落盘 | 恢复方式 |
+| --- | --- | --- | --- | --- |
+| 书签 HTML | 否 | — | — | 内容嗅探后合并导入 |
+| 本地文件 · 明文 | 否 | — | — | 内容嗅探后走完整快照恢复确认 |
+| 本地文件 · 加密 | 是 | 本地卡片临时输入 | 否 | 恢复时提示输入本地备份密码 |
+| GitHub Gist | 是 | `GET /user` 返回 `login` | 否 | `owner.login`（取不到再 `/user`）自动解密；旧 Gist 可手动输旧密码兜底 |
 
-## 3. 本地加密备份
+## 2. 通用导入（自动嗅探）
 
-1. 展开设置 → 备份的「本地」卡片，填写备份密码，点「本地备份」。
-2. 备份是加密完整快照（书签树 + 回收站 + 设置含主页配置），下载为 `.tbh`。
-3. 快照列表按时间倒序展示；选中条目 → 输入密码 → 恢复。
-4. 快照最多保留 20 条，第 21 次备份滚动淘汰最早的快照。
-5. **密码边界**：密码不落盘、不写入备份文件、不写日志、不做会话暂存；每次加解密由用户临时输入，用完即清。
+设置 → 备份 →「导入数据」选择文件，后端按内容识别（不看后缀、不弹格式选项）：
 
-## 4. GitHub 私有 Gist 备份
+- **HTML / LinkMap / 普通 JSON 树** → 合并导入为一个新「导入书签」窗口，保留当前树与设置；
+- **主页配置** → 仅覆盖搜索引擎/自定义引擎/常用网址，二次确认后写库；
+- **本地明文 JSON 完整快照**（含 windows/groups/tabs + settings + trash + exportedAt）→ 完整快照恢复链路：`validateTree` 结构校验通过 → 二次确认 → 全量覆盖树/回收站/设置/主页配置；**纯书签树 JSON**（仅三层数组、无完整快照标记）仍合并为「导入书签」窗口，不覆盖现有设置与回收站。
+- **加密信封 / Gist 快照** → 解密校验 + 二次确认后全量覆盖。
 
-1. 展开「GitHub」卡片，填写 Personal Access Token / Gist ID（留空则首次新建）/ 描述 / 文件名，点「保存并校验配置」；在 Chrome 提示中批准 `https://api.github.com/*` 可选主机权限。
-2. 单独填写备份密码，点「确认备份」。远端保存的是加密完整快照：
-   - 已填 Gist ID → `PATCH https://api.github.com/gists/{id}` 更新；
-   - 未填 → `POST https://api.github.com/gists` 新建私有 Gist。
-3. 定时频率：关闭 / 每 10 分钟 / 每 30 分钟 / 每小时 / 每天（alarm 仅在目标为 GitHub 且频率非关闭时注册；切走即清除）。
-4. **不使用**仓库 / 分支 / 路径 / Contents API；`api.github.com` 是全扩展唯一出站地址，且仅 backup 模块使用。
-5. Token 以明文保存在本机扩展存储，界面不回显；请勿在公用设备使用，不要把 Token 粘贴到 issue、日志或截图。撤销可选主机权限或切回本地备份即停止远端同步。
+非法文件（版本不兼容 / 缺字段 / 结构非法）被拒绝并提示，现有树不变。「从本地文件导入」「导入书签 HTML」按钮复用同一文件输入与嗅探逻辑。
 
-> 仓库自动化测试全部使用 mock fetch，不会真正写入 GitHub；真实线上演练留待正式版发布前完成。
+## 3. 本地文件卡片
 
-## 5. 恢复失败分类
+1. 展开「本地文件」卡片 →「配置备份」。
+2. **加密本地文件**开关：
+   - **关闭（默认）**：点「导出到本地文件」生成明文 `.json`，含 `windows/groups/tabs/settings/trash`；**文件含敏感标题、网址、备注和配置，请妥善保存**。恢复时不需要密码。
+   - **开启**：显示密码框，点导出生成 `.tbh` 加密信封（PBKDF2-SHA256 + AES-256-GCM）；密码不落盘、不写入文件、不写日志，用完即清。
+3. 「从本地文件导入」：选择文件后按内容嗅探恢复（明文直接校验，加密提示输密码）。
+4. 本机快照历史（最多 20 条滚动淘汰）**仅保留加密快照**：明文完整快照含敏感标题/网址/备注/设置，只下载文件、不写入扩展存储历史，降低本机其他扩展读取风险；加密条目恢复需密码，兼容旧加密 `.tbh`。
+5. 恢复是破坏性操作：二次确认后才全量覆盖。
+
+## 4. GitHub Gist 卡片
+
+1. 展开「GitHub」卡片 →「配置备份」，填 Token / Gist ID（留空首次新建）/ 描述 / 文件名，点「保存并校验配置」，在 Chrome 提示中批准 `https://api.github.com/*` 可选主机权限。
+2. **无密码输入框**。加密密码自动取当前 Token 对应的 GitHub login（`GET /user`），不保存、不写日志。
+3. 「备份到 GitHub」：Token → `GET /user` 取 login → 以 login 加密完整快照 → 首次 `POST /gists`、后续 `PATCH /gists/{id}` 更新私有 Gist。
+4. 「从 GitHub 恢复」：`GET /gists/{id}` → 按文件名/特征定位备份文件 → `owner.login`（取不到再 `/user`）解密 → 结构校验 → 二次确认全量覆盖。旧 Gist 用自定义密码加密时，login 解密失败会提示手动输入旧密码兜底一次，旧密码不落盘。
+5. **定时备份已恢复可用**：设置定时频率（关闭 / 每 10 分钟 / 每 30 分钟 / 每小时 / 每天）。alarm 触发时用已保存 Token 重新获取 login 派生密码完成备份，无需落盘密码；Token 缺失时不发网络请求。
+6. 安全提示：GitHub login 不是强密码，仅能防误读/轻量混淆，不能对抗可访问私有 Gist 或知道账号名的攻击者。请保持 Gist 私有、Token 仅申请 gist 权限、勿在公用设备使用；敏感书签建议同时保留本地加密备份。
+7. Token 以明文保存在本机扩展存储，请勿在公用设备使用，不要把 Token 粘贴到 issue/日志/截图。撤销可选主机权限或切回本地备份即停止远端同步。
+
+> 仓库自动化测试全部使用 mock fetch，不会真正写入 GitHub；真实线上演练（建私有 Gist、备份、恢复、PATCH 更新）仍待完成。
+
+## 5. 书签 HTML 卡片
+
+- 「导出书签 HTML」：标准 Netscape 格式，仅文件夹与书签层级，不加密、不含设置/回收站/主页配置。
+- 「导入书签 HTML」：走内容嗅探，即使文件被误改后缀也按内容识别为 HTML，合并导入新窗口，不触发全量覆盖确认。
+- 不引入浏览器 `bookmarks` API（C05 门禁）。
+
+## 6. 恢复失败分类
 
 | 情形 | 表现 |
 | --- | --- |
-| 密码错误 / 信封被篡改 | 解密失败提示，不写库（先校验后写库） |
+| 密码错误 / 信封被篡改 | 「密码错误或备份已被篡改，无法解密」，不写库（先校验后写库） |
 | 文件损坏 / 信封无法解析 | 「备份内容损坏，无法解析加密信封」 |
 | 结构非法 | 导入校验拒绝（缺字段 / ID 重复 / 父节点不存在），模型不变 |
 | 版本不兼容 | 「版本不兼容：期望 v1，实际 v2」 |
 | 未输入密码 | 「恢复加密备份需要输入备份密码」 |
-| GitHub 未授权可选权限 | 「尚未授予 api.github.com 可选权限」 |
-| GitHub 写入失败 | 「写入 GitHub 备份失败（HTTP 4xx/5xx）」等 |
+| Gist 不存在 / 无权限 / Token 无效 | `HTTP 404` / `401/403` 可读中文提示 |
+| 未授予可选权限 | 「尚未授予 api.github.com 可选权限」 |
 
-## 6. 隐私与红线边界
+## 7. 隐私与红线边界
 
-1. **不使用书签 API**：`tools/check-constraints.mjs` C05 门禁静态拒绝任何 `bookmarks.*` 调用；
-   浏览器原生书签一键导入已废弃（需 bookmarks 权限），替代路径是浏览器导出 HTML 后经「导入数据」导入。
-2. **零出站**：除用户显式授权的 `api.github.com`（仅 backup 模块）外不发起网络请求（C11/C12 门禁）。
-3. **加密备份整体原子还原**：书签树、回收站、设置（含主页配置）在同一加密包内一起还原，不拆分。
-4. 隐私政策全文见 [docs/PRIVACY.md](../PRIVACY.md)。
+1. **不使用书签 API**：`tools/check-constraints.mjs` C05 门禁静态拒绝任何 `bookmarks.*` 调用。
+2. **代码主动出站白名单**：除用户显式授权的 `api.github.com`（仅 backup 模块）、天气模块的 Open-Meteo（`api.open-meteo.com` / `geocoding-api.open-meteo.com`，仅 weather 模块）与在线壁纸图源（`wallhaven.cc` / `w.wallhaven.cc` / `nekos.best`，仅 wallpaper-online 模块、用户点击「加载候选」时请求一次）外，扩展代码不主动发起网络请求（均受 C11/C12 白名单约束）。首页壁纸支持**用户主动输入**的 https 图片链接作为运行时资源例外（非代码请求、不写源码字面量、拒绝伪协议与注入字符）；外链音乐为平台 iframe 资源、精选壁纸画廊为随包原创 CC0 渐变（零出站）；天气仅在用户配置城市/显式定位后请求一次、不后台轮询。上述运行时出站可能暴露网络环境信息，是否纳入正式红线白名单待产品/用户拍板。详见 [privacy 说明](../PRIVACY.md) 与 [壁纸来源评估](wallpaper-assessment.md)。
+3. **密码不落盘**：本地临时密码、GitHub login 均不写入设置/备份文件/日志；Token 仍按现有口径明文存本机并在 UI 明示风险。
+4. **完整快照原子还原**：书签树、回收站、设置（含主页配置）在同一快照内一起还原，校验失败前不写库。
+5. 隐私政策全文见 [docs/PRIVACY.md](../PRIVACY.md)。
 
-## 7. 测试覆盖
+## 8. 测试覆盖
 
-- BDD：`features/09_import_export.feature`（24 场景）+ `features/16_menu_backup_audit.feature`（17 场景）——导出 / 导入 / 嗅探 / 加密信封 / 两步卡片 / 恢复失败四分类 / 快照 20 条滚动淘汰 / alarm 注册与清除。
-- E2E：`tests/e2e-chromium.mjs` 13/7 段（真实文件选择器导入、非法版本拒绝）。
-- 样例校验：`npm test` 内含 `samples/validate-samples.mjs`（M3 三件套）。
+- BDD：`features/09_import_export.feature`、`features/16_menu_backup_audit.feature`、`features/17_ui_audit.feature`、`features/21_backup_three_categories.feature`（本地明文/加密、Gist login 加密与 owner.login 解密、旧 Gist 兜底、HTML、alarm 无密码、权限红线、三宿主 UI）。
+- E2E：`tests/e2e-chromium.mjs`（真实文件选择器导入、非法版本拒绝、相邻插入断言）。
+- 真机/GitHub 线上证据（真实 Token、跨设备导入、service worker 重启后定时备份）尚未补齐，**不标注「已验证/全段通过」**。

@@ -11,36 +11,10 @@
     <main class="home-wrap">
       <div class="home-top">
         <div class="home-brand"><span class="logo-mark"></span> TabHarbor</div>
-        <button id="homeSettings" class="tbtn" title="主页设置" aria-label="主页设置">
-          <svg
-            viewBox="0 0 24 24"
-            width="16"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path
-              d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.9 4.6a1.7 1.7 0 0 0 1.56-1.03V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.9v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"
-            />
-          </svg>
-        </button>
-      </div>
-
-      <section class="home-search">
-        <form id="homeSearchForm" class="home-search-box" autocomplete="off">
-          <select id="homeEngine" class="home-engine" title="选择搜索引擎" aria-label="搜索引擎"></select>
-          <input
-            id="homeQ"
-            class="home-q"
-            type="text"
-            placeholder="搜索或输入网址，回车打开…"
-            aria-label="搜索关键词"
-          />
-          <button class="home-go" type="submit" title="搜索" aria-label="搜索">
+        <div class="home-top-actions">
+          <!-- 2026-11-28 浏览器实测任务：移除右上角单独音乐图标入口——音乐只在右栏
+               homeMusicCard 中呈现；配置入口保留在设置面板音乐分页。 -->
+          <button id="homeSettings" class="tbtn" title="主页设置" aria-label="主页设置">
             <svg
               viewBox="0 0 24 24"
               width="16"
@@ -51,61 +25,441 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              <circle cx="11" cy="11" r="7" />
-              <path d="M20 20l-3.5-3.5" />
+              <circle cx="12" cy="12" r="3" />
+              <path
+                d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1.11-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.08A1.7 1.7 0 0 0 4.6 8.9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 8.9 4.6a1.7 1.7 0 0 0 1.56-1.03V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 8.9v.08a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.08A1.7 1.7 0 0 0 19.4 15Z"
+              />
             </svg>
           </button>
-        </form>
-      </section>
-
-      <section class="home-sites-wrap">
-        <div class="home-sites-head">
-          <span class="home-sites-title">常用网址</span>
-          <button id="homeAddSite" class="home-mini" type="button" title="添加网址">+ 添加</button>
         </div>
-        <div id="homeSites" class="home-sites"></div>
-      </section>
+      </div>
+
+      <!-- AI 任务：v5 桌面大屏三栏布局——左栏时钟天气/快捷操作/便签，中栏搜索+站点，右栏音乐/快捷键/分组。 -->
+      <div class="home-grid">
+        <aside class="home-col home-col-left">
+          <section id="homeHero" class="home-hero" hidden>
+            <div id="homeClock" class="home-clock">--:--</div>
+            <div id="homeDateLine" class="home-date-line"></div>
+            <div id="homeGreeting" class="home-greeting"></div>
+          </section>
+
+          <section id="homeWeather" class="home-weather" hidden>
+            <span id="homeWeatherCity" class="home-weather-city"></span>
+            <span id="homeWeatherTemp" class="home-weather-temp"></span>
+            <span id="homeWeatherDesc" class="home-weather-desc"></span>
+            <span class="home-weather-src" title="数据来源：Open-Meteo">Open-Meteo</span>
+            <!-- AI 任务：今日起 4 天预报（同一次请求，不额外出站）。 -->
+            <div id="homeWeatherDays" class="home-weather-days"></div>
+            <!-- 2026-11-28 二次复核 P2-2：文案统一为「重试」，title 由 JS 按模式区分
+                 （定位模式"重新定位"、手动模式"重新获取天气"）。 -->
+            <button id="homeWeatherRetry" class="home-weather-retry" type="button" hidden>
+              重试
+            </button>
+          </section>
+          <p id="homeWeatherError" class="home-weather-error" hidden></p>
+
+          <section id="homeQuickbar" class="home-quickbar" hidden aria-label="快捷操作">
+            <button class="home-mini" data-act="new-tab" type="button" title="新建标签">
+              新建标签
+            </button>
+            <!-- 2026-11-28 二次复核 P1-1：移除「打开主页」自跳转重复入口；导出/备份入口只在
+                 宿主壳或设置面板保留；宿主委托类按钮（回收站）在无宿主环境（独立主页）隐藏。 -->
+            <button class="home-mini" data-act="trash" data-host-only type="button" title="回收站">
+              回收站
+            </button>
+          </section>
+
+          <section id="homeNotesWrap" class="home-notes-wrap" hidden>
+            <div class="home-sites-head">
+              <span class="home-sites-title">本地便签</span>
+              <span class="home-notes-hint">仅存本机</span>
+            </div>
+            <!-- 2026-11-27 复核 P1-5：旧单条便签 textarea 已收敛为多条便签列表（noteItems）。 -->
+            <div id="homeNoteItems" class="home-note-items"></div>
+            <button id="homeNoteAdd" class="home-mini" type="button">+ 添加便签</button>
+          </section>
+        </aside>
+
+        <div class="home-col home-col-mid">
+          <section class="home-search">
+            <form id="homeSearchForm" class="home-search-box" autocomplete="off">
+              <select
+                id="homeEngine"
+                class="home-engine"
+                title="选择搜索引擎"
+                aria-label="搜索引擎"
+              ></select>
+              <input
+                id="homeQ"
+                class="home-q"
+                type="text"
+                placeholder="搜索或输入网址，回车打开…"
+                aria-label="搜索关键词"
+              />
+              <button class="home-go" type="submit" title="搜索" aria-label="搜索">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.5-3.5" />
+                </svg>
+              </button>
+            </form>
+          </section>
+
+          <section class="home-sites-wrap">
+            <div class="home-sites-head">
+              <span class="home-sites-title">常用网址</span>
+              <button id="homeAddSite" class="home-mini" type="button" title="添加网址">
+                + 添加
+              </button>
+            </div>
+            <div id="homeSites" class="home-sites"></div>
+          </section>
+        </div>
+
+        <aside class="home-col home-col-right">
+          <!-- AI 任务：完整音乐播放器——本地/直链曲目原生 <audio>；外链 iframe 仅嵌入兜底。 -->
+          <section id="homeMusicCard" class="home-music-card" hidden>
+            <div class="home-sites-head">
+              <span class="home-sites-title">音乐播放器</span>
+              <button id="homeMusicOpen" class="home-mini" type="button" title="在新标签打开外链">
+                外链兜底打开
+              </button>
+            </div>
+            <!-- 2026-11-28 四轮复核 P1-1：启用音乐但无本地曲目且无外链时的空状态——
+                 卡片可见且添加入口可达，第一条本地曲目不再只能靠导入配置进入。 -->
+            <div id="homeMusicEmpty" class="home-music-empty" hidden>
+              <span class="home-music-empty-text">音乐已启用：添加本地曲目或配置外链后在此播放</span>
+              <button id="homeMusicEmptyAdd" class="home-mini" type="button">+ 添加曲目</button>
+              <button id="homeMusicEmptyCfg" class="home-mini" type="button">配置外链</button>
+            </div>
+            <div id="homeMusicPlaylists" class="home-music-playlists"></div>
+            <!-- 2026-11-28 复核 G6：本地播放器区块整体包裹——仅外链模式（无本地曲目）时隐藏。 -->
+            <div id="homeMusicPlayer" class="home-music-player">
+              <div class="home-music-now">
+                <div class="home-music-meta">
+                  <img id="homeMusicCover" class="home-music-cover" hidden alt="封面" />
+                  <span id="homeMusicTitle" class="home-music-title">未选择曲目</span>
+                  <span id="homeMusicArtist" class="home-music-artist"></span>
+                </div>
+              <div class="home-music-progress">
+                <span id="homeMusicCur" class="home-music-time">00:00</span>
+                <input
+                  id="homeMusicSeek"
+                  class="home-music-seek"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="0"
+                  aria-label="播放进度"
+                />
+                <span id="homeMusicDur" class="home-music-time">00:00</span>
+              </div>
+              <div class="home-music-controls">
+                <button
+                  id="homeMusicLoop"
+                  class="home-mini"
+                  type="button"
+                  title="循环：关/全部/单曲"
+                >
+                  ↻ 关
+                </button>
+                <button id="homeMusicPrev" class="home-mini" type="button" title="上一首">⏮</button>
+                <button
+                  id="homeMusicPlay"
+                  class="home-mini home-music-play"
+                  type="button"
+                  title="播放/暂停"
+                >
+                  ▶
+                </button>
+                <button id="homeMusicNext" class="home-mini" type="button" title="下一首">⏭</button>
+                <button id="homeMusicShuffle" class="home-mini" type="button" title="随机">
+                  ⤨
+                </button>
+                <button id="homeMusicMute" class="home-mini" type="button" title="静音">🔊</button>
+                <input
+                  id="homeMusicVol"
+                  class="home-music-vol"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value="80"
+                  aria-label="音量"
+                />
+              </div>
+            </div>
+            <div id="homeMusicTracks" class="home-music-tracks"></div>
+            <button id="homeMusicAddTrack" class="home-mini" type="button">+ 添加曲目</button>
+            </div>
+            <div id="homeMusicFrame" class="home-music-frame"></div>
+            <button id="homeMusicFallback" class="home-mini hidden" type="button">
+              在新标签打开
+            </button>
+          </section>
+
+          <section id="homeKeysCard" class="home-keys-card" hidden aria-label="快捷键">
+            <div class="home-sites-title">可自定义快捷键</div>
+            <div id="homeKeysList" class="home-keys-list"></div>
+          </section>
+
+          <!-- AI 任务：右栏站点分组管理——分类统计 + 管理入口。 -->
+          <section id="homeGroupCard" class="home-group-card" hidden aria-label="站点分组">
+            <div class="home-sites-head">
+              <span class="home-sites-title">站点分组</span>
+              <button id="homeGroupManage" class="home-mini" type="button">管理</button>
+            </div>
+            <div id="homeGroupStats" class="home-group-stats"></div>
+          </section>
+        </aside>
+      </div>
     </main>
 
-    <!-- 主页配置面板（Q2 引擎 / Q3 常用网址增删改排序） -->
+    <!-- 2026-11-27 审计 P1-9：主页 footer——版本号、使用指南、反馈、隐私说明（链接由 JS 填充）。 -->
+    <footer id="homeFooter" class="home-footer" aria-label="关于">
+      <span id="homeVersion" class="home-footer-version"></span>
+      <a id="homeFooterGuide" target="_blank" rel="noreferrer">使用指南</a>
+      <a id="homeFooterFeedback" target="_blank" rel="noreferrer">反馈</a>
+      <a id="homeFooterPrivacy" target="_blank" rel="noreferrer">隐私说明</a>
+    </footer>
+
+    <!-- 主页配置面板（Q2 引擎 / Q3 常用网址 / Q4 壁纸；2026-11-25 分类两栏布局） -->
     <div id="homeCfgMask" class="mask" hidden>
-      <div class="modal">
+      <div class="modal home-cfg-modal">
         <header>
           <h3>主页设置</h3>
           <button id="homeCfgClose" class="x tbtn" type="button" aria-label="关闭">✕</button>
         </header>
-        <div class="content">
-          <div class="sec-title">搜索引擎</div>
-          <div id="engineList" class="home-cfg-engines"></div>
-          <div class="field-row">
-            <label for="customEngineName">自定义引擎名称</label>
-            <input id="customEngineName" class="edit-input" type="text" placeholder="如：我的搜索" />
-          </div>
-          <div class="field-row">
-            <label for="customEngineUrl">搜索地址（%s 为关键词占位）</label>
-            <input
-              id="customEngineUrl"
-              class="edit-input"
-              type="text"
-              placeholder="https://example.com/search?q=%s"
-            />
-          </div>
-          <div class="modal-actions">
-            <button id="addEngine" class="btn" type="button">添加自定义引擎</button>
-            <button id="resetHomeCfg" class="btn" type="button">恢复默认</button>
-          </div>
+        <!-- 2026-11-28 浏览器实测任务：设置面板分段导航（六分页，每次只显示当前页）。 -->
+        <nav id="homeCfgNav" class="home-cfg-nav" aria-label="设置分页">
+          <button class="home-cfg-tab" data-page="appearance" type="button">外观与壁纸</button>
+          <button class="home-cfg-tab" data-page="search" type="button">搜索引擎</button>
+          <button class="home-cfg-tab" data-page="sites" type="button">常用网址</button>
+          <button class="home-cfg-tab" data-page="music" type="button">音乐</button>
+          <button class="home-cfg-tab" data-page="weather" type="button">天气</button>
+          <button class="home-cfg-tab" data-page="data" type="button">数据导入导出</button>
+        </nav>
+        <div class="content home-cfg-grid">
+          <!-- 外观与壁纸 -->
+          <section class="home-cfg-card home-cfg-page" data-page="appearance">
+            <div class="sec-title">外观与壁纸（仅内部主页）</div>
+            <div class="field-row">
+              <label for="wpMode">壁纸模式</label>
+              <select id="wpMode" class="edit-input">
+                <option value="none">无（默认渐变）</option>
+                <option value="gradient">内置渐变</option>
+                <option value="image">本地图片</option>
+                <option value="url-image">网络图片链接</option>
+              </select>
+            </div>
+            <div class="field-row" id="wpPresetRow">
+              <label for="wpPreset">渐变预设</label>
+              <select id="wpPreset" class="edit-input"></select>
+            </div>
+            <div class="field-row" id="wpGalleryRow">
+              <label>精选壁纸画廊（原创 CC0 · 点击应用）</label>
+              <div id="wpGallery" class="wp-gallery" role="list"></div>
+              <p class="home-hint wp-gallery-hint">
+                精选壁纸均为原创渐变，零版权风险、完全离线；不加载任何远程图片。
+              </p>
+            </div>
+            <div class="field-row hidden" id="wpImageRow">
+              <label>本地图片（png/jpeg/webp，≤1MB）</label>
+              <input
+                id="wpImage"
+                class="hidden"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+              />
+              <button id="wpPickImage" class="btn" type="button">选择本地图片</button>
+              <span id="wpImageMeta" class="wp-image-meta"></span>
+            </div>
+            <div class="field-row hidden" id="wpUrlRow">
+              <label for="wpImageUrl">图片链接</label>
+              <input
+                id="wpImageUrl"
+                class="edit-input"
+                type="url"
+                inputmode="url"
+                placeholder="仅 https 图片链接"
+              />
+            </div>
+            <div class="field-row hidden" id="wpOnlineRow">
+              <label for="wpOnlineSource">在线图源（用户主动加载候选）</label>
+              <select id="wpOnlineSource" class="edit-input">
+                <option value="wallhaven-top">Wallhaven 热门动漫（SFW/16:9）</option>
+                <option value="wallhaven-random">Wallhaven 随机动漫（SFW/16:9）</option>
+                <option value="nekos-neko">Nekos.best 猫咪</option>
+                <option value="nekos-waifu">Nekos.best 角色</option>
+              </select>
+              <button id="wpOnlineLoad" class="btn" type="button">加载候选</button>
+              <div id="wpOnlineList" class="wp-online-list"></div>
+              <p class="home-hint">
+                候选仅 SFW/16:9，来源与作者随壁纸保存；8
+                秒超时或失败不加载，可改用内置精选或自定义链接。
+              </p>
+            </div>
+            <div class="modal-actions" id="wpUrlActions" hidden>
+              <button id="wpUrlApply" class="btn" type="button">预览并应用</button>
+              <button id="wpUrlClear" class="btn" type="button">清除链接</button>
+            </div>
+            <div id="wpPreview" class="wp-preview" hidden>
+              <span id="wpPreviewLabel" class="wp-preview-label">当前壁纸</span>
+              <span id="wpPreviewMeta" class="wp-preview-meta"></span>
+            </div>
+            <div class="field-row" id="wpScrimRow">
+              <label for="wpScrim">遮罩浓度 <span id="wpScrimVal">0.35</span></label>
+              <input id="wpScrim" class="edit-input" type="range" min="0" max="0.85" step="0.05" />
+            </div>
+            <p class="home-hint">
+              本地图片以 data URL 仅存本机，不上传；网络链接仅存本机、可能暴露网络环境，请谨慎。
+            </p>
+            <div class="modal-actions">
+              <button id="wpRemoveImage" class="btn" type="button">移除当前图片</button>
+              <button id="wpResetWallpaper" class="btn" type="button">恢复默认壁纸</button>
+            </div>
+            <div class="sec-title" style="margin-top: 16px">离线装饰</div>
+            <label class="deco-toggle"><input id="decoClock" type="checkbox" /> 时钟与问候语</label>
+            <label class="deco-toggle"
+              ><input id="decoQuickbar" type="checkbox" /> 快捷操作条</label
+            >
+            <label class="deco-toggle"><input id="decoNotes" type="checkbox" /> 本地便签</label>
+            <label class="deco-toggle"><input id="decoKeys" type="checkbox" /> 快捷键提示卡</label>
+          </section>
 
-          <div class="sec-title" style="margin-top: 18px">配置导入导出（M9）</div>
-          <p class="home-hint">导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。</p>
-          <div class="modal-actions">
-            <button id="homeExportCfg" class="btn" type="button">导出主页配置</button>
-            <button id="homeImportCfg" class="btn" type="button">导入主页配置</button>
-          </div>
-          <input id="homeImportFile" type="file" hidden />
+          <!-- 搜索引擎 -->
+          <section class="home-cfg-card home-cfg-page" data-page="search">
+            <div class="sec-title">搜索引擎</div>
+            <div id="engineList" class="home-cfg-engines"></div>
+            <div class="field-row">
+              <label for="customEngineName">自定义引擎名称</label>
+              <input
+                id="customEngineName"
+                class="edit-input"
+                type="text"
+                placeholder="如：我的搜索"
+              />
+            </div>
+            <div class="field-row">
+              <label for="customEngineUrl">搜索地址（%s 为关键词占位）</label>
+              <input
+                id="customEngineUrl"
+                class="edit-input"
+                type="text"
+                placeholder="https://example.com/search?q=%s"
+              />
+            </div>
+            <div class="modal-actions">
+              <button id="addEngine" class="btn" type="button">添加自定义引擎</button>
+              <button id="resetHomeCfg" class="btn" type="button">恢复默认</button>
+            </div>
+          </section>
 
-          <div class="sec-title" style="margin-top: 18px">常用网址</div>
-          <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
-          <div id="siteEditList" class="home-cfg-sites"></div>
+          <!-- 常用网址 -->
+          <section class="home-cfg-card home-cfg-page" data-page="sites">
+            <div class="sec-title">常用网址</div>
+            <p class="home-hint">可编辑名称 / 网址，或用 ↑↓ 调整顺序、删除站点。</p>
+            <div class="field-row">
+              <label for="siteColumns">分类排列</label>
+              <select id="siteColumns" class="edit-input">
+                <option value="auto">自适应</option>
+                <option value="4">每行 4 个</option>
+                <option value="5">每行 5 个</option>
+                <option value="6">每行 6 个</option>
+              </select>
+            </div>
+            <p class="home-hint">大屏网格按分类 chip 切换展示；此处设置站点网格每行列数。</p>
+            <div id="siteEditList" class="home-cfg-sites"></div>
+            <!-- 2026-11-27 复核 P1-4：旧配置/误删导致分类缺失时，一键补回内置推荐站点。 -->
+            <button id="siteRestoreDefaults" class="btn" type="button">恢复推荐站点</button>
+          </section>
+
+          <!-- 外链音乐（阶段 1）-->
+          <section class="home-cfg-card home-cfg-page" data-page="music">
+            <div class="sec-title">外链音乐（阶段 1）</div>
+            <p class="home-hint">
+              粘贴公开音乐链接，自动解析为嵌入播放器；仅
+              https、不自动播放、不读取账号。加载失败可在卡片里点「在新标签打开」。
+            </p>
+            <label class="deco-toggle"
+              ><input id="musicEnabled" type="checkbox" /> 显示音乐卡片</label
+            >
+            <div class="field-row">
+              <label for="musicProvider">来源平台</label>
+              <select id="musicProvider" class="edit-input"></select>
+            </div>
+            <div class="field-row">
+              <label for="musicSource">公开音乐链接</label>
+              <input
+                id="musicSource"
+                class="edit-input"
+                type="text"
+                placeholder="https://soundcloud.com/artist/track"
+              />
+            </div>
+            <div class="modal-actions">
+              <button id="musicApply" class="btn" type="button">解析并应用</button>
+              <button id="musicClear" class="btn" type="button">清除音乐</button>
+              <button id="musicAddTrack" class="btn" type="button">添加本地曲目</button>
+            </div>
+            <p id="musicHint" class="home-hint"></p>
+            <!-- 2026-11-28 浏览器实测任务：公开可测试候选音源（不预置版权保护曲目）。 -->
+            <div class="home-music-suggestions">
+              <span class="home-sites-title">公开候选音源</span>
+              <div id="musicSuggestions" class="home-music-suggestion-list"></div>
+              <p class="home-hint">
+                默认不接入 Spotify / 网易云 / YouTube / 热门 SoundCloud 版权曲目；候选来源的许可与嵌入限制请逐首核对。本地音频优先使用可公开访问的 https 直链，不承诺读取任意本地文件路径永久播放。
+              </p>
+            </div>
+          </section>
+
+          <!-- 天气（任务 4）-->
+          <section class="home-cfg-card home-cfg-page" data-page="weather">
+            <div class="sec-title">天气（手动城市优先）</div>
+            <p class="home-hint">
+              默认手动输入城市，不主动定位；仅打开主页时请求一次 Open-Meteo，离线自动隐藏。
+            </p>
+            <label class="deco-toggle"
+              ><input id="weatherEnabled" type="checkbox" /> 显示天气卡片</label
+            >
+            <div class="field-row">
+              <label for="weatherCity">城市名</label>
+              <input id="weatherCity" class="edit-input" type="text" placeholder="如：北京" />
+            </div>
+            <div class="field-row">
+              <label for="weatherUnit">温度单位</label>
+              <select id="weatherUnit" class="edit-input">
+                <option value="celsius">摄氏度</option>
+                <option value="fahrenheit">华氏度</option>
+              </select>
+            </div>
+            <div class="modal-actions">
+              <button id="weatherUseLocation" class="btn" type="button">使用当前位置</button>
+              <button id="weatherTest" class="btn" type="button">保存并校验</button>
+            </div>
+            <p id="weatherHint" class="home-hint"></p>
+          </section>
+
+          <!-- 配置导入导出 -->
+          <section class="home-cfg-card home-cfg-page" data-page="data">
+            <div class="sec-title">配置导入导出（M9）</div>
+            <p class="home-hint">
+              导出为独立配置文件；导入前确认、整体覆盖当前引擎与常用网址（不合并）。
+            </p>
+            <div class="modal-actions">
+              <button id="homeExportCfg" class="btn" type="button">导出主页配置</button>
+              <button id="homeImportCfg" class="btn" type="button">导入主页配置</button>
+            </div>
+            <input id="homeImportFile" type="file" hidden />
+          </section>
         </div>
       </div>
     </div>

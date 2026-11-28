@@ -74,4 +74,4 @@ src/
 | downloads | 保存导出文件/加密备份 |
 | optional: `https://api.github.com/*` | 用户显式授权后仅 backup 模块写 Gist |
 
-红线：不申请 `bookmarks`/`cookies`/`webRequest`/`all_urls`；零出站（唯一例外见上）；`tabs-op` 只信 tabId。
+红线：不申请 `bookmarks`/`cookies`/`webRequest`/`all_urls`；代码主动出站仅 backup 模块（唯一例外见上），首页壁纸的 https 图片链接为用户主动输入的运行时资源例外（非代码请求，`normalizeWallpaperUrl` 校验拒绝伪协议）；`tabs-op` 只信 tabId。
