@@ -271,7 +271,7 @@ BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constrai
 | --- | --- | --- | --- |
 | F-133 (P1-1) | 主页快捷键卡展示的动作主页未绑定 keydown，“提示可按但按了无效” | keymap `homeVisible` 收敛为仅 focus-panel（open-selected/focus-web/copy-selected 依赖树选中态，主页无目标）；home.js 新增 `onHomeKeydown` 分发：focus-panel 按注册表键串（matchAction）发 `tabharbor:open-side-panel` 消息桥；站点网格方向键在站点卡间移动焦点、Enter 由 `<a href>` 原生打开；快捷键卡如实列出主页自有能力（Enter 打开选中站点 / ↑↓ 移动选择） | 已实现 |
 | F-134 (P1-2) | 外链模式仍露出播放列表/曲目列表/添加曲目等本地管理入口；本地-only 模式「外链兜底打开」常驻 | renderMusic 按内容计算三态（local/external/mixed）：external 隐藏 `#homeMusicPlayer` + `#homeMusicPlaylists`（含新建/重命名/删除管理入口）；local 隐藏 `#homeMusicOpen` 外链兜底；mixed 全显 | 已实现 |
-| F-135 (P1-3) | activeListId 失效但列表非空时新曲目只进曲库，列表归属丢失；音频直链提示文案与 normalizeMusicUrl 实际约束不符 | addTrack 归属解析走 `resolveActiveList` 纯函数（失效落第一个有效列表并回写，无列表建默认）；文案改「音频 https 直链（仅支持 https，示例 https://example.com/a.mp3）」，拒绝提示明确不支持 http 明文/本地路径/data/blob | 已实现 |
+| F-135 (P1-3) | activeListId 失效但列表非空时新曲目只进曲库，列表归属丢失；音频直链提示文案与 normalizeMusicUrl 实际约束不符 | addTrack 归属解析走 `resolveActiveList` 纯函数（失效落第一个有效列表并回写，无列表建默认）；文案改「音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）」（不含 URL 字面量，避免 C12 出站白名单扫描命中），拒绝提示明确不支持 http 明文/本地路径/data/blob | 已实现 |
 | F-136 (P2-3) | tabs-op/home.js 注释、PRIVACY.md 天气段落、test-matrix feature 36 名称残留旧口径 | 四处全部更正为 foreground 当前口径（tabs-op 命中分支注释、home.js 天气注释、PRIVACY「保留卡片+错误+重试」、test-matrix feature 36 名称） | 已实现 |
 | F-137 (P2-4) | focus-panel 在面板已打开聚焦时仍重复发 open-side-panel 消息 | shell 分支加 `document.hasFocus() && visibilityState==="visible"` 守卫：面板已聚焦时只做宿主内 focus+选中行，跳过调桥 | 已实现 |
 | F-138 (P2-5) | 音乐状态流仅静态文本断言，覆盖不到真实内存状态 | homepage.js 提取纯函数 `resolveActiveList`/`switchActiveList`/`moveTrackInList`/`removeTrackEverywhere`；home.js 列表切换/删除/排序/归属兜底全部复用同一实现；BDD 以真实调用断言：切换列表读回一致、curTrackId 按新队列校验重置、上下移顺序变化、越界安全、删除曲目曲库+全部列表+curTrackId 一致清理 | 已实现 |
@@ -280,3 +280,22 @@ BDD 场景总数：359/359 PASS（353 → +6，feature 40）。门禁：constrai
 | F-141 (P2-建议) | 主页快捷条「新建标签」打开 about:blank | 维持 about:blank 口径（新建空白标签语义，浏览器默认新标签页行为接管），未改 | 维持现状 |
 
 BDD 场景总数：365/365 PASS（359 → +6，feature 41）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46136160623](https://github.com/zeek-zhao/tabharbor/actions/runs/46136160623) 一次通过（13efb5d）。红线口径：无 C11/C12 白名单变更、无新增权限（首轮 run 曾因文案含示例 URL 字面量命中 C12，改写后 0 命中）。
+
+## 20. 2026-11-28 四轮复核修复轮（基于 `69d33af`）
+
+> 依据《TabHarbor-最新代码第四轮复核-2026-11-28》（豆包文档）。复核确认三轮主线全部落地；本轮修复 P1-1/P1-2 与 P2 系列（P2-1~P2-6）。
+
+| ID | 四轮复核问题 | 修复 | 状态 |
+| --- | --- | --- | --- |
+| F-142 (P1-1) | 启用音乐但无本地曲目且无外链时卡片整体隐藏，主页与设置面板均无「添加本地曲目」入口，第一条本地曲目正常 UI 路径不可达 | renderMusic 四态（新增 empty）：启用即显示卡片，无内容时显示空状态（提示 + 添加曲目 + 配置外链入口）；设置面板音乐区新增「添加本地曲目」按钮；三入口（卡片按钮/空状态/设置面板）共用 `musicAddTrackFlow` 同一实现；BDD 断言空状态显隐与入口绑定 | 已实现 |
+| F-143 (P1-2) | 顶部音乐图标开关判断 `enabled && external?.embedUrl` 忽略本地曲目，本地-only 点击直接进外链配置引导 | 判断改 `music.enabled && (hasLocal || embedUrl)`：本地-only/有内容时折叠/展开播放器；仅「无本地且无外链」才进配置引导，文案改「先在设置中添加本地曲目或粘贴音乐外链」 | 已实现 |
+| F-144 (P2-1) | 主页方向键导航需先聚焦站点卡，body 级方向键不可达（提示与操作不一致） | onHomeKeydown 补 body 级 fallback：焦点不在站点卡上时按方向键聚焦第一个站点，此后网格内行列导航 | 已实现 |
+| F-145 (P2-2) | home.js focus-panel sendMessage 回调未读取 resp.ok/message，SW 拒绝时仍提示"已请求调起" | 回调读取 lastError / resp.ok === false：失败提示「未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开」（与 SW 应答 message、shell toast 下发文案三方口径一致） | 已实现 |
+| F-146 (P2-3) | normalizeMusicLocal 将失效 activeListId 清空为 ""，chips 无 active 态且持久化未回写 | schema 层失效直接回退第一个有效列表 id（无列表保持空）；BDD 运行时断言导入失效 id 读回即指向有效列表 | 已实现 |
+| F-147 (P2-4) | 新建列表 id `list-${Date.now()}` 无随机段，同毫秒新建存在碰撞风险 | 新增 `musicCreateListId()`（`list-${Date.now()}-${random}`，与曲目 id 口径一致），新建列表/默认列表两处统一使用；BDD 断言无残留旧 id 写法 | 已实现 |
+| F-148 (P2-5) | 曲目时长未在编辑流程持久化，刷新后回 00:00 | 新增 `parseDurationInput` 纯函数（秒数/mm:ss/h:mm:ss，非法返回 null）；新增流程可选填时长、编辑流程可改（留空保留现值）并随曲目持久化；BDD 运行时断言解析与持久化 | 已实现 |
+| F-149 (P2-6) | 台账 F-135 文案仍写含 https 示例，与 C12 改写后代码口径不一致 | 台账同步为不含 URL 字面量的等价描述（含改写原因标注），避免后续按旧描述把 URL 字面量加回源码 | 已实现 |
+| F-150 (P2-7) | UI 显隐/开关分支仍主要靠源码字符串匹配 | 维持字符串断言 + 关键状态流（normalizeMusic 空内容 schema、parseDurationInput、normalizeMusicLocal 失效回退）纯函数运行时断言组合覆盖 | 已实现 |
+| F-151 (P2-8) | 第三方 iframe/直链音频/sidePanel 手势/定位授权/远程壁纸回退真机验收 | 维持真机验收边界；本地真机 Chromium E2E 复跑全绿；浏览器账号环境项仍待手工验收 | 待手工验收 |
+
+BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限。

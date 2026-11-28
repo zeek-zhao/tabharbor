@@ -5892,9 +5892,12 @@ step("那么", "新增曲目自动补入当前播放列表", () => {
   // G6：新增曲目带显式 id 且自动补入 activeListId 对应播放列表的 trackIds。
   if (!homeJs.includes("pl.trackIds = [...pl.trackIds, newId]"))
     throw new Error("新曲目未补入当前播放列表");
-  const addIdx = homeJs.indexOf("homeMusicAddTrack");
-  const addBlock = homeJs.slice(addIdx, homeJs.indexOf("曲目已添加", addIdx));
+  // 四轮复核 P1-1：新增流程抽为 musicAddTrackFlow（卡片/空状态/设置面板三入口共用）。
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const addBlock = homeJs.slice(flowIdx, homeJs.indexOf("曲目已添加", flowIdx));
   if (!addBlock.includes("newId")) throw new Error("新增曲目未使用显式 id");
+  for (const entry of ["#homeMusicEmptyAdd", "#musicAddTrack", "#homeMusicAddTrack"])
+    if (!homeJs.includes('"' + entry + '"')) throw new Error("新增曲目入口未绑定：" + entry);
 });
 
 step("那么", "天气失败态显示错误与重试入口", () => {
@@ -6071,7 +6074,7 @@ step("那么", "音乐本地外链三态分域显隐", () => {
   const rmIdx = homeJs.indexOf("function renderMusic");
   const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
   // P1-2：三态计算 + 分域显隐（external 隐藏本地控件区与列表管理；local 隐藏外链兜底）。
-  if (!rmBlock.includes('? "mixed" : hasLocal ? "local" : "external"'))
+  if (!rmBlock.includes('? "mixed" : hasLocal ? "local" : embedUrl ? "external" : "empty"'))
     throw new Error("缺三态计算");
   if (!rmBlock.includes('playerWrap.hidden = musicMode === "external"'))
     throw new Error("external 态未隐藏本地控件区");
@@ -6194,4 +6197,138 @@ step("那么", "focus-panel 面板已聚焦时跳过后台调桥", () => {
   const sendIdx = fpBlock.indexOf("sendMessage");
   if (guardIdx < 0 || sendIdx < 0 || guardIdx > sendIdx)
     throw new Error("已聚焦判定未先于消息发送短路");
+});
+
+/* ========== 2026-11-28 四轮复核修复（features/42）========== */
+step("那么", "启用音乐无本地无外链时卡片空状态可见且添加入口可用", () => {
+  // P1-1：空状态四态（empty）——卡片可见 + 空状态提示 + 添加/配置入口，第一条本地曲目 UI 可达。
+  const homeJs = repoFile("src/home/home.js");
+  const rmIdx = homeJs.indexOf("function renderMusic");
+  const rmBlock = homeJs.slice(rmIdx, homeJs.indexOf("function renderMusicPlayer", rmIdx));
+  if (!rmBlock.includes("card.hidden = !music.enabled"))
+    throw new Error("启用音乐时卡片未常显（仍按内容整体隐藏）");
+  if (!rmBlock.includes('"empty"')) throw new Error("缺 empty 空状态");
+  if (!rmBlock.includes('emptyBox.hidden = musicMode !== "empty"'))
+    throw new Error("空状态区未按四态控制");
+  // schema 层运行时断言：normalizeMusic 对空内容仍产出完整 local schema。
+  const n = homepage.normalizeMusic({ enabled: true });
+  if (!n.enabled || n.phase !== "external" || n.local.tracks.length)
+    throw new Error("空内容 normalizeMusic schema 异常");
+  // HTML：空状态块 + 三个入口。
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeMusicEmpty"')) throw new Error("缺空状态块");
+  if (!html.includes('id="homeMusicEmptyAdd"')) throw new Error("缺空状态添加按钮");
+  if (!html.includes('id="homeMusicEmptyCfg"')) throw new Error("缺空状态配置外链按钮");
+  if (!html.includes('id="musicAddTrack"')) throw new Error("设置面板缺添加本地曲目按钮");
+  // JS：三入口共用 musicAddTrackFlow，空状态配置入口打开音乐分区。
+  if (!homeJs.includes("async function musicAddTrackFlow")) throw new Error("缺共用新增流程函数");
+  if (
+    !homeJs.includes(
+      'id === "homeMusicAddTrack" || id === "homeMusicEmptyAdd" || id === "musicAddTrack"'
+    )
+  )
+    throw new Error("三入口未共用新增流程");
+  if (!homeJs.includes('id === "homeMusicEmptyCfg"')) throw new Error("空状态配置入口未处理");
+});
+
+step("那么", "顶部音乐开关覆盖本地only状态", () => {
+  // P1-2：enabled && (hasLocal || embedUrl) 才折叠/展开；无内容才进配置引导。
+  const homeJs = repoFile("src/home/home.js");
+  const tgIdx = homeJs.indexOf('$("#homeMusicToggle")?.addEventListener');
+  const tgBlock = homeJs.slice(tgIdx, homeJs.indexOf('$("#homeCfgClose")', tgIdx));
+  if (!tgBlock.includes("music.enabled && (hasLocal || embedUrl)"))
+    throw new Error("开关判断未覆盖本地-only");
+  if (tgBlock.includes("music.enabled && music.external?.embedUrl"))
+    throw new Error("开关仍用旧判断（忽略本地曲目）");
+  if (!tgBlock.includes("先在设置中添加本地曲目或粘贴音乐外链"))
+    throw new Error("未配置引导文案未更新");
+});
+
+step("那么", "body级方向键fallback聚焦首个站点", () => {
+  // P2-1：焦点不在站点卡上时首次按方向键聚焦第一个站点（提示与操作一致）。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (
+    !kdBlock.includes(
+      '!site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)'
+    )
+  )
+    throw new Error("缺 body 级方向键 fallback");
+  if (!kdBlock.includes('document.querySelector("#homeSites a.home-site")'))
+    throw new Error("fallback 未聚焦首个站点");
+});
+
+step("那么", "focus-panel失败应答给出可读提示", () => {
+  // P2-2：lastError 或 resp.ok === false 时提示手动打开入口（与 shell 口径一致）。
+  const homeJs = repoFile("src/home/home.js");
+  const kdIdx = homeJs.indexOf("function onHomeKeydown");
+  const kdBlock = homeJs.slice(kdIdx, homeJs.indexOf("function bind(", kdIdx));
+  if (!kdBlock.includes("resp.ok === false")) throw new Error("未读取失败应答");
+  if (!kdBlock.includes("未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标"))
+    throw new Error("失败提示缺失");
+  // 失败文案口径一致：home 硬编码文案与 SW 应答 message 相同（shell 失败分支 toast resp.message 下发同一文案）。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开"))
+    throw new Error("SW 失败应答文案缺失");
+  const shellJs = repoFile("src/ui/shell.js");
+  if (!shellJs.includes("resp.ok === false && resp.message"))
+    throw new Error("shell 未下发 SW 失败文案");
+});
+
+step("那么", "失效activeListId规范化回退首个有效列表且列表id带随机段", () => {
+  // P2-3：schema 层运行时断言——导入失效 activeListId 读回即指向第一个有效列表。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [
+      { id: "t1", url: "https://e.com/1" },
+      { id: "t2", url: "https://e.com/2" },
+    ],
+    playlists: [
+      { id: "p1", name: "P1", trackIds: ["t1"] },
+      { id: "p2", name: "P2", trackIds: ["t2"] },
+    ],
+    activeListId: "deleted-list",
+  });
+  if (n.activeListId !== "p1")
+    throw new Error("失效 activeListId 未回退第一个有效列表：" + n.activeListId);
+  const n2 = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https://e.com/1" }],
+    playlists: [{ id: "p1", name: "P1", trackIds: ["t1"] }],
+    activeListId: "p2",
+  });
+  if (n2.activeListId !== "p1") throw new Error("无效 id 应同样回退");
+  const n3 = homepage.normalizeMusicLocal({ tracks: [{ id: "t1", url: "https://e.com/1" }] });
+  if (n3.activeListId !== "") throw new Error("无列表时应为空");
+  // P2-4：新建列表 id 带随机段（musicCreateListId），与曲目 id 口径一致。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("function musicCreateListId")) throw new Error("缺列表 id 生成函数");
+  if (!homeJs.includes("list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}"))
+    throw new Error("列表 id 缺随机段");
+  const legacy = [...homeJs.matchAll(/`list-\$\{Date\.now\(\)\}`/g)].length;
+  if (legacy > 0) throw new Error("仍存在 " + legacy + " 处无随机段的列表 id");
+});
+
+step("那么", "时长输入解析与编辑持久化", () => {
+  // P2-5：parseDurationInput 运行时断言——秒数/mm:ss/h:mm:ss/非法输入。
+  if (homepage.parseDurationInput("185") !== 185) throw new Error("秒数解析错误");
+  if (homepage.parseDurationInput("3:05") !== 185) throw new Error("mm:ss 解析错误");
+  if (homepage.parseDurationInput("1:02:03") !== 3723) throw new Error("h:mm:ss 解析错误");
+  if (homepage.parseDurationInput("") !== null) throw new Error("空输入应返回 null");
+  if (homepage.parseDurationInput("-5") !== null) throw new Error("负数应返回 null");
+  if (homepage.parseDurationInput("abc") !== null) throw new Error("非数字应返回 null");
+  if (homepage.parseDurationInput("1:2:3:4") !== null) throw new Error("超段数应返回 null");
+  if (homepage.parseDurationInput("360000") !== null) throw new Error("超上限应返回 null");
+  // UI：新增流程与编辑流程均接入时长（留空默认 0 / 保留现值）。
+  const homeJs = repoFile("src/home/home.js");
+  const flowIdx = homeJs.indexOf("async function musicAddTrackFlow");
+  const flowBlock = homeJs.slice(flowIdx, homeJs.indexOf("async function onMusicAction", flowIdx));
+  if (!flowBlock.includes("hp.parseDurationInput")) throw new Error("新增流程未接时长解析");
+  if (!flowBlock.includes("duration,") && !flowBlock.includes("duration }"))
+    throw new Error("新增曲目未持久化时长");
+  const editIdx = homeJs.indexOf("时长（秒数或 mm:ss，留空保留现值）");
+  if (editIdx < 0) throw new Error("编辑流程缺时长字段");
+  const editBlock = homeJs.slice(editIdx, homeJs.indexOf("Object.assign(track,", editIdx));
+  if (!editBlock.includes("hp.parseDurationInput")) throw new Error("编辑流程未接时长解析");
+  if (!homeJs.includes("{ title, artist, url, cover, duration }"))
+    throw new Error("编辑结果未持久化时长");
 });

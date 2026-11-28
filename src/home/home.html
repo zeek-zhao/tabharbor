@@ -149,6 +149,13 @@
                 外链兜底打开
               </button>
             </div>
+            <!-- 2026-11-28 四轮复核 P1-1：启用音乐但无本地曲目且无外链时的空状态——
+                 卡片可见且添加入口可达，第一条本地曲目不再只能靠导入配置进入。 -->
+            <div id="homeMusicEmpty" class="home-music-empty" hidden>
+              <span class="home-music-empty-text">音乐已启用：添加本地曲目或配置外链后在此播放</span>
+              <button id="homeMusicEmptyAdd" class="home-mini" type="button">+ 添加曲目</button>
+              <button id="homeMusicEmptyCfg" class="home-mini" type="button">配置外链</button>
+            </div>
             <div id="homeMusicPlaylists" class="home-music-playlists"></div>
             <!-- 2026-11-28 复核 G6：本地播放器区块整体包裹——仅外链模式（无本地曲目）时隐藏。 -->
             <div id="homeMusicPlayer" class="home-music-player">
@@ -407,6 +414,7 @@
             <div class="modal-actions">
               <button id="musicApply" class="btn" type="button">解析并应用</button>
               <button id="musicClear" class="btn" type="button">清除音乐</button>
+              <button id="musicAddTrack" class="btn" type="button">添加本地曲目</button>
             </div>
             <p id="musicHint" class="home-hint"></p>
           </section>

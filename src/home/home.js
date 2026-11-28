@@ -337,14 +337,30 @@ function onHomeKeydown(e) {
     }
     return;
   }
+  // 2026-11-28 四轮复核 P2-1：body 级方向键 fallback——焦点不在站点卡上时首次按
+  // 方向键聚焦第一个站点（提示卡“↑↓ 在站点间移动选择”从此可达，不必先点击/Tab）。
+  if (!site && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+    const firstSite = document.querySelector("#homeSites a.home-site");
+    if (firstSite) {
+      firstSite.focus();
+      e.preventDefault();
+      return;
+    }
+  }
   const actionId = keymap.matchAction(settings && settings.keymap, e);
   if (actionId !== "focus-panel") return;
   e.preventDefault();
   try {
-    chromeApi?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, () => {
-      void chromeApi?.runtime?.lastError; // 面板已打开/无接收方：忽略
+    // 2026-11-28 四轮复核 P2-2：读取应答区分成功/失败——SW sidePanel.open 被拒绝或
+    // 无接收方时给出可读提示（与 shell 口径一致），不再一律提示“已请求调起”。
+    chromeApi?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, (resp) => {
+      if (chromeApi?.runtime?.lastError) {
+        say("未能自动打开侧边栏，请点击浏览器工具栏的 TabHarbor 图标打开");
+        return;
+      }
+      if (resp && resp.ok === false && resp.message) say(resp.message);
+      else say("已请求调起插件侧边栏");
     });
-    say("已请求调起插件侧边栏");
   } catch {
     say("当前环境不支持调起侧边栏");
   }
@@ -680,17 +696,22 @@ function renderMusic() {
   if (!card) return;
   const hasLocal = (music.local?.tracks || []).length > 0;
   const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
-  card.hidden = !(music.enabled && (hasLocal || embedUrl));
-  // 2026-11-28 三轮复核 P1-2：三态显隐收敛——
+  // 2026-11-28 四轮复核 P1-1：卡片只要启用就显示——无本地曲目且无外链时进入空状态
+  // （提示 + 添加入口），不再整体隐藏（旧逻辑导致第一条本地曲目正常 UI 路径不可达）。
+  card.hidden = !music.enabled;
+  // 2026-11-28 三轮复核 P1-2 / 四轮复核 P1-1：四态显隐收敛——
   // external-only：隐藏本地控件区 + 播放列表管理入口（chips/新建/重命名/删除）；
-  // local-only：隐藏「外链兜底打开」（无外链 URL 时点击无意义）；mixed：全部显示。
-  const musicMode = hasLocal && embedUrl ? "mixed" : hasLocal ? "local" : "external";
+  // local-only：隐藏「外链兜底打开」；empty：只显示空状态添加入口；mixed：全部显示。
+  const musicMode =
+    hasLocal && embedUrl ? "mixed" : hasLocal ? "local" : embedUrl ? "external" : "empty";
   const playerWrap = $("#homeMusicPlayer");
-  if (playerWrap) playerWrap.hidden = musicMode === "external";
+  if (playerWrap) playerWrap.hidden = musicMode === "external" || musicMode === "empty";
   const plSection = $("#homeMusicPlaylists");
-  if (plSection) plSection.hidden = musicMode === "external";
+  if (plSection) plSection.hidden = musicMode === "external" || musicMode === "empty";
   const openExternalBtn = $("#homeMusicOpen");
-  if (openExternalBtn) openExternalBtn.hidden = musicMode === "local";
+  if (openExternalBtn) openExternalBtn.hidden = musicMode === "local" || musicMode === "empty";
+  const emptyBox = $("#homeMusicEmpty");
+  if (emptyBox) emptyBox.hidden = musicMode !== "empty";
   renderMusicPlayer();
   if (frame) frame.innerHTML = "";
   const fallback = $("#homeMusicFallback");
@@ -883,6 +904,66 @@ function renderMusicControls() {
   if (hint) hint.textContent = music.external.embedUrl ? "已解析嵌入链接。" : "";
 }
 
+// 2026-11-28 四轮复核 P2-4：列表 id 带随机段（与曲目 id 口径一致），避免同毫秒新建碰撞。
+function musicCreateListId() {
+  return `list-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+// 2026-11-28 四轮复核 P1-1：新增曲目流程抽为独立函数——卡片添加按钮、空状态入口
+// （#homeMusicEmptyAdd）、设置面板入口（#musicAddTrack）共用同一实现，
+// 三条 UI 路径都可达第一条本地曲目。
+async function musicAddTrackFlow() {
+  const title = window.prompt("曲目名称")?.trim();
+  if (!title) return;
+  const artist = window.prompt("艺术家（可留空）")?.trim() || "";
+  const rawUrl = window
+    .prompt(
+      "音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）"
+    )
+    ?.trim();
+  if (!rawUrl) return;
+  const url = hp.normalizeMusicUrl(rawUrl);
+  if (!url) {
+    say("仅支持合法 https 直链（不支持 http 明文、本地文件路径与 data/blob 等）");
+    return;
+  }
+  // 2026-11-28 四轮复核 P2-5：时长可选填（秒数或 mm:ss），留空默认 0（读取 metadata 前显示 00:00）。
+  const durRaw = window.prompt("时长（秒数或 mm:ss，可留空）")?.trim() || "";
+  let duration = 0;
+  if (durRaw) {
+    const parsed = hp.parseDurationInput(durRaw);
+    if (parsed == null) {
+      say("时长格式无效（支持秒数或 mm:ss），已按 00:00 保存");
+    } else {
+      duration = parsed;
+    }
+  }
+  // 2026-11-28 复核 G6 / 三轮复核 P1-3：新增曲目带显式 id，并自动补入当前播放列表
+  // trackIds；激活列表失效时落到第一个有效列表，无任何列表则建默认列表并回写。
+  const newId = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  cfg.music.local.tracks = [
+    ...(cfg.music.local.tracks || []),
+    { id: newId, title, artist, url, duration },
+  ].slice(0, 50);
+  let pl = hp.resolveActiveList(cfg.music.local.playlists, cfg.music.local.activeListId);
+  if (pl && pl.id !== cfg.music.local.activeListId) {
+    // P1-3：activeListId 指向已删除/不存在的列表——落到第一个有效列表并回写。
+    cfg.music.local.activeListId = pl.id;
+  }
+  if (!pl) {
+    const id = musicCreateListId();
+    cfg.music.local.playlists = [
+      { id, name: "默认播放列表", trackIds: cfg.music.local.tracks.map((t) => t.id) },
+    ];
+    cfg.music.local.activeListId = id;
+  } else if (!pl.trackIds.includes(newId)) {
+    pl.trackIds = [...pl.trackIds, newId];
+  }
+  await persistMusicLocal();
+  renderMusic();
+  say("曲目已添加");
+}
+
 async function onMusicAction(e) {
   const id = e.target.id;
   if (id === "musicApply") {
@@ -955,45 +1036,13 @@ async function onMusicAction(e) {
     if (musicAudio) musicAudio.volume = cfg.music.local.muted ? 0 : cfg.music.local.volume;
     await persistMusicLocal();
     renderMusicPlayer();
-  } else if (id === "homeMusicAddTrack") {
-    const title = window.prompt("曲目名称")?.trim();
-    if (!title) return;
-    const artist = window.prompt("艺术家（可留空）")?.trim() || "";
-    const rawUrl = window
-      .prompt(
-        "音频 https 直链（仅支持 https 协议；示例：example.com/a.mp3，填入时需以 https 协议开头）"
-      )
-      ?.trim();
-    if (!rawUrl) return;
-    const url = hp.normalizeMusicUrl(rawUrl);
-    if (!url) {
-      say("仅支持合法 https 直链（不支持 http 明文、本地文件路径与 data/blob 等）");
-      return;
-    }
-    // 2026-11-28 复核 G6 / 三轮复核 P1-3：新增曲目带显式 id，并自动补入当前播放列表
-    // trackIds；激活列表失效时落到第一个有效列表，无任何列表则建默认列表并回写。
-    const newId = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    cfg.music.local.tracks = [
-      ...(cfg.music.local.tracks || []),
-      { id: newId, title, artist, url },
-    ].slice(0, 50);
-    let pl = hp.resolveActiveList(cfg.music.local.playlists, cfg.music.local.activeListId);
-    if (pl && pl.id !== cfg.music.local.activeListId) {
-      // P1-3：activeListId 指向已删除/不存在的列表——落到第一个有效列表并回写。
-      cfg.music.local.activeListId = pl.id;
-    }
-    if (!pl) {
-      const id = `list-${Date.now()}`;
-      cfg.music.local.playlists = [
-        { id, name: "默认播放列表", trackIds: cfg.music.local.tracks.map((t) => t.id) },
-      ];
-      cfg.music.local.activeListId = id;
-    } else if (!pl.trackIds.includes(newId)) {
-      pl.trackIds = [...pl.trackIds, newId];
-    }
-    await persistMusicLocal();
-    renderMusic();
-    say("曲目已添加");
+  } else if (id === "homeMusicAddTrack" || id === "homeMusicEmptyAdd" || id === "musicAddTrack") {
+    // 2026-11-28 四轮复核 P1-1：卡片按钮 / 空状态入口 / 设置面板入口共用同一新增流程。
+    await musicAddTrackFlow();
+  } else if (id === "homeMusicEmptyCfg") {
+    // 空状态「配置外链」：打开配置面板音乐分区。
+    openHomeConfig("#musicEnabled");
+    return;
   }
 }
 
@@ -1023,7 +1072,7 @@ function onMusicPlayerClick(e) {
     }
     const name = window.prompt("新播放列表名称")?.trim();
     if (!name) return;
-    const id = `list-${Date.now()}`;
+    const id = musicCreateListId();
     local.playlists = [...(local.playlists || []), { id, name, trackIds: [] }];
     cfg.music.local.activeListId = id;
     musicIndex = -1;
@@ -1145,9 +1194,23 @@ function onMusicPlayerClick(e) {
         }
         cover = next;
       }
-      Object.assign(track, { title, artist, url, cover });
+      // 2026-11-28 四轮复核 P2-5：时长可编辑持久化（秒数或 mm:ss），留空保留现值；
+      // 未读取 metadata 前显示 00:00（fmtTime(0)）。
+      const durRaw = window
+        .prompt("时长（秒数或 mm:ss，留空保留现值）", track.duration ? String(track.duration) : "")
+        ?.trim();
+      let duration = track.duration || 0;
+      if (durRaw) {
+        const parsed = hp.parseDurationInput(durRaw);
+        if (parsed == null) {
+          say("时长格式无效（支持秒数或 mm:ss），未修改时长");
+          return;
+        }
+        duration = parsed;
+      }
+      Object.assign(track, { title, artist, url, cover, duration });
       const src = (local.tracks || []).find((t) => t.id === track.id);
-      if (src) Object.assign(src, { title, artist, url, cover });
+      if (src) Object.assign(src, { title, artist, url, cover, duration });
       void persistMusicLocal();
       renderMusic();
       say("曲目已更新");
@@ -1232,10 +1295,12 @@ function bind() {
     });
   }
   // 外链音乐：配置面板应用/清除/开关 + 卡片内"在新标签打开"兜底。
+  // 2026-11-28 四轮复核 P1-1：空状态添加/配置入口 + 设置面板本地曲目入口同链路绑定。
   for (const id of [
     "#musicApply",
     "#musicClear",
     "#musicEnabled",
+    "#musicAddTrack",
     "#homeMusicOpen",
     "#homeMusicFallback",
     "#homeMusicPlay",
@@ -1245,6 +1310,8 @@ function bind() {
     "#homeMusicShuffle",
     "#homeMusicMute",
     "#homeMusicAddTrack",
+    "#homeMusicEmptyAdd",
+    "#homeMusicEmptyCfg",
   ]) {
     $(id)?.addEventListener("click", onMusicAction);
   }
@@ -1301,7 +1368,11 @@ function bind() {
   });
   $("#homeMusicToggle")?.addEventListener("click", () => {
     const music = cfg.music || hp.DEFAULT_HOMEPAGE.music;
-    if (music.enabled && music.external?.embedUrl) {
+    // 2026-11-28 四轮复核 P1-2：开关判断覆盖本地曲目——enabled && (hasLocal || embedUrl)
+    // 才折叠/展开播放器；仅「无本地且无外链」时才进入配置引导。
+    const hasLocal = (music.local?.tracks || []).length > 0;
+    const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
+    if (music.enabled && (hasLocal || embedUrl)) {
       const card = $("#homeMusicCard");
       if (card) {
         card.hidden = !card.hidden;
@@ -1314,7 +1385,7 @@ function bind() {
     }
     // 未配置：直接打开配置面板的音乐分区（不经过齿轮入口）。
     openHomeConfig("#musicEnabled");
-    say("先在设置中粘贴音乐外链");
+    say("先在设置中添加本地曲目或粘贴音乐外链");
   });
   $("#homeCfgClose")?.addEventListener("click", () => {
     $("#homeCfgMask").hidden = true;

@@ -649,9 +649,11 @@ export function normalizeMusicLocal(raw) {
         .map(String)
         .filter((id) => idSet.has(id)),
     }));
+  // 2026-11-28 四轮复核 P2-3：activeListId 失效（指向已删除列表）时直接回退第一个
+  // 有效列表 id——读回配置即指向有效列表，chips 有 active 态，不依赖 UI 层二次兜底。
   const activeListId = playlists.some((pl) => pl.id === src.activeListId)
     ? String(src.activeListId)
-    : "";
+    : playlists[0]?.id || "";
   // 2026-11-28 复核 G6：当前曲目 id 持久化（曲目被删/非法时回退空）。
   const curTrackId = idSet.has(src.curTrackId) ? String(src.curTrackId) : "";
   const loop = ["off", "all", "one"].includes(src.loop) ? src.loop : "off";
@@ -708,6 +710,25 @@ export function removeTrackEverywhere(local, trackId) {
   }));
   const curTrackId = local?.curTrackId === trackId ? "" : String(local?.curTrackId || "");
   return { tracks, playlists, curTrackId, activeListId: String(local?.activeListId || "") };
+}
+
+/**
+ * 2026-11-28 四轮复核 P2-5：时长输入解析——纯数字按秒；mm:ss（或 h:mm:ss）按时分秒；
+ * 非法/负数/超上限（≤359999 秒）返回 null（调用方保留现值）。
+ */
+export function parseDurationInput(raw) {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return null;
+  const parts = s.split(":").map((p) => p.trim());
+  if (parts.some((p) => !/^\d+$/.test(p))) return null;
+  let sec = 0;
+  if (parts.length === 1) sec = Number(parts[0]);
+  else if (parts.length === 2) sec = Number(parts[0]) * 60 + Number(parts[1]);
+  else if (parts.length === 3)
+    sec = Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]);
+  else return null;
+  if (!Number.isFinite(sec) || sec < 0 || sec > 359999) return null;
+  return sec;
 }
 
 // 2026-11-27 审计 P1：多条便签规范化——文本限长 1000、日期 YYYY-MM-DD、提醒 HH:MM、完成态布尔。
