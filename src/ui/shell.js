@@ -433,10 +433,16 @@ export async function bootShell(root) {
   const closeModal = (id, doc = document) => {
     const el = doc.querySelector(`#${id}`);
     if (el) el.hidden = true;
+    // 2026-11-28 复核 G3：设置弹窗关闭时取消进行中的快捷键录制并清理捕获监听器。
+    if (id === "modalSetting") cancelKeymapRecording();
   };
   root.querySelectorAll(".mask").forEach((mask) => {
     mask.addEventListener("click", (e) => {
-      if (e.target === mask) mask.hidden = true;
+      if (e.target === mask) {
+        mask.hidden = true;
+        // 2026-11-28 复核 G3：遮罩点空关闭设置弹窗同样取消录制。
+        if (mask.id === "modalSetting") cancelKeymapRecording();
+      }
     });
   });
   root.querySelectorAll("[data-modal-close]").forEach((btn) => {
@@ -1374,7 +1380,8 @@ export async function bootShell(root) {
       return;
     }
     if (action === "focus-panel") {
-      // ← ：焦点回到插件面板选中行（面板未打开时本快捷键仅在面板内生效，无需额外开面板）。
+      // ← ：焦点回到插件面板选中行。2026-11-28 复核 G2：面板未打开的上下文（独立窗口/
+      // 主页等）里按 ← 时，同时经后台消息桥调起侧边栏（SW 侧执行 sidePanel.open）。
       e.preventDefault();
       if (body) {
         if (!body.hasAttribute("tabindex")) body.setAttribute("tabindex", "-1");
@@ -1388,12 +1395,33 @@ export async function bootShell(root) {
         }
       }
       toast("焦点已回到面板");
+      try {
+        chrome?.runtime?.sendMessage?.({ type: "tabharbor:open-side-panel" }, () => {
+          void chrome?.runtime?.lastError; // 面板已打开/无接收方：忽略
+        });
+      } catch {
+        // 非扩展环境：忽略
+      }
       return;
     }
   });
 
   // ---- AI 任务：快捷键动作注册表 UI（录制 / 冲突提示 / 恢复默认）----
+  // 2026-11-28 复核 G3：录制捕获监听器统一挂移除函数——切换录制目标/取消/弹窗关闭时
+  // 都先清理上一次捕获，杜绝 keydown 捕获监听器泄漏与双捕获竞态。
   let keymapRecording = null; // 正在录制的动作 id
+  let keymapCaptureRemover = null; // 录制捕获监听器的移除函数
+  const removeKeymapCapture = () => {
+    if (keymapCaptureRemover) {
+      keymapCaptureRemover();
+      keymapCaptureRemover = null;
+    }
+  };
+  const cancelKeymapRecording = () => {
+    removeKeymapCapture();
+    keymapRecording = null;
+    renderKeymapList(host);
+  };
   const renderKeymapList = () => {
     const list = root.querySelector("#keymapList");
     if (!list) return;
@@ -1419,8 +1447,7 @@ export async function bootShell(root) {
     if (resetBtn) {
       settings.keymap = keymap.defaultKeymap();
       await store.saveSettings(settings);
-      keymapRecording = null;
-      renderKeymapList(host);
+      cancelKeymapRecording();
       toast("快捷键已恢复默认");
       return;
     }
@@ -1428,18 +1455,19 @@ export async function bootShell(root) {
     const actionId = btn.dataset.act;
     if (keymapRecording === actionId) {
       // 再次点击取消录制
-      keymapRecording = null;
-      renderKeymapList(host);
+      cancelKeymapRecording();
       return;
     }
+    // 2026-11-28 复核 G3：切换录制目标前先清理上一次捕获监听器，避免泄漏/双捕获。
+    removeKeymapCapture();
     keymapRecording = actionId;
     renderKeymapList(host);
     const capture = async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      doc.removeEventListener("keydown", capture, true);
+      removeKeymapCapture();
+      keymapRecording = null;
       if (ev.key === "Escape") {
-        keymapRecording = null;
         renderKeymapList(host);
         return;
       }
@@ -1463,6 +1491,7 @@ export async function bootShell(root) {
       toast("快捷键已更新");
     };
     doc.addEventListener("keydown", capture, true);
+    keymapCaptureRemover = () => doc.removeEventListener("keydown", capture, true);
   };
   root.addEventListener("click", onKeymapListClick);
   // 打开设置弹窗时同步快捷键列表（复用 btnSettings 的打开动作，追加渲染）。

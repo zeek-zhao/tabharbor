@@ -5454,11 +5454,14 @@ step("那么", "装饰组件纯本地计算且便签仅存本机不上传", () =
 
 step("那么", "快捷键卡只列已实现按键且不含左右方向键", () => {
   const homeJs = repoFile("src/home/home.js");
-  const card = homeJs.slice(homeJs.indexOf("homeKeysList"), homeJs.indexOf("homeKeysList") + 700);
-  for (const k of ["↑ / ↓", "Enter", "Delete", "Esc"])
-    if (!card.includes(k)) throw new Error("快捷键卡缺已实现键：" + k);
-  if (card.includes("ArrowLeft") || card.includes("左") || card.includes("右"))
-    throw new Error("快捷键卡不应写左右方向键");
+  // 2026-11-28 复核 G3：快捷键卡升级为复用动作注册表渲染——键位来自 keymap（可自定义），
+  // 旧的硬编码键位列表（↑ / ↓ 等字面量）已移除；注册表本身仍不含左右方向键默认绑定。
+  if (!homeJs.includes("keymap.KEY_ACTIONS")) throw new Error("快捷键卡未复用动作注册表");
+  if (!homeJs.includes("keymap.normalizeKeymap")) throw new Error("快捷键卡未读取本地 keymap");
+  if (homeJs.includes('["↑ / ↓", "选择标签"]')) throw new Error("快捷键卡仍硬编码键位列表");
+  const leftRight = keymap.KEY_ACTIONS.filter((a) => a.key === "ArrowLeft");
+  if (leftRight.length !== 1 || leftRight[0].id !== "focus-panel")
+    throw new Error("← 仅允许默认绑定 focus-panel");
   const homeCss = repoFile("src/home/home.css");
   if (!homeCss.includes("flex-wrap") || !homeCss.includes("minmax(180px"))
     throw new Error("装饰区未做窄屏换行");
@@ -5799,4 +5802,116 @@ step("那么", "天气预报四天同请求附带且不额外出站", () => {
   if (hosts.length !== 2) throw new Error("出站域名数量异常");
   const homeJs = repoFile("src/home/home.js");
   if (!homeJs.includes("homeWeatherDays")) throw new Error("缺预报渲染容器");
+});
+
+/* ========== 2026-11-28 复核修复（features/39）========== */
+step("那么", "focus-panel 未开面板时经后台桥调起侧边栏", () => {
+  // shell：focus-panel 分支发 tabharbor:open-side-panel 消息（面板未打开的上下文自动调起侧边栏）。
+  const shellJs = repoFile("src/ui/shell.js");
+  const fpIdx = shellJs.indexOf('action === "focus-panel"');
+  if (fpIdx < 0) throw new Error("缺 focus-panel 分支");
+  const block = shellJs.slice(fpIdx, shellJs.indexOf("return;", fpIdx) + 7);
+  if (!block.includes("tabharbor:open-side-panel"))
+    throw new Error("focus-panel 未发调起侧边栏消息");
+  // SW：消息桥处理并调用 sidePanel.open（优先 sender 窗口，回退最后聚焦窗口）。
+  const sw = repoFile("src/background/service-worker.js");
+  if (!sw.includes("tabharbor:open-side-panel")) throw new Error("SW 未监听调起消息");
+  if (!sw.includes("sidePanel.open")) throw new Error("SW 未调用 sidePanel.open");
+  if (!sw.includes("getLastFocused")) throw new Error("SW 缺回退窗口解析");
+});
+
+step("那么", "快捷键录制监听器全路径清理且主页快捷键卡复用注册表", () => {
+  const shellJs = repoFile("src/ui/shell.js");
+  // G3：录制捕获监听器统一移除函数——切换录制目标/取消/恢复默认/弹窗关闭全路径清理。
+  if (!shellJs.includes("keymapCaptureRemover")) throw new Error("缺捕获监听器移除句柄");
+  if (!shellJs.includes("removeKeymapCapture()")) throw new Error("切换录制目标未先清理旧捕获");
+  if (!shellJs.includes("cancelKeymapRecording")) throw new Error("缺统一取消函数");
+  const cmIdx = shellJs.indexOf("const closeModal =");
+  if (!shellJs.slice(cmIdx, cmIdx + 400).includes("cancelKeymapRecording"))
+    throw new Error("设置弹窗关闭未取消录制");
+  // G3：主页快捷键卡复用注册表渲染（键位随 keymap 生效），不再硬编码键位列表。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("keymap.KEY_ACTIONS")) throw new Error("主页快捷键卡未复用注册表");
+  if (!homeJs.includes("keymap.normalizeKeymap")) throw new Error("主页快捷键卡未读取本地 keymap");
+  if (homeJs.includes('["↑ / ↓", "选择标签"]')) throw new Error("主页快捷键卡仍硬编码键位");
+});
+
+step("那么", "宽屏中栏铺满且分类chip单行滑动", () => {
+  const css = repoFile("src/home/home.css");
+  // G4：中栏不再限宽 640px，宽屏下站点网格随中栏铺满（原型 v5 密度）。
+  const wrapIdx = css.indexOf(".home-sites-wrap");
+  const wrapBlock = css.slice(wrapIdx, css.indexOf("}", wrapIdx));
+  if (/max-width\s*:\s*640px/.test(wrapBlock)) throw new Error("中栏仍被 640px 限宽");
+  // G5：分类 chip 单行横向滑动（不换行）。
+  const chipIdx = css.indexOf(".home-site-chips");
+  const chipBlock = css.slice(chipIdx, css.indexOf("}", chipIdx));
+  if (!/flex-wrap\s*:\s*nowrap/.test(chipBlock)) throw new Error("chip 仍换行未单行滑动");
+  if (!/overflow-x\s*:\s*auto/.test(chipBlock)) throw new Error("chip 行缺横向滑动");
+  const chipElIdx = css.indexOf(".home-site-chip {");
+  const chipElBlock = css.slice(chipElIdx, css.indexOf("}", chipElIdx));
+  if (!/flex\s*:\s*0 0 auto|white-space\s*:\s*nowrap/.test(chipElBlock))
+    throw new Error("chip 未锁定不换行尺寸");
+});
+
+step("那么", "播放器曲目编辑删除封面与当前曲目持久化", () => {
+  // G6：schema——曲目 cover 字段 + 当前曲目 id（curTrackId）持久化。
+  const n = homepage.normalizeMusicLocal({
+    tracks: [
+      {
+        id: "t1",
+        title: "A",
+        url: "https:" + "//example.com/a.mp3",
+        cover: "https:" + "//example.com/c.jpg",
+      },
+    ],
+    playlists: [{ id: "p1", name: "P", trackIds: ["t1"] }],
+    activeListId: "p1",
+    curTrackId: "t1",
+  });
+  if (n.tracks[0].cover !== "https:" + "//example.com/c.jpg") throw new Error("cover 未规范化保留");
+  if (n.curTrackId !== "t1") throw new Error("curTrackId 未持久化");
+  const bad = homepage.normalizeMusicLocal({
+    tracks: [{ id: "t1", url: "https:" + "//e.com/a" }],
+    curTrackId: "gone",
+  });
+  if (bad.curTrackId !== "") throw new Error("非法 curTrackId 未回退空");
+  // UI：曲目行内编辑/删除；本地播放器区块在仅外链模式下整体隐藏；封面元素存在。
+  const homeJs = repoFile("src/home/home.js");
+  if (!homeJs.includes("track-edit") || !homeJs.includes("track-del"))
+    throw new Error("曲目缺行内编辑/删除");
+  if (!homeJs.includes("curTrackId")) throw new Error("播放未持久化当前曲目");
+  if (!homeJs.includes('$("#homeMusicCover")')) throw new Error("缺封面渲染");
+  if (!homeJs.includes('$("#homeMusicPlayer")')) throw new Error("外链模式未隐藏本地控件区");
+  const html = repoFile("src/home/home.html");
+  if (!html.includes('id="homeMusicPlayer"')) throw new Error("缺本地播放器包裹层");
+  if (!html.includes('id="homeMusicCover"')) throw new Error("缺封面元素");
+});
+
+step("那么", "新增曲目自动补入当前播放列表", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // G6：新增曲目带显式 id 且自动补入 activeListId 对应播放列表的 trackIds。
+  if (!homeJs.includes("pl.trackIds = [...pl.trackIds, newId]"))
+    throw new Error("新曲目未补入当前播放列表");
+  const addIdx = homeJs.indexOf("homeMusicAddTrack");
+  const addBlock = homeJs.slice(addIdx, homeJs.indexOf("曲目已添加", addIdx));
+  if (!addBlock.includes("newId")) throw new Error("新增曲目未使用显式 id");
+});
+
+step("那么", "天气失败态显示错误与重试入口", () => {
+  const homeJs = repoFile("src/home/home.js");
+  // G8：天气请求失败不再隐藏卡片，显示可读错误 + 重试入口常驻。
+  const rfIdx = homeJs.indexOf("async function refreshWeather");
+  const rfBlock = homeJs.slice(rfIdx, homeJs.indexOf("async function onWeatherAction", rfIdx));
+  if (!rfBlock.includes("card.hidden = false")) throw new Error("失败态未显示卡片");
+  if (!rfBlock.includes("errEl.hidden = false")) throw new Error("失败态未显示错误文案");
+  if (!rfBlock.includes("retryBtn.hidden = false")) throw new Error("重试入口未常驻");
+  // 手动模式重试直接重新拉取天气（不是误触发定位）。
+  const actIdx = homeJs.indexOf("async function onWeatherAction");
+  const actBlock = homeJs.slice(actIdx, homeJs.indexOf("function geoErrorMessage", actIdx));
+  if (!actBlock.includes('w.mode === "location"')) throw new Error("重试未按模式分流");
+  // 定位失败提示整合进卡片状态（卡片可见 + 重试入口）。
+  const rlIdx = homeJs.indexOf("async function requestLocation");
+  const rlBlock = homeJs.slice(rlIdx, homeJs.indexOf("// ===== 2026-11-26", rlIdx));
+  if (!rlBlock.includes("card.hidden = false")) throw new Error("定位失败未显示卡片");
+  if (!rlBlock.includes("retryBtn.hidden = false")) throw new Error("定位失败缺重试入口");
 });

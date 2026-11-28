@@ -155,11 +155,14 @@
               </button>
             </div>
             <div id="homeMusicPlaylists" class="home-music-playlists"></div>
-            <div class="home-music-now">
-              <div class="home-music-meta">
-                <span id="homeMusicTitle" class="home-music-title">未选择曲目</span>
-                <span id="homeMusicArtist" class="home-music-artist"></span>
-              </div>
+            <!-- 2026-11-28 复核 G6：本地播放器区块整体包裹——仅外链模式（无本地曲目）时隐藏。 -->
+            <div id="homeMusicPlayer" class="home-music-player">
+              <div class="home-music-now">
+                <div class="home-music-meta">
+                  <img id="homeMusicCover" class="home-music-cover" hidden alt="封面" />
+                  <span id="homeMusicTitle" class="home-music-title">未选择曲目</span>
+                  <span id="homeMusicArtist" class="home-music-artist"></span>
+                </div>
               <div class="home-music-progress">
                 <span id="homeMusicCur" class="home-music-time">00:00</span>
                 <input
@@ -209,6 +212,7 @@
             </div>
             <div id="homeMusicTracks" class="home-music-tracks"></div>
             <button id="homeMusicAddTrack" class="home-mini" type="button">+ 添加曲目</button>
+            </div>
             <div id="homeMusicFrame" class="home-music-frame"></div>
             <button id="homeMusicFallback" class="home-mini hidden" type="button">
               在新标签打开

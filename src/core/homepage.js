@@ -616,7 +616,8 @@ export function normalizeMusic(raw) {
 /**
  * AI 任务：本地播放列表规范化——曲目（title/artist/url/duration）与播放列表（name + trackIds）。
  * url 仅接受 https 直链（normalizeMusicUrl），防止伪协议/注入；曲目 ≤50、列表 ≤10。
- * 播放控制状态（loop/shuffle/volume/muted）纯本机持久化；播放位置为内存态不入库。
+ * 播放控制状态（loop/shuffle/volume/muted）纯本机持久化；2026-11-28 复核 G6：
+ * 当前曲目 id（curTrackId）与封面（cover）也纳入持久化 schema。
  */
 export function normalizeMusicLocal(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
@@ -628,6 +629,7 @@ export function normalizeMusicLocal(raw) {
       title: String(t.title || "").slice(0, 120) || "未命名曲目",
       artist: String(t.artist || "").slice(0, 80),
       url: normalizeMusicUrl(t.url),
+      cover: normalizeMusicUrl(t.cover) || "",
       duration: Number.isFinite(Number(t.duration)) ? Math.max(0, Number(t.duration)) : 0,
     }))
     .filter((t) => t.url);
@@ -645,12 +647,15 @@ export function normalizeMusicLocal(raw) {
   const activeListId = playlists.some((pl) => pl.id === src.activeListId)
     ? String(src.activeListId)
     : "";
+  // 2026-11-28 复核 G6：当前曲目 id 持久化（曲目被删/非法时回退空）。
+  const curTrackId = idSet.has(src.curTrackId) ? String(src.curTrackId) : "";
   const loop = ["off", "all", "one"].includes(src.loop) ? src.loop : "off";
   const vol = Number(src.volume);
   return {
     tracks,
     playlists,
     activeListId,
+    curTrackId,
     loop,
     shuffle: src.shuffle === true,
     volume: Number.isFinite(vol) ? Math.max(0, Math.min(1, vol)) : 0.8,

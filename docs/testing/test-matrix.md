@@ -72,7 +72,7 @@
 
 | 层 | 环境 | 可证明的内容 | 当前证据 |
 | --- | --- | --- | --- |
-| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 347/347 PASS（v0.3.0 发布时 249/249） |
+| BDD（mock） | Node + mock chrome | 业务逻辑、模型事务、静态契约 | 353/353 PASS（v0.3.0 发布时 249/249） |
 | E2E（真机自动化） | Playwright + Chromium `--load-extension` | 扩展真实加载、页面渲染、storage 联动、真实拖拽/打开 | 本地真机 Chromium 全段通过（2026-11-24）；CI `e2e` job 每次 push/PR 自动复验 |
 | 真实 Chrome 手工验收 | 用户浏览器 + 真实账号 | 真实站点行为、GitHub 线上写入、商店材料 | GitHub 真实 Gist 演练未做（全 mock）；手工验收清单见 release 文档 |
 
@@ -82,13 +82,13 @@
 
 | 命令 | 内容 | 本轮结果 |
 | --- | --- | --- |
-| `npm test` | BDD 347 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
+| `npm test` | BDD 353 场景 + JSON/HTML 样例校验（含去里程碑化样例） | PASS |
 | `npm run constraints` | 9 条静态红线（tabId-only、权限、零出站、密码不落盘…） | 0 命中 |
 | `npm run compliance` | LICENSE + 敏感信息扫描 | 0 命中 |
 | `npm run format:check` | Prettier | 通过 |
 | `npm run committer` | 单一提交人 | 通过 |
 | `npm run contrast` | 深/浅色设计态对比度 | 全部达标 |
-| `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-24 / 11-25 修复后复跑，含模型树位次断言）；CI `e2e` job 随 push/PR 复验 |
+| `npm run test:e2e` | 真机 Chromium 冒烟 | 本地真机 Chromium 通过（2026-11-28 复核修复轮复跑全绿）；CI `e2e` job 随 push/PR 复验 |
 
 > 门禁结果为 2026-11-25 发布后审计修复态的本地复跑记录；已发布 v0.3.0 的 CI 证据：[main run 45445426126](https://github.com/zeek-zhao/tabharbor/actions/runs/45445426126)（test+e2e success）、[release run 45445619199](https://github.com/zeek-zhao/tabharbor/actions/runs/45445619199)（Release 打包 success）。修复推送后的新 run 链接见最终执行报告。
 

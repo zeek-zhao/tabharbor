@@ -221,3 +221,23 @@ BDD 场景总数：343/343 PASS（338 → 本轮 +5，feature 37）。本轮无�
 | F-109 | 天气预报 | fetchCurrentWeather 同一次请求附带 daily（今日起 4 天最高/最低温与天气码），不增加请求次数；天气卡片渲染多天预报行 | 已实现 |
 
 BDD 场景总数：347/347 PASS（343 → +4，feature 38）。红线口径：无 C11/C12 白名单变更、无新增权限；音频直链为用户主动输入的运行时资源（同壁纸 https 链接口径）。
+
+## 17. 2026-11-28 复核修复轮（基于 `fda12c8`）
+
+> 依据《TabHarbor-最新代码实现复核-前台焦点主页音乐播放器-2026-11-28》（豆包文档）。复核确认 10 项对照中 6 项已实现/已守住，4 项带缺口；本轮按缺口逐项修复。「默认前台打开」复核标注为已实现（新建前台分支靠 `active:true` 自然前台、不额外 `windows.update(focused)` 是「焦点留插件」产品口径，BDD 30/36 契约覆盖，未改动）；「网页内裸方向键无法被扩展全局捕获」为浏览器平台限制，维持边界说明。
+
+| ID | 复核缺口 | 修复 | 状态 |
+| --- | --- | --- | --- |
+| F-110 (P1) | focus-panel 只在面板已打开时聚焦，未开面板时不会调起侧边栏 | shell focus-panel 分支发 `tabharbor:open-side-panel` 消息；service-worker 消息桥执行 `sidePanel.open`（优先 sender 窗口，回退 `getLastFocused`） | 已实现 |
+| F-111 (P1) | 快捷键录制监听器泄漏/取消清理不完整 | 录制捕获监听器统一挂移除句柄（`keymapCaptureRemover`）：切换录制目标先清理旧捕获、Escape/再点击/恢复默认/设置弹窗关闭（closeModal + 遮罩点空）全路径 `cancelKeymapRecording` | 已实现 |
+| F-112 (P1) | 主页快捷键卡硬编码键位列表，未复用注册表 | `renderDecorations` 改按 `keymap.KEY_ACTIONS` + `normalizeKeymap(settings.keymap)` 渲染（键位随设置生效）；历史硬编码断言（feature 32）同步更新 | 已实现 |
+| F-113 (P1) | 中栏 `.home-sites-wrap` 限宽 640px，宽屏未充分利用 | 移除限宽，中栏站点网格随宽屏铺满（对齐原型 v5 站点密度） | 已实现 |
+| F-114 (P1) | 分类 chip 是 flex-wrap 换行，不是原型口径的单行滑动 | `.home-site-chips` 改 `nowrap + overflow-x: auto`（细滚动条），chip 锁定不换行尺寸 | 已实现 |
+| F-115 (P1) | 新增曲目未补入现有播放列表 trackIds | 新增曲目带显式 id 并自动补入当前播放列表 `trackIds`（无播放列表时仍自动建默认列表） | 已实现 |
+| F-116 (P1) | 曲目无删除/编辑/封面字段 | 曲目行内 ✎ 编辑（名称/艺术家/直链/封面）与 ✕ 删除（同步清理播放列表 trackIds 与当前播放态）；schema 增加 `cover`（https 直链，normalizeMusicUrl 校验） | 已实现 |
+| F-117 (P1) | 当前曲目不持久化 | `music.local.curTrackId` 持久化（播放时写入；非法/已删曲目回退空）；重开主页按其恢复定位 | 已实现 |
+| F-118 (P1) | 外链模式仍可能显示空本地控件 | 本地播放器区块整体包裹 `#homeMusicPlayer`：仅外链模式（无本地曲目）时隐藏，不留伪控件 | 已实现 |
+| F-119 (P1) | 天气失败仍隐藏卡片；手动城市失败无明显重试入口；定位失败提示与卡片状态分离 | 失败不再隐藏卡片——保留最近数据 + 显示可读错误；重试入口常驻（手动模式重拉天气、定位模式重试定位）；定位失败提示整合进卡片（卡片可见 + 重试） | 已实现 |
+| F-120 (P2) | 第三方 iframe 的 CSP/CORS/可嵌入性/自动播放限制 | 维持真机验收边界（8 秒超时兜底 + 新标签打开已具备）；本轮真机 Chromium E2E 全绿 | 待手工验收 |
+
+BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限；曲目封面为用户主动输入的 https 运行时资源（同音频直链/壁纸链接口径）。

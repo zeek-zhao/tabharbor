@@ -197,6 +197,34 @@
   color: var(--fg2);
   font-size: 10px;
 }
+/* 2026-11-28 复核 G6：封面缩略图 + 曲目行内编辑/删除按钮。 */
+.home-music-cover {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  object-fit: cover;
+  border: 1px solid var(--line2);
+}
+.home-music-track .ops {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.home-music-track .ops button {
+  background: transparent;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  color: var(--fg2);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  cursor: pointer;
+}
+.home-music-track .ops button:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .home-top {
   display: flex;
   align-items: center;
@@ -306,9 +334,10 @@
 }
 
 /* 常用网址图标网格 */
+/* 2026-11-28 复核 G4：宽屏中栏不再限宽 640px，站点网格随中栏铺满（原型 v5 宽屏密度）。 */
 .home-sites-wrap {
-  max-width: 640px;
   margin: 0 auto;
+  width: 100%;
 }
 .home-sites-head {
   display: flex;
@@ -368,12 +397,16 @@
   grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
   gap: 12px;
 }
-/* 2026-11-27 复核 P1-4：分类 chip 行——单选切换，窄屏可换行不溢出。 */
+/* 2026-11-28 复核 G5：分类 chip 单行横向滑动（原型口径），窄屏不换行不溢出。 */
 .home-site-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   margin-bottom: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 .home-site-chip {
   display: inline-flex;
@@ -386,6 +419,8 @@
   color: var(--fg2);
   font-size: 11px;
   cursor: pointer;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .home-site-chip:hover {
   color: var(--fg1);

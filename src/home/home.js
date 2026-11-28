@@ -5,6 +5,8 @@ import * as store from "../core/store.js";
 import * as hp from "../core/homepage.js";
 import * as weather from "../core/weather.js";
 import * as onlineWp from "../core/wallpaper-online.js";
+// 2026-11-28 复核 G3：主页快捷键卡复用动作注册表渲染（与设置面板同源，键位随 keymap 生效）。
+import * as keymap from "../core/keymap.js";
 
 const $ = (sel) => document.querySelector(sel);
 const chromeApi = globalThis.chrome;
@@ -380,16 +382,14 @@ function renderDecorations() {
   // 2026-11-27 复核 P1-5：旧单条便签 UI 已移除，只保留 noteItems 多条列表。
   renderNoteItems();
   const keysList = $("#homeKeysList");
-  if (keysList && !keysList.childElementCount) {
-    keysList.innerHTML = [
-      ["↑ / ↓", "选择标签"],
-      ["Enter", "切换页面（焦点留插件）"],
-      ["Ctrl+Shift+Enter", "聚焦网页"],
-      ["Delete", "删除到回收站"],
-      ["Esc", "关闭菜单/弹窗"],
-    ]
-      .map(([k, label]) => `<div class="kv"><kbd>${k}</kbd><span>${label}</span></div>`)
-      .join("");
+  if (keysList) {
+    // 2026-11-28 复核 G3：不再硬编码键位列表——按动作注册表渲染，键位读取本地 keymap
+    // （设置面板改键后主页提示卡同步显示实际生效键串）。
+    const map = keymap.normalizeKeymap(settings && settings.keymap);
+    keysList.innerHTML = keymap.KEY_ACTIONS.map(
+      (a) =>
+        `<div class="kv"><kbd>${escapeHtml(map[a.id] || a.key)}</kbd><span>${escapeHtml(a.label)}</span></div>`
+    ).join("");
   }
   const toggles = [
     ["#decoClock", "clock"],
@@ -463,13 +463,25 @@ async function refreshWeather() {
     }
   }
   const retryBtn = $("#homeWeatherRetry");
-  // 2026-11-27 P1：定位模式下卡片常驻「重新定位」入口（即使天气请求失败也能重试）。
-  if (retryBtn) retryBtn.hidden = w.mode !== "location";
+  // 2026-11-28 复核 G8：重试入口常驻（手动城市/定位模式均可一键重试）。
+  if (retryBtn) retryBtn.hidden = false;
+  const errEl = $("#homeWeatherError");
   const cur = await weather.fetchCurrentWeather(coords, w.unit, globalThis.fetch);
   if (!cur) {
-    card.hidden = true; // 离线/失败隐藏，仅保留时钟日期；定位失败提示由 requestLocation 给出。
+    // 2026-11-28 复核 G8：失败不再隐藏卡片——保留最近成功数据并显示可读错误 + 重试入口。
+    card.hidden = false;
+    if (errEl) {
+      errEl.textContent =
+        w.mode === "manual"
+          ? `天气获取失败（${w.city || "未设置城市"}），请检查网络或城市名后重试。`
+          : "天气获取失败，请检查网络后重试。";
+      errEl.hidden = false;
+    }
+    const daysBox0 = $("#homeWeatherDays");
+    if (daysBox0) daysBox0.innerHTML = "";
     return;
   }
+  if (errEl) errEl.hidden = true;
   const cityEl = $("#homeWeatherCity");
   const tempEl = $("#homeWeatherTemp");
   const descEl = $("#homeWeatherDesc");
@@ -518,12 +530,17 @@ async function onWeatherAction(e) {
       await refreshWeather();
       const hint = $("#weatherHint");
       if (hint) {
-        const ok = !$("#homeWeather")?.hidden;
-        hint.textContent = ok ? "天气已就绪。" : "获取失败，将隐藏天气卡片（可稍后重试）。";
+        const ok = $("#homeWeatherError")?.hidden !== false && !$("#homeWeather")?.hidden;
+        hint.textContent = ok ? "天气已就绪。" : "获取失败，可在天气卡片中点击重试。";
       }
     });
-  } else if (id === "weatherUseLocation" || id === "homeWeatherRetry") {
+  } else if (id === "weatherUseLocation") {
     await requestLocation();
+  } else if (id === "homeWeatherRetry") {
+    // 2026-11-28 复核 G8：卡片重试入口——定位模式重试定位，手动模式直接重新拉取天气。
+    const w = cfg.weather || hp.DEFAULT_HOMEPAGE.weather;
+    if (w.mode === "location") await requestLocation();
+    else await refreshWeather();
   }
 }
 
@@ -545,6 +562,11 @@ async function requestLocation() {
       errEl.textContent = msg;
       errEl.hidden = false;
     }
+    // 2026-11-28 复核 G8：定位失败提示整合进卡片状态——卡片可见并保留重试入口。
+    const card = $("#homeWeather");
+    const retryBtn = $("#homeWeatherRetry");
+    if (card && (cfg.weather || hp.DEFAULT_HOMEPAGE.weather).enabled) card.hidden = false;
+    if (retryBtn) retryBtn.hidden = false;
   };
   const clearErr = () => {
     if (errEl) errEl.hidden = true;
@@ -589,8 +611,14 @@ function musicListTracks() {
   const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
   const tracks = local.tracks || [];
   const pl = (local.playlists || []).find((p) => p.id === local.activeListId);
-  if (!pl) return tracks;
-  return pl.trackIds.map((id) => tracks.find((t) => t.id === id)).filter(Boolean);
+  let queue = tracks;
+  if (pl) queue = pl.trackIds.map((id) => tracks.find((t) => t.id === id)).filter(Boolean);
+  // 2026-11-28 复核 G6：启动/重渲染时从持久化的 curTrackId 恢复当前曲目定位。
+  if (musicIndex < 0 && local.curTrackId) {
+    const idx = queue.findIndex((t) => t.id === local.curTrackId);
+    if (idx >= 0) musicIndex = idx;
+  }
+  return queue;
 }
 
 function renderMusic() {
@@ -601,6 +629,9 @@ function renderMusic() {
   const hasLocal = (music.local?.tracks || []).length > 0;
   const embedUrl = hp.normalizeMusicUrl(music.external?.embedUrl || "");
   card.hidden = !(music.enabled && (hasLocal || embedUrl));
+  // 2026-11-28 复核 G6：仅外链模式（无本地曲目）时隐藏本地 <audio> 控件区，不留伪控件。
+  const playerWrap = $("#homeMusicPlayer");
+  if (playerWrap) playerWrap.hidden = !hasLocal && !!embedUrl;
   renderMusicPlayer();
   if (frame) frame.innerHTML = "";
   const fallback = $("#homeMusicFallback");
@@ -661,6 +692,18 @@ function renderMusicPlayer() {
   const artist = $("#homeMusicArtist");
   if (title) title.textContent = cur ? cur.title : "未选择曲目";
   if (artist) artist.textContent = cur ? cur.artist || "" : "";
+  // 2026-11-28 复核 G6：有封面字段时展示封面缩略图。
+  const coverEl = $("#homeMusicCover");
+  if (coverEl) {
+    const cov = hp.normalizeMusicUrl(cur?.cover || "");
+    if (cov) {
+      coverEl.src = cov;
+      coverEl.hidden = false;
+    } else {
+      coverEl.removeAttribute("src");
+      coverEl.hidden = true;
+    }
+  }
   const dur = $("#homeMusicDur");
   if (dur) dur.textContent = fmtTime(cur?.duration || musicAudio?.duration || 0);
   const tracksBox = $("#homeMusicTracks");
@@ -668,7 +711,7 @@ function renderMusicPlayer() {
     tracksBox.innerHTML = musicQueue
       .map(
         (t, i) =>
-          `<div class="home-music-track${i === musicIndex ? " active" : ""}" data-idx="${i}"><span class="no">${i + 1}</span><span class="t">${escapeHtml(t.title)}</span><span class="a">${escapeHtml(t.artist)}</span><span class="d">${fmtTime(t.duration)}</span></div>`
+          `<div class="home-music-track${i === musicIndex ? " active" : ""}" data-idx="${i}"><span class="no">${i + 1}</span><span class="t">${escapeHtml(t.title)}</span><span class="a">${escapeHtml(t.artist)}</span><span class="d">${fmtTime(t.duration)}</span><span class="ops"><button class="track-edit" data-idx="${i}" type="button" title="编辑曲目">✎</button><button class="track-del" data-idx="${i}" type="button" title="删除曲目">✕</button></span></div>`
       )
       .join("");
   }
@@ -723,6 +766,11 @@ function musicPlayAt(i) {
   const local = (cfg.music || hp.DEFAULT_HOMEPAGE.music).local || {};
   audio.src = track.url;
   audio.volume = local.muted ? 0 : local.volume;
+  // 2026-11-28 复核 G6：当前曲目 id 持久化（下次打开主页可恢复定位）。
+  if (track.id && cfg.music?.local) {
+    cfg.music.local.curTrackId = track.id;
+    void persistMusicLocal();
+  }
   void audio.play().catch(() => say("播放失败：浏览器阻止或直链不可用"));
   renderMusicPlayer();
 }
@@ -856,16 +904,23 @@ async function onMusicAction(e) {
       say("仅支持 https 直链");
       return;
     }
-    cfg.music.local.tracks = [...(cfg.music.local.tracks || []), { title, artist, url }].slice(
-      0,
-      50
-    );
+    // 2026-11-28 复核 G6：新增曲目带显式 id，并自动补入当前播放列表 trackIds。
+    const newId = `track-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    cfg.music.local.tracks = [
+      ...(cfg.music.local.tracks || []),
+      { id: newId, title, artist, url },
+    ].slice(0, 50);
     if (!cfg.music.local.activeListId && !cfg.music.local.playlists.length) {
       const id = `list-${Date.now()}`;
       cfg.music.local.playlists = [
         { id, name: "默认播放列表", trackIds: cfg.music.local.tracks.map((t) => t.id) },
       ];
       cfg.music.local.activeListId = id;
+    } else {
+      const pl = (cfg.music.local.playlists || []).find(
+        (p) => p.id === cfg.music.local.activeListId
+      );
+      if (pl && !pl.trackIds.includes(newId)) pl.trackIds = [...pl.trackIds, newId];
     }
     await persistMusicLocal();
     renderMusic();
@@ -895,6 +950,56 @@ function onMusicPlayerClick(e) {
     cfg.music.local.activeListId = chip.dataset.list || "";
     musicIndex = -1;
     renderMusicPlayer();
+    return;
+  }
+  // 2026-11-28 复核 G6：曲目行内编辑 / 删除（先于播放命中，避免误触播放）。
+  const local = cfg.music?.local || {};
+  const editBtn = e.target.closest("#homeMusicTracks .track-edit");
+  const delBtn = e.target.closest("#homeMusicTracks .track-del");
+  if (editBtn || delBtn) {
+    const idx = Number((editBtn || delBtn).dataset.idx) || 0;
+    const track = musicQueue[idx];
+    if (!track) return;
+    if (delBtn) {
+      if (!window.confirm(`删除曲目「${track.title}」？`)) return;
+      const tid = track.id;
+      local.tracks = (local.tracks || []).filter((t) => t.id !== tid);
+      for (const pl of local.playlists || []) {
+        pl.trackIds = (pl.trackIds || []).filter((id) => id !== tid);
+      }
+      if (local.curTrackId === tid) local.curTrackId = "";
+      // 当前播放中的曲目被删除：停止播放并重置定位。
+      if (musicQueue[musicIndex]?.id === tid) {
+        if (musicAudio) musicAudio.pause();
+        musicAudio && (musicAudio.removeAttribute("src"), musicAudio.load());
+        musicIndex = -1;
+      }
+      void persistMusicLocal();
+      renderMusic();
+      say("曲目已删除");
+    } else {
+      const title = window.prompt("曲目名称", track.title)?.trim();
+      if (!title) return;
+      const artist = window.prompt("艺术家（可留空）", track.artist || "")?.trim() || "";
+      const rawUrl = window.prompt("音频直链", track.url)?.trim() || "";
+      const url = rawUrl ? hp.normalizeMusicUrl(rawUrl) : track.url;
+      if (rawUrl && !url) {
+        say("仅支持 https 直链，未修改 URL");
+        return;
+      }
+      const rawCover = window.prompt("封面图直链（可留空）", track.cover || "")?.trim() || "";
+      const cover = rawCover ? hp.normalizeMusicUrl(rawCover) : "";
+      if (rawCover && !cover) {
+        say("封面仅支持 https 直链，未修改封面");
+        return;
+      }
+      Object.assign(track, { title, artist, url, cover });
+      const src = (local.tracks || []).find((t) => t.id === track.id);
+      if (src) Object.assign(src, { title, artist, url, cover });
+      void persistMusicLocal();
+      renderMusic();
+      say("曲目已更新");
+    }
     return;
   }
   const track = e.target.closest("#homeMusicTracks .home-music-track");
