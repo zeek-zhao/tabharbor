@@ -332,4 +332,4 @@ BDD 场景总数：371/371 PASS（365 → +6，feature 42）。门禁：constrai
 | F-158 (7) | UI/验证 | 焦点环、prefers-reduced-motion、空/失败态；E2E 新增 3 项真实 DOM 契约；BDD 382/382 | 已实现 |
 | F-159 (8) | 真机验收 | 快捷键矩阵/手势/定位授权/iframe CSP/远程资源/大标签性能仍需解包扩展环境逐项复测（风险清单见执行报告） | 待手工验收 |
 
-BDD 场景总数：382/382 PASS（371 → +11，feature 43/44）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿（含新增 3 项 DOM 契约）。红线：无 C11/C12 白名单变更、无新增权限、未注入内容脚本、未读书签/历史。
+BDD 场景总数：382/382 PASS（371 → +11，feature 43/44）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿（含新增 3 项 DOM 契约）；CI [run 46163048238](https://github.com/zeek-zhao/tabharbor/actions/runs/46163048238) 一次通过（b952811）。红线：无 C11/C12 白名单变更、无新增权限、未注入内容脚本、未读书签/历史。

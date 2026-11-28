@@ -39,7 +39,7 @@
 - **BDD：382/382 PASS**（371 → +11，feature 43 + 44）
 - **真机 Chromium E2E**：全绿，含 3 项新增主页 DOM 契约
 - **六项门禁**：constraints / compliance / format:check / committer / contrast 0 命中
-- **CI**：run 一次通过（提交推送后补记）
+- **CI**：[run 46163048238](https://github.com/zeek-zhao/tabharbor/actions/runs/46163048238) 一次通过（`b952811`，test + e2e 双 job success，2026-11-28）
 
 ## 未真机验证风险清单（诚实边界）
 
