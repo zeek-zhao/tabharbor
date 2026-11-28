@@ -240,4 +240,4 @@ BDD 场景总数：347/347 PASS（343 → +4，feature 38）。红线口径：�
 | F-119 (P1) | 天气失败仍隐藏卡片；手动城市失败无明显重试入口；定位失败提示与卡片状态分离 | 失败不再隐藏卡片——保留最近数据 + 显示可读错误；重试入口常驻（手动模式重拉天气、定位模式重试定位）；定位失败提示整合进卡片（卡片可见 + 重试） | 已实现 |
 | F-120 (P2) | 第三方 iframe 的 CSP/CORS/可嵌入性/自动播放限制 | 维持真机验收边界（8 秒超时兜底 + 新标签打开已具备）；本轮真机 Chromium E2E 全绿 | 待手工验收 |
 
-BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿。红线口径：无 C11/C12 白名单变更、无新增权限；曲目封面为用户主动输入的 https 运行时资源（同音频直链/壁纸链接口径）。
+BDD 场景总数：353/353 PASS（347 → +6，feature 39）。门禁：constraints/compliance/format:check/committer/contrast 0 命中；真机 Chromium E2E 全绿；CI [run 46117383831](https://github.com/zeek-zhao/tabharbor/actions/runs/46117383831) 一次通过（e42d3d9）。红线口径：无 C11/C12 白名单变更、无新增权限；曲目封面为用户主动输入的 https 运行时资源（同音频直链/壁纸链接口径）。
